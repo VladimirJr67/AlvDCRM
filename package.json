@@ -1,0 +1,12 @@
+{
+  "name": "alvid-crm",
+  "version": "3.0.0",
+  "description": "Локальная CRM «Алвид» с файловой базой данных (db.json)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "author": "Алвид",
+  "license": "UNLICENSED",
+  "private": true
+}

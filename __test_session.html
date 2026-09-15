@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>test</title></head>
+<body>
+<script>
+  // Тестовый хук: задать сессию и перейти в приложение.
+  var session = new URLSearchParams(location.search).get('u') || 'admin';
+  if (session === 'user') {
+    localStorage.setItem('alvid_crm_session', JSON.stringify({userId: 2, login: 'manager', name: 'Менеджер', role: 'user'}));
+  } else {
+    localStorage.setItem('alvid_crm_session', JSON.stringify({userId: 1, login: 'Admin', name: 'Администратор', role: 'admin'}));
+  }
+  localStorage.setItem('alvid_crm_data_version', '3');
+  location.replace('/');
+</script>
+</body>
+</html>

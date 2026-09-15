@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Алвид CRM</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="login-screen" id="loginScreen">
+  <div class="login-card">
+    <img src="https://avatars.mds.yandex.net/i?id=59709a441721a5e380612fdd93e30472_l-5098586-images-thumbs&n=13" alt="Алвид">
+    <h2>Алвид CRM</h2>
+    <input type="text" id="loginInput" placeholder="Логин" value="Admin">
+    <input type="password" id="passwordInput" placeholder="Пароль" value="Admin">
+    <button onclick="doLogin()">Войти</button>
+    <div class="login-error" id="loginError">Неверный логин или пароль</div>
+  </div>
+</div>
+
+<div class="app" id="app">
+  <div class="sidebar">
+    <div class="sidebar-logo">
+      <img src="https://avatars.mds.yandex.net/i?id=59709a441721a5e380612fdd93e30472_l-5098586-images-thumbs&n=13" alt="Алвид">
+      <span>Алвид</span>
+    </div>
+    <div class="sidebar-rates" id="sidebarRates" title="Курсы ЦБ РФ">
+      <div class="rate-item" title="Доллар США (USD)">
+        <span class="rate-ccy">$</span>
+        <span class="rate-val" id="rateUSD">—</span>
+        <span class="rate-chg" id="rateUSDChg"></span>
+      </div>
+      <div class="rate-item" title="Евро (EUR)">
+        <span class="rate-ccy">€</span>
+        <span class="rate-val" id="rateEUR">—</span>
+        <span class="rate-chg" id="rateEURChg"></span>
+      </div>
+    </div>
+    <div class="menu" id="sidebarMenu"></div>
+    <div class="user-info">
+      <div class="user-avatar">A</div>
+      <span class="user-info-name">Admin</span>
+      <button class="logout-btn" onclick="doLogout()">Выйти</button>
+    </div>
+  </div>
+
+  <div class="main" id="mainContent"></div>
+</div>
+
+<script src="js/lib/xlsx.full.min.js"></script>
+<script src="js/data.js"></script>
+<script src="js/storage.js"></script>
+<script src="js/users.js"></script>
+<script src="js/interactionTypes.js"></script>
+<script src="js/rates.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/api.js"></script>
+<script src="js/clients.js"></script>
+<script src="js/contacts.js"></script>
+<script src="js/reminders.js"></script>
+<script src="js/tasks.js"></script>
+<script src="js/orders.js"></script>
+<script src="js/notifications.js"></script>
+<script src="js/admin.js"></script>
+<script src="js/app.js"></script>
+
+</body>
+</html>

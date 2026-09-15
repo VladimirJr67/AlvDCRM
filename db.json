@@ -1,0 +1,89 @@
+{
+  "version": 5,
+  "users": [
+    {
+      "id": 1,
+      "login": "Admin",
+      "password": "Admin",
+      "role": "admin",
+      "name": "Администратор"
+    },
+    {
+      "id": 2,
+      "login": "manager",
+      "password": "manager",
+      "role": "user",
+      "name": "Менеджер"
+    }
+  ],
+  "clients": [
+    {
+      "orgName": "11",
+      "orgCity": "",
+      "orgDirection": "",
+      "orgAddress": "",
+      "orgPhones": "",
+      "orgStatus": "in_progress",
+      "orgEmails": "",
+      "orgWebsite": "",
+      "orgInn": "",
+      "contactName": "",
+      "contactPosition": "",
+      "contactPhoneWork": "",
+      "contactPhoneMobile": "",
+      "contactEmail": "",
+      "id": 1,
+      "contacts": [
+        {
+          "name": "121",
+          "position": "121",
+          "phoneWork": "",
+          "phoneMobile": "",
+          "email": ""
+        }
+      ],
+      "history": [
+        {
+          "date": "2026-08-27T15:38:55.703Z",
+          "type": "Размещение заказа",
+          "contactPerson": "",
+          "manager": "Admin",
+          "comment": "1212",
+          "order": {
+            "kg": 1212,
+            "condition": "Анод",
+            "avgPrice": 650,
+            "cost": 1221212
+          }
+        }
+      ],
+      "createdBy": 1
+    }
+  ],
+  "contacts": [],
+  "tasks": [],
+  "taskColumns": [],
+  "reminders": [],
+  "notifications": [],
+  "interactionTypes": [
+    "Звонок",
+    "Информация",
+    "Встреча",
+    "Письмо",
+    "Размещение заказа"
+  ],
+  "orders": [
+    {
+      "id": 1,
+      "clientId": 1,
+      "clientName": "11",
+      "kg": 1212,
+      "condition": "Анод",
+      "avgPrice": 650,
+      "cost": 1221212,
+      "date": "2026-08-27T15:38:55.714Z",
+      "createdBy": 1,
+      "comment": "1212"
+    }
+  ]
+}
