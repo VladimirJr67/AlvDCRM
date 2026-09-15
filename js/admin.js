@@ -33,6 +33,128 @@ function renderAdminSection(section) {
   else if (section === 'admin-users') renderAdminUsers();
   else if (section === 'admin-assignments') renderAdminAssignments();
   else if (section === 'admin-interaction-types') renderAdminInteractionTypes();
+  else if (section === 'admin-integrations') renderAdminIntegrations();
+}
+
+/* ===================== Интеграции ===================== */
+
+// Ключ внешнего сервиса живёт на сервере (config.local.json вне git),
+// поэтому эта форма шлёт его на /api/integrations/dadata, а не в db.json.
+async function renderAdminIntegrations() {
+  const main = document.getElementById('mainContent');
+  if (!main) return;
+
+  main.innerHTML = `
+    <div style="padding:25px;max-width:820px;margin:0 auto;height:100%;box-sizing:border-box;overflow-y:auto;">
+      <div style="margin-bottom:20px;">
+        <h1 style="font-size:22px;font-weight:600;color:#1a3a5c;">🔌 Интеграции</h1>
+      </div>
+
+      <div class="integration-card">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
+          <div>
+            <div style="font-size:15px;font-weight:600;color:#1a3a5c;">Дадата — реквизиты по ИНН и подсказки городов</div>
+            <div style="font-size:12px;color:#6b7280;margin-top:4px;max-width:540px;line-height:1.5;">
+              По ИНН заполняет название, адрес, город и ОГРН, а при вводе города показывает подсказки.
+              Ключ хранится на сервере в файле <code>config.local.json</code> (внесён в .gitignore)
+              и в браузер не передаётся.
+            </div>
+          </div>
+          <div id="dadataStatusBox" class="integration-status"><span class="integration-dot off"></span><span>проверяю…</span></div>
+        </div>
+
+        <form onsubmit="saveDadataToken(event)" style="margin-top:16px;">
+          <div class="form-row">
+            <div class="form-group">
+              <label>API-ключ Дадаты</label>
+              <input type="password" id="dadataTokenInput" placeholder="Вставьте ключ из личного кабинета dadata.ru" autocomplete="off">
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <button type="submit" class="btn">Сохранить ключ</button>
+            <button type="button" class="btn btn-secondary" onclick="clearDadataToken()">Удалить ключ</button>
+          </div>
+          <div style="font-size:11px;color:#9ca3af;margin-top:8px;line-height:1.5;">
+            Ключ можно задать и переменной окружения <code>DADATA_API_KEY</code> — она имеет приоритет над файлом.
+            Сохранить ключ можно только с компьютера, на котором запущен сервер.
+          </div>
+        </form>
+
+        <div id="dadataMsg" class="integration-msg"></div>
+      </div>
+
+      <div class="integration-card">
+        <div style="font-size:15px;font-weight:600;color:#1a3a5c;">Встроенный справочник</div>
+        <div style="font-size:12px;color:#6b7280;margin-top:4px;line-height:1.5;">
+          Пока ключ не задан, подсказки городов работают по локальному списку из <code>js/geo.js</code>
+          (46 стран, 566 городов). Кнопка «Заполнить по ИНН» в карточке клиента сообщит,
+          что сервис не настроен. Новые города можно просто дописать в массив <code>CITY_FALLBACK</code>.
+        </div>
+      </div>
+    </div>`;
+
+  // Статус читаем с сервера принудительно: ключ мог быть изменён только что.
+  const status = await dadataStatus(true);
+  const box = document.getElementById('dadataStatusBox');
+  if (box) {
+    box.innerHTML = status.configured
+      ? `<span class="integration-dot on"></span><span>подключена${
+          status.source === 'env' ? ' (ключ из переменной окружения)' : ''}</span>`
+      : '<span class="integration-dot off"></span><span>ключ не задан — работает встроенный справочник</span>';
+  }
+}
+
+function setDadataMsg(text, kind) {
+  const el = document.getElementById('dadataMsg');
+  if (!el) return;
+  el.className = 'integration-msg' + (text ? (kind === 'error' ? ' err' : ' ok') : '');
+  el.textContent = text || '';
+}
+
+async function saveDadataToken(e) {
+  e.preventDefault();
+  const input = document.getElementById('dadataTokenInput');
+  const token = ((input && input.value) || '').trim();
+  if (!token) {
+    setDadataMsg('Вставьте ключ или нажмите «Удалить ключ»', 'error');
+    return;
+  }
+  try {
+    const res = await fetch('/api/integrations/dadata', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: token })
+    });
+    const j = await res.json().catch(() => null);
+    if (!res.ok || !j || !j.ok) {
+      setDadataMsg((j && j.error) || ('Не удалось сохранить ключ (HTTP ' + res.status + ')'), 'error');
+      return;
+    }
+    await renderAdminIntegrations();
+    setDadataMsg('Ключ сохранён — автозаполнение по ИНН доступно.', 'ok');
+  } catch (err) {
+    setDadataMsg('Нет связи с сервером', 'error');
+  }
+}
+
+async function clearDadataToken() {
+  if (!confirm('Удалить сохранённый ключ Дадаты?')) return;
+  try {
+    const res = await fetch('/api/integrations/dadata', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: '' })
+    });
+    const j = await res.json().catch(() => null);
+    if (!res.ok || !j || !j.ok) {
+      setDadataMsg((j && j.error) || 'Не удалось удалить ключ', 'error');
+      return;
+    }
+    await renderAdminIntegrations();
+    setDadataMsg('Ключ удалён.', 'ok');
+  } catch (err) {
+    setDadataMsg('Нет связи с сервером', 'error');
+  }
 }
 
 /* ===================== Типы взаимодействий ===================== */
