@@ -80,10 +80,10 @@ function openContactItemModal(contact = null) {
   document.getElementById('contactItemModalTitle').textContent = contact ? 'Редактировать контакт' : 'Добавить контакт';
   document.getElementById('contactItemId').value = contact?.id || '';
   document.getElementById('contactItemType').value = currentContactsSubsection;
-  document.getElementById('newContactName').value = contact?.name || '';
-  document.getElementById('newContactPosition').value = contact?.position || '';
-  document.getElementById('newContactDept').value = contact?.department || '';
-  document.getElementById('newContactNumber').value = contact?.number || '';
+  document.getElementById('dirContactName').value = contact?.name || '';
+  document.getElementById('dirContactPosition').value = contact?.position || '';
+  document.getElementById('dirContactDept').value = contact?.department || '';
+  document.getElementById('dirContactNumber').value = contact?.number || '';
   document.getElementById('contactItemModal').classList.add('active');
 }
 
@@ -92,12 +92,14 @@ function saveContactItem(e) {
   const id = document.getElementById('contactItemId').value;
   const type = document.getElementById('contactItemType').value;
   const data = {
-    name: document.getElementById('newContactName').value.trim(),
-    position: document.getElementById('newContactPosition').value.trim(),
-    department: document.getElementById('newContactDept').value.trim(),
-    number: document.getElementById('newContactNumber').value.trim(),
+    name: document.getElementById('dirContactName').value.trim(),
+    position: document.getElementById('dirContactPosition').value.trim(),
+    department: document.getElementById('dirContactDept').value.trim(),
+    number: document.getElementById('dirContactNumber').value.trim(),
     type: type
   };
+  // Должность пополняет общий справочник — её увидят все менеджеры.
+  if (data.position) dictAdd('positions', data.position);
 
   if (id) {
     const idx = contacts.findIndex(c => c.id === parseInt(id));

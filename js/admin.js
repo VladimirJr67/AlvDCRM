@@ -424,7 +424,7 @@ function exportCommentsExcel() {
     'Комментарий': (h.comment || '').replace(/\s+/g, ' ').trim(),
     'Кол-во кг': h.order && h.order.kg !== null && h.order.kg !== undefined ? h.order.kg : '—',
     'Состояние': h.order && h.order.condition ? h.order.condition : '—',
-    'Средняя цена': h.order && h.order.avgPrice !== null && h.order.avgPrice !== undefined ? h.order.avgPrice : '—',
+    'Стоимость за кг': h.order && h.order.avgPrice !== null && h.order.avgPrice !== undefined ? h.order.avgPrice : '—',
     'Стоимость заказа': h.order && h.order.cost !== null && h.order.cost !== undefined ? h.order.cost : '—',
     'Дата/Время': formatDateAdmin(h.date)
   }));
@@ -697,10 +697,11 @@ function openAdminNewTaskModal(userId) {
   const sortedCols = [...taskColumns].sort((a, b) => a.order - b.order);
   typeSelect.innerHTML = sortedCols.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
 
-  // Компания — необязательное поле.
-  const clientSelect = document.getElementById('adminTaskClient');
-  clientSelect.innerHTML = '<option value="">— Без компании —</option>' +
-    clients.map(c => `<option value="${c.id}">${escapeHtml(c.orgName)}</option>`).join('');
+  // Компания — необязательное поле с автоподбором: список компаний длинный,
+  // набрать название быстрее, чем листать выпадающий список.
+  document.getElementById('adminTaskClient').value = '';
+  document.getElementById('adminTaskClientSearch').value = '';
+  hideAdminTaskClientDropdown();
 
   document.getElementById('adminTaskComment').value = '';
   document.getElementById('adminTaskDeadline').value = '';
@@ -708,12 +709,55 @@ function openAdminNewTaskModal(userId) {
   content.classList.add('active');
 }
 
+/* ===== Автоподбор компании в форме назначения задачи ===== */
+
+function hideAdminTaskClientDropdown() {
+  const dd = document.getElementById('adminTaskClientDropdown');
+  if (dd) dd.style.display = 'none';
+}
+
+function onAdminTaskClientSearch() {
+  const input = document.getElementById('adminTaskClientSearch');
+  const dd = document.getElementById('adminTaskClientDropdown');
+  if (!input || !dd) return;
+
+  const q = (input.value || '').trim().toLowerCase();
+  if (!q) {
+    // Поле очистили — задача снова «без компании».
+    document.getElementById('adminTaskClient').value = '';
+    hideAdminTaskClientDropdown();
+    syncAdminTaskNoClient();
+    return;
+  }
+
+  const matches = clients
+    .filter(c => (c.orgName || '').toLowerCase().includes(q))
+    .slice(0, 20);
+
+  if (!matches.length) {
+    dd.innerHTML = '<div class="manager-option-empty">Компании не найдены</div>';
+    dd.style.display = 'block';
+    return;
+  }
+  dd.innerHTML = matches.map(c =>
+    `<div class="client-typeahead-item" data-id="${c.id}" data-name="${escapeHtml(c.orgName)}">${escapeHtml(c.orgName)}</div>`
+  ).join('');
+  dd.style.display = 'block';
+}
+
+function selectAdminTaskClient(id, name) {
+  document.getElementById('adminTaskClient').value = id;
+  document.getElementById('adminTaskClientSearch').value = name;
+  hideAdminTaskClientDropdown();
+  syncAdminTaskNoClient();
+}
+
 // Чекбокс «Ссылка на обработку новой компании»: активен, пока компания не выбрана.
 function syncAdminTaskNoClient() {
-  const clientSelect = document.getElementById('adminTaskClient');
+  const clientInput = document.getElementById('adminTaskClient');
   const noClient = document.getElementById('adminTaskNoClient');
   const note = document.getElementById('adminTaskNoClientNote');
-  const hasCompany = !!(clientSelect && clientSelect.value);
+  const hasCompany = !!(clientInput && clientInput.value);
   if (noClient) noClient.checked = !hasCompany;
   if (note) {
     note.textContent = hasCompany
@@ -834,9 +878,12 @@ function injectAdminModals() {
             </div>
             <div class="form-row">
               <div class="form-group"><label>Дедлайн</label><input type="datetime-local" id="adminTaskDeadline"></div>
-              <div class="form-group">
+              <div class="form-group client-typeahead-group">
                 <label>Компания (необязательно)</label>
-                <select id="adminTaskClient" onchange="syncAdminTaskNoClient()"></select>
+                <input type="text" id="adminTaskClientSearch" placeholder="Начните вводить название..." autocomplete="off"
+                       oninput="onAdminTaskClientSearch()" onfocus="onAdminTaskClientSearch()">
+                <input type="hidden" id="adminTaskClient">
+                <div class="client-typeahead-dropdown" id="adminTaskClientDropdown"></div>
               </div>
             </div>
             <div class="form-row">

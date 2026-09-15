@@ -76,14 +76,23 @@ body { background: #f5f6f8; color: #222; font-size: 13px; overflow: hidden; }
   border-bottom: 1px solid #e5e7eb;
 }
 .contact-list td { height: 33px; padding: 8px 10px; border-bottom: 1px solid #f0f0f0; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.contact-list .table-body { max-height: 163px; overflow-y: auto; } /* 31px заголовок + 4 строки по 33px */
-.contact-list th:nth-child(1), .contact-list td:nth-child(1) { width: 24%; }
-.contact-list th:nth-child(2), .contact-list td:nth-child(2) { width: 18%; }
-.contact-list th:nth-child(3), .contact-list td:nth-child(3) { width: 17%; }
-.contact-list th:nth-child(4), .contact-list td:nth-child(4) { width: 16%; }
-.contact-list th:nth-child(5), .contact-list td:nth-child(5) { width: 15%; }
-.contact-list th:nth-child(6), .contact-list td:nth-child(6) { width: 10%; }
+/* Список контактных лиц: окно фиксированной высоты, при переполнении —
+   вертикальная прокрутка. Раньше селектор .contact-list .table-body не
+   срабатывал, потому что оба класса стоят на одном элементе, и список рос
+   без ограничений. */
+.contact-list .table-body,
+.contact-list.table-body { max-height: 163px; overflow-y: auto; } /* 31px заголовок + 4 строки по 33px */
+.contact-list th:nth-child(1), .contact-list td:nth-child(1) { width: 22%; }
+.contact-list th:nth-child(2), .contact-list td:nth-child(2) { width: 17%; }
+.contact-list th:nth-child(3), .contact-list td:nth-child(3) { width: 15%; }
+.contact-list th:nth-child(4), .contact-list td:nth-child(4) { width: 15%; }
+.contact-list th:nth-child(5), .contact-list td:nth-child(5) { width: 11%; }
+.contact-list th:nth-child(6), .contact-list td:nth-child(6) { width: 14%; }
+.contact-list th:nth-child(7), .contact-list td:nth-child(7) { width: 6%; }
 .contact-list .col-actions { text-align: right; white-space: nowrap; }
+/* Строка контактного лица выбирается кликом — по выбору фильтруются комментарии */
+.contact-row { cursor: pointer; }
+.contact-row.selected td { background: #dbeafe; }
 
 .main-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
 .main-header h1 { font-size: 20px; font-weight: 600; color: #1a3a5c; }
@@ -287,6 +296,20 @@ select[multiple] option:checked { background: #3b82f6; color: #fff; }
 .client-history-section { margin-top: 16px; }
 .client-history-section .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
 .client-history-section .section-header h3 { font-size: 14px; color: #374151; font-weight: 600; }
+.history-actions { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
+.history-filter-hint { font-size: 11px; color: #6b7280; margin-bottom: 8px; }
+.link-btn { background: none; border: none; color: #3b82f6; cursor: pointer; font-size: 11px; padding: 0 4px; text-decoration: underline; }
+.link-btn:hover { color: #1d4ed8; }
+
+/* Мессенджеры контактного лица: отметки в форме и плашки в таблице */
+.messenger-picker { display: flex; flex-wrap: wrap; gap: 8px 14px; padding: 4px 0 2px; }
+.messenger-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #374151; cursor: pointer; user-select: none; }
+.messenger-chip input { width: 14px; height: 14px; margin: 0; cursor: pointer; }
+.messenger-chip-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 24px; height: 17px; padding: 0 4px; border-radius: 4px;
+  background: #e0e7ff; color: #3730a3; font-size: 9px; font-weight: 700; letter-spacing: 0.02em;
+}
 .history-scroll { max-height: 240px; overflow-y: auto; border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px; background: #fff; display: flex; flex-direction: column; gap: 10px; }
 .history-entry { border: 1px solid #f0f0f0; border-radius: 6px; padding: 8px 10px; background: #fafbfc; }
 

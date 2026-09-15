@@ -102,7 +102,7 @@ function renderOrders() {
           <div class="table-body" style="max-height:calc(100vh - 320px);">
             <table class="admin-table">
               <thead><tr>
-                <th>Дата заказа</th><th>Клиент</th><th>Кол-во кг</th><th>Состояние</th><th>Средняя цена</th><th>Стоимость заказа</th><th style="text-align:right;">Действия</th>
+                <th>Дата заказа</th><th>Клиент</th><th>Кол-во кг</th><th>Состояние</th><th>Стоимость за кг</th><th>Стоимость заказа</th><th style="text-align:right;">Действия</th>
               </tr></thead>
               <tbody>
                 ${sorted.map(o => {
@@ -148,7 +148,7 @@ function exportOrdersExcel() {
     'Клиент': o.clientName || '—',
     'Кол-во кг': o.kg !== null && o.kg !== undefined ? o.kg : '—',
     'Состояние': o.condition || '—',
-    'Средняя цена': o.avgPrice !== null && o.avgPrice !== undefined ? o.avgPrice : '—',
+    'Стоимость за кг': o.avgPrice !== null && o.avgPrice !== undefined ? o.avgPrice : '—',
     'Стоимость заказа': o.cost !== null && o.cost !== undefined ? o.cost : '—'
   }));
   const ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{}]);

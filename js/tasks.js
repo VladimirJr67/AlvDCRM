@@ -97,13 +97,29 @@ function visibleTasks() {
   return tasks.filter(t => t.ownerId === uid || t.assignedTo === uid);
 }
 
+// Столбцы, задачи из которых считаются завершёнными.
+function taskCompletedColumnIds() {
+  return taskColumns
+    .filter(c => c.id === 'completed' || c.name === 'Завершены')
+    .map(c => c.id);
+}
+
+function isTaskCompleted(task) {
+  if (!task) return false;
+  return taskCompletedColumnIds().indexOf(task.status) > -1;
+}
+
+// Счётчик показывает активные задачи: завершённые в него не попадают,
+// иначе он не отражает объём незакрытой работы.
 function updateTasksMenuBadge() {
   const badge = document.getElementById('tasksMenuBadge');
   if (!badge) return;
   const visible = visibleTasks();
-  const overdue = visible.filter(t => taskOverdue(t)).length;
+  const active = visible.filter(t => !isTaskCompleted(t));
+  const done = visible.length - active.length;
+  const overdue = active.filter(t => taskOverdue(t)).length;
   badge.innerHTML =
-    `<span class="menu-badge-count" title="Всего задач">${visible.length}</span>` +
+    `<span class="menu-badge-count" title="Активных задач: ${active.length}. Завершено: ${done}">${active.length}</span>` +
     `<span class="menu-badge-count menu-badge-overdue" title="Просрочено">${overdue}</span>`;
 }
 
@@ -159,6 +175,9 @@ function renderTasks() {
         board.scrollLeft += e.deltaY;
       }
     }, { passive: false });
+
+    // Позиция курсора нужна автопрокрутке во время перетаскивания.
+    board.addEventListener('dragover', (e) => { boardPointerX = e.clientX; });
   }
 
   updateTasksMenuBadge();
@@ -303,18 +322,57 @@ function renderTaskCard(task, col) {
 let draggedTaskId = null;
 let draggedColumnId = null;
 
+/* ===== Автопрокрутка доски при перетаскивании =====
+   Без неё задача не попадает в столбцы за пределами видимой области:
+   зона приёма физически недостижима — курсор упирается в край окна.
+   Пока идёт перетаскивание, доска прокручивается, когда курсор у края. */
+
+const BOARD_EDGE_PX = 90;    // ширина «горячей» зоны у краёв доски
+const BOARD_SCROLL_STEP = 22;
+
+let boardAutoScrollTimer = null;
+let boardPointerX = 0;
+
+function boardAutoScrollTick() {
+  const board = document.querySelector('.task-board');
+  if (!board) return;
+  const rect = board.getBoundingClientRect();
+  if (boardPointerX - rect.left < BOARD_EDGE_PX) board.scrollLeft -= BOARD_SCROLL_STEP;
+  else if (rect.right - boardPointerX < BOARD_EDGE_PX) board.scrollLeft += BOARD_SCROLL_STEP;
+}
+
+function startBoardAutoScroll(clientX) {
+  if (typeof clientX === 'number') boardPointerX = clientX;
+  if (boardAutoScrollTimer) return;
+  const board = document.querySelector('.task-board');
+  // Плавная прокрутка мешает точному позиционированию во время перетаскивания.
+  if (board) board.style.scrollBehavior = 'auto';
+  boardAutoScrollTimer = setInterval(boardAutoScrollTick, 16);
+}
+
+function stopBoardAutoScroll() {
+  if (boardAutoScrollTimer) {
+    clearInterval(boardAutoScrollTimer);
+    boardAutoScrollTimer = null;
+  }
+  const board = document.querySelector('.task-board');
+  if (board) board.style.scrollBehavior = '';
+}
+
 function handleDragStart(e, taskId) {
   draggedTaskId = taskId;
   draggedColumnId = null;
   e.target.style.opacity = '0.5';
   e.dataTransfer.effectAllowed = 'move';
   e.dataTransfer.setData('text/plain', taskId);
+  startBoardAutoScroll(e.clientX);
 }
 
 function handleDragEnd(e) {
   e.target.style.opacity = '1';
   draggedTaskId = null;
   draggedColumnId = null;
+  stopBoardAutoScroll();
   document.querySelectorAll('[ondragover]').forEach(el => el.style.background = '');
   document.querySelectorAll('.task-column.drag-over').forEach(el => el.classList.remove('drag-over'));
 }
@@ -358,10 +416,12 @@ function handleColumnDragStart(e, colId) {
   draggedTaskId = null;
   e.dataTransfer.effectAllowed = 'move';
   e.dataTransfer.setData('text/plain', 'col:' + colId);
+  startBoardAutoScroll(e.clientX);
 }
 
 function handleColumnDragEnd(e) {
   draggedColumnId = null;
+  stopBoardAutoScroll();
   document.querySelectorAll('.task-column.drag-over').forEach(el => el.classList.remove('drag-over'));
 }
 

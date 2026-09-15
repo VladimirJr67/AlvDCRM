@@ -153,6 +153,8 @@ async function enterApp() {
   // Приводим ранее сохранённые карточки к актуальной структуре
   // (после гидратации — уже на серверных данных).
   migrateLegacyClientData();
+  // Пополняем общие справочники значениями, введёнными до их появления.
+  seedDictionariesFromData();
 
   ensureRequiredTaskColumns();
   injectModals();
@@ -209,7 +211,13 @@ function injectModals() {
               </div>
             </div>
             <div class="form-row">
-              <div class="form-group"><label>Тип организации</label><input type="text" id="orgDirection"></div>
+              <div class="form-group client-typeahead-group">
+                <label>Тип организации</label>
+                <input type="text" id="orgDirection" data-dict="orgTypes" autocomplete="off"
+                       placeholder="Выберите из списка или введите новый"
+                       oninput="onDictInput(this)" onfocus="onDictFocus(this)">
+                <div class="client-typeahead-dropdown"></div>
+              </div>
               <div class="form-group"><label>Статус</label>
                 <select id="orgStatus">
                   <option value="cooperation">Сотрудничество</option>
@@ -253,11 +261,23 @@ function injectModals() {
           <div class="form-section">
             <div class="form-row">
               <div class="form-group"><label>ФИО *</label><input type="text" id="newContactName" required></div>
-              <div class="form-group"><label>Должность</label><input type="text" id="newContactPosition"></div>
+              <div class="form-group client-typeahead-group">
+                <label>Должность</label>
+                <input type="text" id="newContactPosition" data-dict="positions" autocomplete="off"
+                       placeholder="Выберите из списка или введите новую"
+                       oninput="onDictInput(this)" onfocus="onDictFocus(this)">
+                <div class="client-typeahead-dropdown"></div>
+              </div>
             </div>
             <div class="form-row">
               <div class="form-group"><label>Рабочий тел.</label><input type="text" id="newContactPhoneWork"></div>
               <div class="form-group"><label>Сотовый</label><input type="text" id="newContactPhoneMobile"></div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Мессенджеры</label>
+                <div class="messenger-picker" id="newContactMessengers"></div>
+              </div>
             </div>
             <div class="form-row"><div class="form-group"><label>Email</label><input type="email" id="newContactEmail"></div></div>
           </div>
@@ -287,19 +307,17 @@ function injectModals() {
                 <h3>Параметры заказа</h3>
                 <div class="form-row">
                   <div class="form-group"><label>Кол-во кг</label><input type="number" id="orderKg" min="0" step="0.01" oninput="recalcOrderCost()"></div>
-                  <div class="form-group"><label>Состояние</label><input type="text" id="orderCondition" placeholder="ГОСТ, б/у и т.п."></div>
+                  <div class="form-group"><label>Состояние поставки</label><select id="orderCondition"></select></div>
                 </div>
                 <div class="form-row">
-                  <div class="form-group"><label>Средняя цена</label><input type="number" id="orderAvgPrice" min="0" step="0.01" oninput="recalcOrderCost()"></div>
-                  <div class="form-group"><label>Стоимость заказа</label><input type="number" id="orderCost" min="0" step="0.01"></div>
-                </div>
-                <div class="form-row" style="margin-top:4px;">
-                  <div class="form-group" style="display:flex;align-items:center;gap:8px;">
-                    <input type="checkbox" id="orderAutoCalc" checked onchange="onOrderAutoCalcToggle()" style="width:16px;height:16px;">
-                    <label for="orderAutoCalc" style="margin:0;font-size:12px;cursor:pointer;">Рассчитывать автоматически (кг × цена)</label>
+                  <div class="form-group"><label>Общая стоимость заказа</label><input type="number" id="orderCost" min="0" step="0.01" oninput="recalcOrderCost()"></div>
+                  <div class="form-group">
+                    <label>Стоимость за кг</label>
+                    <input type="text" id="orderPricePerKg" readonly placeholder="считается автоматически"
+                           style="background:#f9fafb;color:#1a3a5c;font-weight:600;">
                   </div>
                 </div>
-                <div style="font-size:11px;color:#9ca3af;">Стоимость считается автоматически: Кол-во кг × Средняя цена. Снимите галочку, чтобы ввести стоимость вручную.</div>
+                <div style="font-size:11px;color:#9ca3af;">Стоимость за кг считается автоматически: Общая стоимость ÷ Кол-во кг.</div>
               </div>
             </div>
           </div>
@@ -318,12 +336,18 @@ function injectModals() {
           <input type="hidden" id="contactItemId">
           <input type="hidden" id="contactItemType">
           <div class="form-section">
-            <div class="form-row"><div class="form-group"><label>ФИО *</label><input type="text" id="newContactName" required></div></div>
+            <div class="form-row"><div class="form-group"><label>ФИО *</label><input type="text" id="dirContactName" required></div></div>
             <div class="form-row">
-              <div class="form-group"><label>Должность</label><input type="text" id="newContactPosition"></div>
-              <div class="form-group"><label>Отдел</label><input type="text" id="newContactDept"></div>
+              <div class="form-group client-typeahead-group">
+                <label>Должность</label>
+                <input type="text" id="dirContactPosition" data-dict="positions" autocomplete="off"
+                       placeholder="Выберите из списка или введите новую"
+                       oninput="onDictInput(this)" onfocus="onDictFocus(this)">
+                <div class="client-typeahead-dropdown"></div>
+              </div>
+              <div class="form-group"><label>Отдел</label><input type="text" id="dirContactDept"></div>
             </div>
-            <div class="form-row"><div class="form-group"><label>Номер *</label><input type="text" id="newContactNumber" required></div></div>
+            <div class="form-row"><div class="form-group"><label>Номер *</label><input type="text" id="dirContactNumber" required></div></div>
           </div>
           <div class="modal-actions">
             <button type="button" class="btn btn-secondary" onclick="closeModal('contactItemModal')">Отмена</button>
@@ -353,6 +377,7 @@ function injectModals() {
               <div class="form-group client-typeahead-group">
                 <label>Клиент (компания)</label>
                 <input type="text" id="reminderClientSearch" placeholder="Начните вводить название компании..." autocomplete="off"
+                       oninput="onReminderClientSearch()" onfocus="onReminderClientSearch()"
                        style="width:100%;padding:7px 9px;border:1px solid #d0d5dd;border-radius:5px;font-size:12px;">
                 <div class="client-typeahead-dropdown" id="reminderClientDropdown"></div>
               </div>
@@ -398,6 +423,7 @@ function injectModals() {
               <div class="form-group client-typeahead-group">
                 <label>Клиент (компания)</label>
                 <input type="text" id="taskClientSearch" placeholder="Начните вводить название компании..." autocomplete="off"
+                       oninput="onTaskClientSearch()" onfocus="onTaskClientSearch()"
                        style="width:100%;padding:7px 9px;border:1px solid #d0d5dd;border-radius:5px;font-size:12px;">
                 <div class="client-typeahead-dropdown" id="taskClientDropdown"></div>
               </div>
@@ -433,6 +459,16 @@ function injectModals() {
           <button type="button" class="modal-close-icon" onclick="closeModal('clientCardModal')" title="Закрыть" aria-label="Закрыть">✕</button>
         </div>
         <div id="clientCardContent"></div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="allHistoryModal" onclick="if(event.target===this)closeModal('allHistoryModal')">
+      <div class="modal" style="width:900px;max-width:94vw;">
+        <div class="modal-head">
+          <h2 id="allHistoryTitle">Вся история взаимодействий</h2>
+          <button type="button" class="modal-close-icon" onclick="closeModal('allHistoryModal')" title="Закрыть" aria-label="Закрыть">✕</button>
+        </div>
+        <div id="allHistoryContent"></div>
       </div>
     </div>
   `;
@@ -665,6 +701,8 @@ document.addEventListener('click', (e) => {
     selectTaskClient(id, name);
   } else if (searchInput && searchInput.id === 'reminderClientSearch') {
     selectReminderClient(id, name);
+  } else if (searchInput && searchInput.id === 'adminTaskClientSearch') {
+    selectAdminTaskClient(id, name);
   }
 });
 
@@ -740,6 +778,8 @@ document.addEventListener('DOMContentLoaded', () => {
   migrateLegacyClientData();
   loadUsers();
   loadInteractionTypes();
+  loadDictionaries();
+  seedDictionariesFromData();
   loadTasks();
   loadReminders();
   loadNotifications();

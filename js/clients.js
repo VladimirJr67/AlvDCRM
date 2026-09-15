@@ -7,6 +7,10 @@ let cardClientId = null;
 // открыта, карточка закрыта; после сохранения или отмены возвращаемся в неё.
 let editReturnToCardId = null;
 
+// Индекс выбранного контактного лица: по нему фильтруются комментарии
+// в блоке истории. null — выбрано «все контакты».
+let selectedContactIdx = null;
+
 // Фильтр списка клиентов: 'mine' (только мои) | 'all' (все) | id менеджера.
 let clientManagerFilter = 'mine';
 let clientSearchTimer = null;
@@ -297,6 +301,8 @@ function exportClientsExcel() {
 }
 
 function selectClient(id) {
+  // При переходе к другому клиенту фильтр по контактному лицу сбрасывается.
+  if (selectedClientId !== id) selectedContactIdx = null;
   selectedClientId = id;
   historyFilter = 'all';
   renderClientsTable();
@@ -322,6 +328,8 @@ function renderClientContacts(id) {
 
   const contacts = client.contacts || [];
   const editable = canEditClient(client);
+  // Индекс мог устареть, если контактное лицо удалили.
+  if (selectedContactIdx !== null && !contacts[selectedContactIdx]) selectedContactIdx = null;
   if (countEl) countEl.textContent = contacts.length ? `(${contacts.length})` : '';
   if (addBtn) addBtn.disabled = !editable;
 
@@ -331,22 +339,26 @@ function renderClientContacts(id) {
     return;
   }
 
+  // Список — окно фиксированной высоты: при большом числе контактов
+  // появляется вертикальная прокрутка (см. .contact-list.table-body).
   panel.innerHTML = `
     <div class="contact-list table-body">
       <table>
         <thead><tr>
-          <th>ФИО</th><th>Должность</th><th>Рабочий тел.</th><th>Сотовый</th><th>Email</th>${editable ? '<th class="col-actions">Действия</th>' : ''}
+          <th>ФИО</th><th>Должность</th><th>Рабочий тел.</th><th>Сотовый</th><th>Мессенджеры</th><th>Email</th>${editable ? '<th class="col-actions">Действия</th>' : ''}
         </tr></thead>
         <tbody>
-          ${contacts.map((ct, idx) => `<tr>
+          ${contacts.map((ct, idx) => `<tr class="contact-row${selectedContactIdx === idx ? ' selected' : ''}"
+              onclick="selectClientContact(${idx})" title="Показать комментарии этого контактного лица">
             <td><strong>${escapeHtml(ct.name || '—')}</strong></td>
             <td>${escapeHtml(ct.position || '—')}</td>
             <td>${escapeHtml(ct.phoneWork || '—')}</td>
             <td>${escapeHtml(ct.phoneMobile || '—')}</td>
+            <td>${messengerChipsHtml(ct.messengers)}</td>
             <td>${escapeHtml(ct.email || '—')}</td>
             ${editable ? `<td class="col-actions">
-              <button class="btn-icon-btn" onclick="editClientContact(${id}, ${idx})" title="Редактировать">✏️</button>
-              <button class="btn-icon-btn" onclick="deleteContact(${id}, ${idx})" title="Удалить">🗑️</button>
+              <button class="btn-icon-btn" onclick="event.stopPropagation(); editClientContact(${id}, ${idx})" title="Редактировать">✏️</button>
+              <button class="btn-icon-btn" onclick="event.stopPropagation(); deleteContact(${id}, ${idx})" title="Удалить">🗑️</button>
             </td>` : ''}
           </tr>`).join('')}
         </tbody>
@@ -355,34 +367,141 @@ function renderClientContacts(id) {
     ${renderHistoryBlock(client, editable)}`;
 }
 
+/* ===== Мессенджеры контактного лица ===== */
+
+// Плашки мессенджеров в таблице контактов.
+function messengerChipsHtml(ids) {
+  const list = Array.isArray(ids) ? ids : [];
+  if (!list.length) return '<span style="color:#9ca3af;">—</span>';
+  return list.map(id => {
+    const name = messengerName(id) || id;
+    return `<span class="messenger-chip-icon" title="${escapeHtml(name)}">${escapeHtml(messengerShort(id) || name)}</span>`;
+  }).join(' ');
+}
+
+// Чекбоксы мессенджеров в форме контактного лица.
+function messengerCheckboxesHtml(selected) {
+  const sel = Array.isArray(selected) ? selected : [];
+  return MESSENGERS.map(m => `
+    <label class="messenger-chip">
+      <input type="checkbox" value="${m.id}"${sel.indexOf(m.id) > -1 ? ' checked' : ''}>
+      <span class="messenger-chip-icon">${escapeHtml(m.short)}</span>
+      <span>${escapeHtml(m.name)}</span>
+    </label>`).join('');
+}
+
+function readMessengerCheckboxes(containerId) {
+  const box = document.getElementById(containerId);
+  if (!box || !box.querySelectorAll) return [];
+  return Array.from(box.querySelectorAll('input[type=checkbox]'))
+    .filter(cb => cb.checked)
+    .map(cb => cb.value);
+}
+
+/* ===== Выбор контактного лица для фильтра комментариев ===== */
+
+// Имя выбранного контактного лица (null — фильтр не задан).
+function selectedContactName(client) {
+  if (selectedContactIdx === null || !client) return null;
+  const ct = (client.contacts || [])[selectedContactIdx];
+  return ct && ct.name ? ct.name : null;
+}
+
+// Клик по строке: показываем комментарии только этого человека.
+// Повторный клик по той же строке снимает фильтр.
+function selectClientContact(idx) {
+  selectedContactIdx = (selectedContactIdx === idx) ? null : idx;
+  renderClientContacts(selectedClientId);
+}
+
+function clearContactHistoryFilter() {
+  selectedContactIdx = null;
+  renderClientContacts(selectedClientId);
+}
+
+// Одна запись истории — используется и в блоке контактов, и в окне всей истории.
+function historyEntryHtml(h) {
+  return `
+    <div class="history-entry">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+        <span style="font-size:11px;color:#9ca3af;">${formatDate(h.date)}</span>
+        <span class="badge">${escapeHtml(h.type)}</span>
+      </div>
+      <div class="history-comment">${escapeHtml(h.comment)}</div>
+      <div style="font-size:11px;color:#6b7280;margin-top:4px;">
+        ${escapeHtml(h.manager || '')}${h.contactPerson ? ' · ' + escapeHtml(h.contactPerson) : ''}
+      </div>
+    </div>
+  `;
+}
+
 // Блок «История взаимодействий» под списком контактных лиц.
-// Комментарии выводятся от новых к старым, длинные истории прокручиваются.
+// Если контактное лицо выбрано — показываем только его комментарии.
 function renderHistoryBlock(client, editable) {
-  const history = [...(client.history || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
+  const all = [...(client.history || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
+  const person = selectedContactName(client);
+  const history = person ? all.filter(h => (h.contactPerson || '') === person) : all;
+
+  const filterHint = person
+    ? `<div class="history-filter-hint">Показаны комментарии: <strong>${escapeHtml(person)}</strong>
+         <button type="button" class="link-btn" onclick="clearContactHistoryFilter()">показать все</button></div>`
+    : '';
+
   return `
     <div class="client-history-section">
       <div class="section-header">
-        <h3>История взаимодействий (${history.length})</h3>
-        ${editable !== false ? `<button class="btn btn-sm" onclick="openHistoryModal(${client.id})">+ Добавить</button>` : ''}
-      </div>
-      ${history.length === 0 ? '<p style="color:#9ca3af;font-size:12px;padding:10px 0">Нет записей</p>' : `
-        <div class="history-scroll">
-          ${history.map(h => `
-            <div class="history-entry">
-              <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-                <span style="font-size:11px;color:#9ca3af;">${formatDate(h.date)}</span>
-                <span class="badge">${escapeHtml(h.type)}</span>
-              </div>
-              <div class="history-comment">${escapeHtml(h.comment)}</div>
-              <div style="font-size:11px;color:#6b7280;margin-top:4px;">
-                ${escapeHtml(h.manager || '')}${h.contactPerson ? ' · ' + escapeHtml(h.contactPerson) : ''}
-              </div>
-            </div>
-          `).join('')}
+        <h3>История взаимодействий (${history.length}${person ? ' из ' + all.length : ''})</h3>
+        <div class="history-actions">
+          <button class="btn btn-sm btn-secondary" onclick="openAllHistoryModal(${client.id})">Вся история взаимодействий</button>
+          ${editable !== false ? `<button class="btn btn-sm" onclick="openHistoryModal(${client.id})">+ Добавить</button>` : ''}
         </div>
-      `}
+      </div>
+      ${filterHint}
+      ${history.length === 0
+        ? `<p style="color:#9ca3af;font-size:12px;padding:10px 0">${person ? 'У этого контактного лица нет комментариев' : 'Нет записей'}</p>`
+        : `<div class="history-scroll">${history.map(historyEntryHtml).join('')}</div>`}
     </div>
   `;
+}
+
+// Окно со всеми комментариями по клиенту — от текущей даты к самой первой записи.
+function openAllHistoryModal(clientId) {
+  const client = clients.find(c => c.id === clientId);
+  if (!client) return;
+  const content = document.getElementById('allHistoryContent');
+  if (!content) return;
+
+  const all = [...(client.history || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
+  const title = document.getElementById('allHistoryTitle');
+  if (title) title.textContent = 'Вся история взаимодействий — ' + (client.orgName || '');
+
+  content.innerHTML = `
+    <div style="font-size:12px;color:#6b7280;margin-bottom:12px;">
+      Всего записей: <strong>${all.length}</strong> · от новых к старым
+    </div>
+    ${all.length === 0 ? '<div class="empty-state" style="padding:40px 20px;"><p>Комментариев пока нет</p></div>' : `
+      <div class="scrollable-table">
+        <div class="table-body" style="max-height:60vh;">
+          <table>
+            <thead><tr>
+              <th style="width:120px">Дата</th><th style="width:140px">Тип взаимодействия</th>
+              <th style="width:160px">Контактное лицо</th><th style="width:110px">Менеджер</th><th>Комментарий</th>
+            </tr></thead>
+            <tbody>
+              ${all.map(h => `<tr style="cursor:default;">
+                <td>${formatDate(h.date)}</td>
+                <td><span class="badge">${escapeHtml(h.type)}</span></td>
+                <td>${escapeHtml(h.contactPerson || '—')}</td>
+                <td>${escapeHtml(h.manager || '—')}</td>
+                <td><div class="history-comment">${escapeHtml(h.comment)}</div></td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>`}
+  `;
+  const modal = document.getElementById('allHistoryModal');
+  if (modal) modal.classList.add('active');
 }
 
 function openClientCard(id) {
@@ -627,6 +746,7 @@ function openContactModal(clientId) {
   document.getElementById('newContactPhoneWork').value = '';
   document.getElementById('newContactPhoneMobile').value = '';
   document.getElementById('newContactEmail').value = '';
+  document.getElementById('newContactMessengers').innerHTML = messengerCheckboxesHtml([]);
   document.getElementById('contactModal').classList.add('active');
 }
 
@@ -642,6 +762,7 @@ function editClientContact(clientId, idx) {
   document.getElementById('newContactPhoneWork').value = ct.phoneWork || '';
   document.getElementById('newContactPhoneMobile').value = ct.phoneMobile || '';
   document.getElementById('newContactEmail').value = ct.email || '';
+  document.getElementById('newContactMessengers').innerHTML = messengerCheckboxesHtml(ct.messengers);
   document.getElementById('contactModal').classList.add('active');
 }
 
@@ -662,8 +783,12 @@ function saveContact(e) {
     position: document.getElementById('newContactPosition').value.trim(),
     phoneWork: document.getElementById('newContactPhoneWork').value.trim(),
     phoneMobile: document.getElementById('newContactPhoneMobile').value.trim(),
-    email: document.getElementById('newContactEmail').value.trim()
+    email: document.getElementById('newContactEmail').value.trim(),
+    messengers: readMessengerCheckboxes('newContactMessengers')
   };
+
+  // Должность пополняет общий справочник — её увидят все менеджеры.
+  if (contactData.position) dictAdd('positions', contactData.position);
   
   if (editIdx !== '') {
     client.contacts[parseInt(editIdx)] = contactData;
@@ -712,45 +837,65 @@ function openHistoryModal(clientId) {
   document.getElementById('historyModal').classList.add('active');
 }
 
-/* ===== Форма «Размещение заказа» в комментарии ===== */
+/* ===== Форма заказа в комментарии =====
+   Порядок заполнения: кол-во кг и общая стоимость заказа, а стоимость за кг
+   считается автоматически: Стоимость_кг = Общая_стоимость / Кол-во_кг. */
 
-let orderCostManual = false; // стоимость вводится вручную (авторасчёт выключен)
+// Тип считается «заказным», если в названии есть «заказ»: так работают
+// и «Размещение заказа», и созданный в справочнике тип «Заказ».
+function isOrderType(type) {
+  return /заказ/i.test(String(type || ''));
+}
+
+// Стоимость за килограмм. null, если данных не хватает: нулевой вес или
+// незаполненная (нулевая) сумма — тогда в форме показываем «—», а не 0.
+function orderPricePerKg(kg, cost) {
+  const k = Number(kg);
+  const c = Number(cost);
+  if (!k || !c || !isFinite(k) || !isFinite(c)) return null;
+  return Math.round((c / k) * 100) / 100;
+}
+
+// Состояния поставки из справочного списка. Значение из старой записи,
+// которого нет в списке, добавляется отдельным пунктом — чтобы не потерялось.
+function renderOrderConditions(current) {
+  const select = document.getElementById('orderCondition');
+  if (!select) return;
+  const list = ORDER_CONDITIONS.slice();
+  const value = String(current || '').trim();
+  if (value && list.indexOf(value) === -1) list.push(value);
+  select.innerHTML = '<option value="">—</option>' +
+    list.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('');
+  select.value = value;
+}
 
 function resetOrderForm() {
   const kg = document.getElementById('orderKg');
-  const condition = document.getElementById('orderCondition');
-  const price = document.getElementById('orderAvgPrice');
   const cost = document.getElementById('orderCost');
-  const auto = document.getElementById('orderAutoCalc');
+  const price = document.getElementById('orderPricePerKg');
   if (kg) kg.value = '';
-  if (condition) condition.value = '';
+  if (cost) cost.value = '';
   if (price) price.value = '';
-  if (cost) { cost.value = ''; cost.disabled = true; }
-  if (auto) auto.checked = true;
-  orderCostManual = false;
+  renderOrderConditions('');
 }
 
-// Показываем/скрываем блок параметров заказа при выборе типа.
+// Показываем блок параметров заказа при выборе «заказного» типа.
 function onHistoryTypeChange() {
   const section = document.getElementById('orderFormSection');
-  const isOrder = document.getElementById('historyType').value === 'Размещение заказа';
+  const typeEl = document.getElementById('historyType');
+  const isOrder = isOrderType(typeEl ? typeEl.value : '');
   if (section) section.style.display = isOrder ? 'block' : 'none';
+  if (isOrder) recalcOrderCost();
 }
 
-// Автопересчёт стоимости: Кол-во кг × Средняя цена.
+// Автопересчёт: Стоимость за кг = Общая стоимость / Кол-во кг.
 function recalcOrderCost() {
-  if (orderCostManual) return;
-  const kg = parseFloat(document.getElementById('orderKg').value);
-  const price = parseFloat(document.getElementById('orderAvgPrice').value);
-  const costEl = document.getElementById('orderCost');
-  costEl.value = (kg && price) ? Math.round((kg * price) * 100) / 100 : '';
-}
-
-function onOrderAutoCalcToggle() {
-  orderCostManual = !document.getElementById('orderAutoCalc').checked;
-  const costEl = document.getElementById('orderCost');
-  costEl.disabled = orderCostManual;
-  if (!orderCostManual) recalcOrderCost();
+  const kg = document.getElementById('orderKg');
+  const cost = document.getElementById('orderCost');
+  const priceEl = document.getElementById('orderPricePerKg');
+  if (!kg || !cost || !priceEl) return;
+  const perKg = orderPricePerKg(kg.value, cost.value);
+  priceEl.value = perKg === null ? '' : fmtMoney(perKg);
 }
 
 function saveHistory(e) {
@@ -767,27 +912,27 @@ function saveHistory(e) {
   let comment = document.getElementById('historyComment').value.trim();
   let orderData = null;
 
-  // «Размещение заказа»: собираем параметры, формируем текст комментария
-  // и создаём запись в модуле «Заказы».
-  if (type === 'Размещение заказа') {
+  // Заказ: собираем параметры, формируем текст комментария и создаём
+  // запись в модуле «Заказы». Стоимость за кг считаем из суммы и веса.
+  if (isOrderType(type)) {
+    const conditionEl = document.getElementById('orderCondition');
     const kgRaw = document.getElementById('orderKg').value;
-    const condition = document.getElementById('orderCondition').value.trim();
-    const priceRaw = document.getElementById('orderAvgPrice').value;
     const costRaw = document.getElementById('orderCost').value;
 
     const kg = kgRaw === '' ? null : Number(kgRaw);
-    const avgPrice = priceRaw === '' ? null : Number(priceRaw);
     const cost = costRaw === '' ? null : Number(costRaw);
+    const condition = conditionEl ? conditionEl.value.trim() : '';
+    const avgPrice = orderPricePerKg(kg, cost);
 
     orderData = { kg, condition, avgPrice, cost };
 
     const parts = [
       'Кол-во кг — ' + (kg === null ? '—' : fmtKg(kg)),
-      'Состояние — ' + (condition || '—'),
-      'Средняя цена — ' + (avgPrice === null ? '—' : fmtMoney(avgPrice)),
-      'Стоимость заказа — ' + (cost === null ? '—' : fmtMoney(cost))
+      'Состояние поставки — ' + (condition || '—'),
+      'Общая стоимость — ' + (cost === null ? '—' : fmtMoney(cost)),
+      'Стоимость за кг — ' + (avgPrice === null ? '—' : fmtMoney(avgPrice))
     ];
-    const autoComment = 'Размещение заказа: ' + parts.join(', ');
+    const autoComment = type + ': ' + parts.join(', ');
     comment = comment || autoComment;
   }
 
