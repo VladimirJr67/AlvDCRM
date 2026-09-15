@@ -1,19 +1,77 @@
+/* ============================================================
+   js/reminders.js — модуль «Напоминания».
+
+   — раскладка адаптивная, без центрирования: список и календарь
+     перестраиваются под ширину окна;
+   — тип напоминания: «Для себя» (личное, видит только автор) или
+     «Для клиента» (видно всем, выводится индикатором в карточке);
+   — важность задаёт цвет индикатора: красный — обязательно
+     к просмотру, жёлтый — обратить внимание, зелёный — информационное;
+   — в назначенное время всплывает уведомление в интерфейсе.
+   ============================================================ */
+
 let reminders = [];
 let currentReminderMonth = new Date().getMonth();
 let currentReminderYear = new Date().getFullYear();
 let reminderDateFilter = null;
+let reminderScopeFilter = 'all';
 
-const REMINDER_COLORS = [
-  { name: 'Синий', value: '#3b82f6' },
-  { name: 'Красный', value: '#ef4444' },
-  { name: 'Зелёный', value: '#10b981' },
-  { name: 'Серый', value: '#6b7280' },
-  { name: 'Оранжевый', value: '#f59e0b' }
+// Важность напоминания. Значение хранится в поле color (совместимо со
+// старыми записями), но смысл теперь строго трёхуровневый.
+const REMINDER_LEVELS = [
+  { value: '#ef4444', key: 'urgent', name: 'Обязательно к просмотру' },
+  { value: '#f59e0b', key: 'attention', name: 'Обратить внимание' },
+  { value: '#10b981', key: 'info', name: 'Информационное' }
 ];
+
+const REMINDER_LEVEL_RANK = { urgent: 3, attention: 2, info: 1 };
+
+// Раньше можно было выбрать произвольный цвет из палитры — приводим
+// старые значения к трём уровням.
+const LEGACY_LEVEL_MAP = {
+  '#ef4444': '#ef4444',
+  '#f59e0b': '#f59e0b',
+  '#10b981': '#10b981',
+  '#3b82f6': '#f59e0b',
+  '#6b7280': '#10b981'
+};
+
+function reminderLevelInfo(color) {
+  const normalized = LEGACY_LEVEL_MAP[color] || REMINDER_LEVELS[2].value;
+  const lvl = REMINDER_LEVELS.find(l => l.value === normalized) || REMINDER_LEVELS[2];
+  // color продублирован как отдельное поле: он подставляется прямо в разметку
+  // (рамки карточек, точки календаря, индикатор клиента).
+  return { value: lvl.value, color: lvl.value, key: lvl.key, name: lvl.name };
+}
+
+// Локальная дата в формате YYYY-MM-DD: toISOString() отдаёт UTC,
+// из-за чего ночью «сегодня» уезжало на день назад.
+function todayISO(date) {
+  const d = date || new Date();
+  return d.getFullYear() + '-' +
+    String(d.getMonth() + 1).padStart(2, '0') + '-' +
+    String(d.getDate()).padStart(2, '0');
+}
+
+function formatReminderDate(dateStr) {
+  if (!dateStr) return '—';
+  const today = todayISO();
+  const tomorrow = todayISO(new Date(Date.now() + 24 * 60 * 60 * 1000));
+  if (dateStr === today) return 'Сегодня';
+  if (dateStr === tomorrow) return 'Завтра';
+  const d = new Date(String(dateStr) + 'T00:00:00');
+  if (isNaN(d.getTime())) return String(dateStr);
+  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' });
+}
+
+function reminderDateTime(r) {
+  return new Date((r.date || '') + 'T' + (r.time || '09:00'));
+}
 
 function loadReminders() {
   const saved = localStorage.getItem('alvid_crm_reminders');
   reminders = saved ? JSON.parse(saved) : [];
+  if (!Array.isArray(reminders)) reminders = [];
 }
 
 function saveReminders() {
@@ -23,69 +81,189 @@ function saveReminders() {
   queueServerSave();
 }
 
+/* ===== Тип и видимость ===== */
+
+function reminderScope(r) {
+  if (r && (r.scope === 'self' || r.scope === 'client')) return r.scope;
+  // Старые записи: привязанные к клиенту считаем клиентскими.
+  return (r && r.clientId) ? 'client' : 'self';
+}
+
+function reminderScopeLabel(r) {
+  return reminderScope(r) === 'client' ? 'Для клиента' : 'Для себя';
+}
+
+// Личные напоминания видит только автор. Если автор неизвестен
+// (записи до появления типов), напоминание остаётся общим.
+function canSeeReminder(r) {
+  if (reminderScope(r) === 'client') return true;
+  if (!r.createdBy) return true;
+  return !!currentUser && r.createdBy === currentUser.id;
+}
+
+function visibleReminders() {
+  return reminders.filter(canSeeReminder);
+}
+
+function isMyReminder(r) {
+  return !!currentUser && r.createdBy === currentUser.id;
+}
+
+/* ===== Индикатор напоминаний в карточке клиента ===== */
+
+// Важнейшее из активных напоминаний клиента: красное важнее жёлтого,
+// жёлтое — зелёного. Нужно для цветного маркера в разделе «Клиенты».
+function clientReminderMarker(clientId) {
+  if (!clientId) return null;
+  const active = reminders.filter(r => !r.completed && r.clientId === clientId && canSeeReminder(r));
+  if (!active.length) return null;
+
+  let best = active[0];
+  active.forEach(r => {
+    if (REMINDER_LEVEL_RANK[reminderLevelInfo(r.color).key] >
+        REMINDER_LEVEL_RANK[reminderLevelInfo(best.color).key]) best = r;
+  });
+
+  const nearest = active.slice().sort((a, b) => reminderDateTime(a) - reminderDateTime(b))[0];
+  return {
+    level: reminderLevelInfo(best.color),
+    count: active.length,
+    nearest: nearest
+  };
+}
+
+function clientReminderTitle(clientId) {
+  const m = clientReminderMarker(clientId);
+  if (!m) return '';
+  const when = formatReminderDate(m.nearest.date) + (m.nearest.time ? ' ' + m.nearest.time : '');
+  return 'Напоминаний: ' + m.count + ' · ' + m.level.name + ' · ближайшее: ' + when + ' — ' + m.nearest.title;
+}
+
+// Цветная точка-маркер для таблицы клиентов и карточки.
+function clientReminderDotHtml(clientId) {
+  const m = clientReminderMarker(clientId);
+  if (!m) return '';
+  return `<span class="client-reminder-dot" style="background:${m.level.color};" title="${escapeHtml(clientReminderTitle(clientId))}"></span>`;
+}
+
+// Плашка для карточки: «Напоминания: 2» нужным цветом.
+function clientReminderBadgeHtml(clientId) {
+  const m = clientReminderMarker(clientId);
+  if (!m) return '';
+  return `<span class="client-reminder-badge" style="background:${m.level.color}1f;color:${m.level.color};border-color:${m.level.color}66;"
+                title="${escapeHtml(clientReminderTitle(clientId))}">🔔 Напоминания: ${m.count}</span>`;
+}
+
+/* ===== Раздел «Напоминания» ===== */
+
+function setReminderScopeFilter(value) {
+  reminderScopeFilter = value || 'all';
+  renderReminders();
+}
+
 function renderReminders() {
   const main = document.getElementById('mainContent');
-  
-  let filteredReminders = reminders;
-  if (reminderDateFilter) {
-    filteredReminders = reminders.filter(r => r.date === reminderDateFilter);
-  }
-  
-  const today = new Date().toISOString().split('T')[0];
-  const upcoming = filteredReminders.filter(r => r.date >= today && !r.completed).sort((a, b) => new Date(a.date + 'T' + a.time) - new Date(b.date + 'T' + b.time));
-  const overdue = filteredReminders.filter(r => r.date < today && !r.completed).sort((a, b) => new Date(b.date) - new Date(a.date));
-  const completed = filteredReminders.filter(r => r.completed);
+  if (!main) return;
+
+  const visible = visibleReminders();
+  let filtered = visible;
+  if (reminderScopeFilter !== 'all') filtered = filtered.filter(r => reminderScope(r) === reminderScopeFilter);
+  if (reminderDateFilter) filtered = filtered.filter(r => r.date === reminderDateFilter);
+
+  const today = todayISO();
+  const upcoming = filtered
+    .filter(r => !r.completed && r.date >= today)
+    .sort((a, b) => reminderDateTime(a) - reminderDateTime(b));
+  const overdue = filtered
+    .filter(r => !r.completed && r.date < today)
+    .sort((a, b) => reminderDateTime(b) - reminderDateTime(a));
+  const completed = filtered
+    .filter(r => r.completed)
+    .sort((a, b) => reminderDateTime(b) - reminderDateTime(a));
+
+  const group = (title, list, status, color) => list.length === 0 ? '' : `
+    <section class="reminders-group">
+      <h3 class="reminders-group-title" style="color:${color};">
+        ${title}<span class="reminders-group-count">${list.length}</span>
+      </h3>
+      <div class="reminders-list">${list.map(r => renderReminderCard(r, status)).join('')}</div>
+    </section>`;
+
+  const scopeOption = (value, label) =>
+    `<option value="${value}"${reminderScopeFilter === value ? ' selected' : ''}>${label}</option>`;
 
   main.innerHTML = `
-    <div style="display:flex;gap:20px;padding:30px;max-width:1400px;margin:0 auto;">
-      <div style="flex:1;min-width:0;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-          <h1 style="font-size:22px;font-weight:600;color:#1a3a5c;">🔔 Напоминания${reminderDateFilter ? ' — ' + formatDate(reminderDateFilter) : ''}</h1>
-          <div style="display:flex;gap:8px;">
-            ${reminderDateFilter ? '<button class="btn btn-secondary btn-sm" onclick="clearReminderDateFilter()">Сбросить дату</button>' : ''}
-            <button class="btn" onclick="openReminderModal()">+ Новое напоминание</button>
-          </div>
+    <div class="reminders-page">
+      <div class="reminders-head">
+        <div class="reminders-head-text">
+          <h1>🔔 Напоминания${reminderDateFilter ? ' — ' + formatReminderDate(reminderDateFilter) : ''}</h1>
+          <div class="reminders-sub">Личные напоминания видите только вы, клиентские — вся команда</div>
         </div>
-        
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:25px;">
-          <div class="stat-card"><div class="stat-value" style="color:#ef4444">${overdue.length}</div><div class="stat-label">Просрочено</div></div>
-          <div class="stat-card"><div class="stat-value" style="color:#3b82f6">${upcoming.length}</div><div class="stat-label">Предстоит</div></div>
-          <div class="stat-card"><div class="stat-value" style="color:#10b981">${completed.length}</div><div class="stat-label">Выполнено</div></div>
+        <div class="reminders-head-actions">
+          <select class="reminders-scope-filter" onchange="setReminderScopeFilter(this.value)" title="Фильтр по типу">
+            ${scopeOption('all', 'Все типы')}
+            ${scopeOption('self', 'Для себя')}
+            ${scopeOption('client', 'Для клиента')}
+          </select>
+          ${reminderDateFilter ? '<button class="btn btn-secondary btn-sm" onclick="clearReminderDateFilter()">Сбросить дату</button>' : ''}
+          <button class="btn" onclick="openReminderModal()">+ Новое напоминание</button>
         </div>
-
-        ${overdue.length > 0 ? `
-          <div style="margin-bottom:20px;">
-            <h3 style="font-size:15px;font-weight:600;color:#ef4444;margin-bottom:12px;">⚠ Просрочено</h3>
-            ${overdue.map(r => renderReminderCard(r, 'overdue')).join('')}
-          </div>
-        ` : ''}
-        
-        ${upcoming.length > 0 ? `
-          <div style="margin-bottom:20px;">
-            <h3 style="font-size:15px;font-weight:600;color:#3b82f6;margin-bottom:12px;">📅 Предстоящие</h3>
-            ${upcoming.map(r => renderReminderCard(r, 'upcoming')).join('')}
-          </div>
-        ` : ''}
-        
-        ${completed.length > 0 ? `
-          <div>
-            <h3 style="font-size:15px;font-weight:600;color:#10b981;margin-bottom:12px;">✅ Выполнено</h3>
-            ${completed.slice(0, 10).map(r => renderReminderCard(r, 'completed')).join('')}
-          </div>
-        ` : ''}
-        
-        ${filteredReminders.length === 0 ? `
-          <div style="text-align:center;padding:60px 20px;color:#9ca3af;">
-            <h2 style="color:#4b5563;margin-bottom:8px;">Нет напоминаний</h2>
-            <p>Создайте первое напоминание</p>
-          </div>
-        ` : ''}
       </div>
-      
-      <div style="width:280px;flex-shrink:0;">
-        ${renderReminderCalendar()}
+
+      <div class="reminders-stats">
+        <div class="stat-card"><div class="stat-value" style="color:#ef4444">${overdue.length}</div><div class="stat-label">Просрочено</div></div>
+        <div class="stat-card"><div class="stat-value" style="color:#3b82f6">${upcoming.length}</div><div class="stat-label">Предстоит</div></div>
+        <div class="stat-card"><div class="stat-value" style="color:#10b981">${completed.length}</div><div class="stat-label">Выполнено</div></div>
+      </div>
+
+      <div class="reminders-layout">
+        <div class="reminders-main">
+          ${group('⚠ Просрочено', overdue, 'overdue', '#ef4444')}
+          ${group('📅 Предстоящие', upcoming, 'upcoming', '#3b82f6')}
+          ${group('✅ Выполнено', completed.slice(0, 12), 'completed', '#10b981')}
+          ${filtered.length === 0 ? `
+            <div class="reminders-empty">
+              <h2>${reminderDateFilter ? 'На выбранную дату напоминаний нет' : 'Нет напоминаний'}</h2>
+              <p>Создайте первое напоминание — кнопкой «+ Новое напоминание» или «Быстрое напоминание» в боковом меню.</p>
+            </div>` : ''}
+        </div>
+        <aside class="reminders-side">${renderReminderCalendar()}</aside>
       </div>
     </div>
+  `;
+}
+
+function renderReminderCard(reminder, status) {
+  const level = reminderLevelInfo(reminder.color);
+  const isCompleted = status === 'completed';
+  const client = reminder.clientId ? clients.find(c => c.id === reminder.clientId) : null;
+  const isClient = reminderScope(reminder) === 'client';
+
+  return `
+    <article class="reminder-card${isCompleted ? ' done' : ''}${status === 'overdue' ? ' overdue' : ''}"
+             style="border-left-color:${status === 'overdue' ? '#ef4444' : level.color};">
+      <div class="reminder-card-head">
+        <input type="checkbox" ${isCompleted ? 'checked' : ''} onchange="toggleReminderComplete(${reminder.id})"
+               title="Отметить выполненным" class="reminder-card-check">
+        <div class="reminder-card-title">${escapeHtml(reminder.title)}</div>
+        <div class="reminder-card-actions">
+          <button class="btn-icon-btn" onclick="editReminder(${reminder.id})" title="Редактировать">✏️</button>
+          <button class="btn-icon-btn" onclick="deleteReminder(${reminder.id})" title="Удалить">🗑</button>
+        </div>
+      </div>
+
+      ${reminder.description ? `<p class="reminder-card-text">${escapeHtml(reminder.description)}</p>` : ''}
+
+      <div class="reminder-card-when${status === 'overdue' ? ' overdue' : ''}">
+        📅 ${formatReminderDate(reminder.date)} · 🕐 ${escapeHtml(reminder.time || '—')}
+      </div>
+
+      <div class="reminder-card-meta">
+        <span class="reminder-chip" style="background:${level.color}1f;color:${level.color};">${escapeHtml(level.name)}</span>
+        <span class="reminder-chip reminder-chip-scope">${isClient ? 'Для клиента' : 'Для себя'}</span>
+        ${client ? `<a href="#" class="reminder-client-link" onclick="event.preventDefault(); goToClient(${client.id});">${escapeHtml(client.orgName)}</a>` : ''}
+      </div>
+    </article>
   `;
 }
 
@@ -93,47 +271,45 @@ function renderReminderCalendar() {
   const year = currentReminderYear;
   const month = currentReminderMonth;
   const firstDay = new Date(year, month, 1);
-  const lastDay = new Date(year, month + 1, 0);
-  const daysInMonth = lastDay.getDate();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
   const startDay = firstDay.getDay() || 7;
-  
-  const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
-  
+
+  const monthNames = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+  const todayStr = todayISO();
+  const visible = visibleReminders();
+
   let html = `
-    <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:15px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-        <button onclick="changeReminderMonth(-1)" style="background:none;border:none;cursor:pointer;font-size:18px;color:#6b7280;">‹</button>
-        <span style="font-weight:600;font-size:14px;color:#1a3a5c;">${monthNames[month]} ${year}</span>
-        <button onclick="changeReminderMonth(1)" style="background:none;border:none;cursor:pointer;font-size:18px;color:#6b7280;">›</button>
+    <div class="reminders-calendar">
+      <div class="reminders-calendar-head">
+        <button onclick="changeReminderMonth(-1)" title="Предыдущий месяц">‹</button>
+        <span>${monthNames[month]} ${year}</span>
+        <button onclick="changeReminderMonth(1)" title="Следующий месяц">›</button>
       </div>
-      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center;">
+      <div class="reminders-calendar-grid">
   `;
-  
-  ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].forEach(d => {
-    html += `<div style="font-size:11px;color:#9ca3af;padding:4px;font-weight:500;">${d}</div>`;
+
+  ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].forEach(d => {
+    html += `<div class="reminders-calendar-dow">${d}</div>`;
   });
-  
+
   for (let i = 1; i < startDay; i++) html += '<div></div>';
-  
-  const today = new Date().toISOString().split('T')[0];
-  
+
   for (let day = 1; day <= daysInMonth; day++) {
-    const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
-    const dayReminders = reminders.filter(r => r.date === dateStr && !r.completed);
+    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const dayReminders = visible.filter(r => r.date === dateStr && !r.completed);
     const isSelected = reminderDateFilter === dateStr;
-    const isToday = dateStr === today;
-    
-    html += `<div onclick="filterRemindersByDate('${dateStr}')" style="cursor:pointer;padding:4px 2px;border-radius:4px;min-height:38px;${isSelected ? 'background:#eff6ff;' : ''}">
-      <div style="font-size:12px;color:${isToday ? '#3b82f6' : '#374151'};${isToday ? 'font-weight:700;' : ''}">${day}</div>
-      <div style="display:flex;gap:2px;justify-content:center;flex-wrap:wrap;margin-top:2px;">
-        ${dayReminders.slice(0,4).map(r => {
-          const color = REMINDER_COLORS.find(c => c.value === r.color)?.value || '#6b7280';
-          return `<div style="width:5px;height:5px;border-radius:50%;background:${color};"></div>`;
-        }).join('')}
+    const isToday = dateStr === todayStr;
+
+    html += `<div class="reminders-calendar-day${isSelected ? ' selected' : ''}${isToday ? ' today' : ''}"
+                  onclick="filterRemindersByDate('${dateStr}')" title="${dayReminders.length ? 'Напоминаний: ' + dayReminders.length : 'Напоминаний нет'}">
+      <div class="reminders-calendar-num">${day}</div>
+      <div class="reminders-calendar-dots">
+        ${dayReminders.slice(0, 4).map(r =>
+          `<span style="background:${reminderLevelInfo(r.color).color};"></span>`).join('')}
       </div>
     </div>`;
   }
-  
+
   html += '</div></div>';
   return html;
 }
@@ -155,55 +331,31 @@ function clearReminderDateFilter() {
   renderReminders();
 }
 
-function renderReminderCard(reminder, status) {
-  const color = REMINDER_COLORS.find(c => c.value === reminder.color) || REMINDER_COLORS[0];
-  const isOverdue = status === 'overdue';
-  const isCompleted = status === 'completed';
-  
-  const assignedContacts = (reminder.assignees || []).map(a => {
-    if (a.type === 'me') return `${currentUser ? currentUser.login : 'Admin'} (Я)`;
-    const contact = contacts.find(c => c.id === a.id);
-    return contact ? contact.name : null;
-  }).filter(Boolean);
+/* ===== Форма напоминания ===== */
 
-  const client = reminder.clientId ? clients.find(c => c.id === reminder.clientId) : null;
-
-  return `
-    <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:14px;margin-bottom:10px;${isOverdue ? 'border-left:3px solid #ef4444;' : `border-left:3px solid ${color.value};`}">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
-        <div style="display:flex;align-items:flex-start;gap:10px;flex:1;min-width:0;">
-          <input type="checkbox" ${isCompleted ? 'checked' : ''} onchange="toggleReminderComplete(${reminder.id})" style="width:16px;height:16px;cursor:pointer;margin-top:2px;flex-shrink:0;">
-          <div style="flex:1;min-width:0;">
-            <div style="font-size:14px;font-weight:500;color:#111;${isCompleted ? 'text-decoration:line-through;opacity:0.6;' : ''};word-break:break-word;">${escapeHtml(reminder.title)}</div>
-            ${reminder.description ? `<div style="font-size:12px;color:#6b7280;margin-top:4px;line-height:1.4;">${escapeHtml(reminder.description)}</div>` : ''}
-          </div>
-        </div>
-        <div style="display:flex;gap:4px;flex-shrink:0;margin-left:8px;">
-          <button class="btn-icon-btn" onclick="editReminder(${reminder.id})" title="Редактировать">✏️</button>
-          <button class="btn-icon-btn" onclick="deleteReminder(${reminder.id})" title="Удалить">🗑</button>
-        </div>
-      </div>
-      
-      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:12px;color:#6b7280;margin-top:8px;">
-        <span style="${isOverdue ? 'color:#ef4444;font-weight:500;' : ''}">📅 ${formatDate(reminder.date)}</span>
-        <span style="color:#d1d5db;">·</span>
-        <span>🕐 ${reminder.time}</span>
-        ${client ? `<span style="color:#d1d5db;">·</span><span style="color:#3b82f6;cursor:pointer;" onclick="goToClient(${client.id})"> ${escapeHtml(client.orgName)}</span>` : ''}
-      </div>
-      
-      ${assignedContacts.length > 0 ? `
-        <div style="font-size:12px;color:#6b7280;margin-top:6px;"> ${assignedContacts.join(', ')}</div>
-      ` : ''}
-    </div>
-  `;
+function getSelectedReminderScope() {
+  const checked = document.querySelector('input[name="reminderScope"]:checked');
+  return checked ? checked.value : 'self';
 }
 
-function goToClient(id) {
-  document.querySelectorAll('.menu-item').forEach(i => i.classList.remove('active'));
-  document.querySelector('[data-section="clients"]').classList.add('active');
-  document.getElementById('contactsSubmenu').classList.remove('show');
-  renderSection('clients');
-  setTimeout(() => selectClient(id), 50);
+// Клиентское напоминание требует клиента, личное — нет,
+// поэтому поле клиента показываем только для «Для клиента».
+function onReminderScopeChange() {
+  const scope = getSelectedReminderScope();
+  const row = document.getElementById('reminderClientRow');
+  const search = document.getElementById('reminderClientSearch');
+  const link = document.getElementById('reminderClientLink');
+
+  if (row) row.style.display = scope === 'client' ? '' : 'none';
+
+  if (scope === 'self') {
+    document.getElementById('reminderClientId').value = '';
+    if (search) search.value = '';
+    selectedReminderClientId = null;
+    if (link) { link.style.display = 'none'; link.innerHTML = ''; }
+  } else {
+    updateReminderClientLink();
+  }
 }
 
 function openReminderModal(reminder = null, clientId = null) {
@@ -211,85 +363,67 @@ function openReminderModal(reminder = null, clientId = null) {
   document.getElementById('reminderId').value = reminder?.id || '';
   document.getElementById('reminderTitle').value = reminder?.title || '';
   document.getElementById('reminderDescription').value = reminder?.description || '';
-  document.getElementById('reminderDate').value = reminder?.date || new Date().toISOString().split('T')[0];
+  document.getElementById('reminderDate').value = reminder?.date || todayISO();
   document.getElementById('reminderTime').value = reminder?.time || '09:00';
+
+  // Тип: у нового напоминания — «Для себя», если оно открыто не из карточки клиента.
+  const scope = reminder ? reminderScope(reminder) : (clientId ? 'client' : 'self');
+  document.querySelectorAll('input[name="reminderScope"]').forEach(el => {
+    el.checked = (el.value === scope);
+  });
+
+  // Важность: для нового напоминания по умолчанию «Обратить внимание».
+  const levelSelect = document.getElementById('reminderLevel');
+  levelSelect.innerHTML = REMINDER_LEVELS.map(l =>
+    `<option value="${l.value}">${escapeHtml(l.name)}</option>`).join('');
+  levelSelect.value = reminder ? reminderLevelInfo(reminder.color).value : REMINDER_LEVELS[1].value;
+
   document.getElementById('reminderClientId').value = reminder?.clientId || clientId || '';
   initReminderClientSearch();
-
-  const colorSelect = document.getElementById('reminderColor');
-  colorSelect.innerHTML = REMINDER_COLORS.map(c => 
-    `<option value="${c.value}" ${reminder?.color === c.value ? 'selected' : ''}>${c.name}</option>`
-  ).join('');
-  
-  const meCheckbox = document.getElementById('reminderAssignMe');
-  const assigneesSelect = document.getElementById('reminderAssignees');
-  
-  const hasMe = reminder?.assignees?.some(a => a.type === 'me');
-  meCheckbox.checked = hasMe || false;
-  
-  assigneesSelect.innerHTML = contacts.map(c => {
-    const isSelected = reminder?.assignees?.some(a => a.type === 'contact' && a.id === c.id);
-    return `<option value="${c.id}" ${isSelected ? 'selected' : ''}>${escapeHtml(c.name)} (${escapeHtml(c.department || '—')})</option>`;
-  }).join('');
-  
-  const clientLink = document.getElementById('reminderClientLink');
-  const cid = reminder?.clientId || clientId;
-  if (cid) {
-    const c = clients.find(cl => cl.id === cid);
-    if (c) {
-      clientLink.style.display = 'block';
-      clientLink.innerHTML = `🏢 <strong>${escapeHtml(c.orgName)}</strong> <button type="button" onclick="unlinkReminderFromClient()" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:12px;margin-left:6px;">✕ убрать</button>`;
-    }
-  } else {
-    clientLink.style.display = 'none';
-  }
-  
+  onReminderScopeChange();
   document.getElementById('reminderModal').classList.add('active');
-}
-
-function unlinkReminderFromClient() {
-  document.getElementById('reminderClientId').value = '';
-  document.getElementById('reminderClientLink').style.display = 'none';
 }
 
 function saveReminder(e) {
   e.preventDefault();
   const id = document.getElementById('reminderId').value;
+  const scope = getSelectedReminderScope();
   const clientIdVal = document.getElementById('reminderClientId').value;
-  const assignees = [];
-  
-  if (document.getElementById('reminderAssignMe').checked) {
-    assignees.push({ type: 'me' });
+  const clientId = (scope === 'client' && clientIdVal) ? parseInt(clientIdVal) : null;
+
+  if (scope === 'client' && !clientId) {
+    alert('Выберите клиента или переключите тип на «Для себя».');
+    return;
   }
-  Array.from(document.getElementById('reminderAssignees').selectedOptions).forEach(opt => {
-    assignees.push({ type: 'contact', id: parseInt(opt.value) });
-  });
-  
+
   const data = {
     title: document.getElementById('reminderTitle').value.trim(),
     description: document.getElementById('reminderDescription').value.trim(),
     date: document.getElementById('reminderDate').value,
     time: document.getElementById('reminderTime').value,
-    color: document.getElementById('reminderColor').value,
-    assignees: assignees,
-    clientId: clientIdVal ? parseInt(clientIdVal) : null
+    color: document.getElementById('reminderLevel').value,
+    scope: scope,
+    clientId: clientId
   };
 
   if (id) {
     const idx = reminders.findIndex(r => r.id === parseInt(id));
-    if (idx !== -1) reminders[idx] = { ...reminders[idx], ...data };
+    if (idx !== -1) {
+      // Время изменили — напоминание должно сработать заново.
+      if (reminders[idx].date !== data.date || reminders[idx].time !== data.time) data.notifiedAt = null;
+      reminders[idx] = { ...reminders[idx], ...data };
+    }
   } else {
     const maxId = reminders.reduce((m, r) => Math.max(m, r.id || 0), 0);
     data.id = maxId + 1;
     data.completed = false;
     data.createdAt = new Date().toISOString();
+    data.createdBy = currentUser ? currentUser.id : null;
     reminders.push(data);
   }
-  
+
   saveReminders();
   closeModal('reminderModal');
-  
-  const currentSection = document.querySelector('.menu-item.active')?.dataset.section;
   if (currentSection === 'reminders') renderReminders();
 }
 
@@ -314,18 +448,94 @@ function toggleReminderComplete(id) {
   renderReminders();
 }
 
-function formatDate(dateStr) {
-  if (!dateStr) return '—';
-  const d = new Date(dateStr);
-  const today = new Date();
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  
-  if (dateStr === today.toISOString().split('T')[0]) return 'Сегодня';
-  if (dateStr === tomorrow.toISOString().split('T')[0]) return 'Завтра';
-  
-  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' });
+/* ===== Навигация ===== */
+
+function goToClient(id) {
+  goToSection('clients');
+  setTimeout(() => selectClient(id), 50);
 }
+
+/* ===== Всплывающее уведомление в назначенное время ===== */
+
+let reminderWatchTimer = null;
+
+function startReminderWatcher() {
+  if (reminderWatchTimer) return;
+  checkDueReminders();
+  reminderWatchTimer = setInterval(checkDueReminders, 20000);
+}
+
+// Напоминание пора показать: сегодня, время наступило, ещё не показывали,
+// не выполнено и принадлежит текущему пользователю.
+function isReminderDue(r, now) {
+  if (!r || r.completed || r.notifiedAt) return false;
+  if (!isMyReminder(r)) return false;
+  const today = todayISO(now);
+  if (r.date !== today) return false;
+  const hhmm = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+  return String(r.time || '09:00') <= hhmm;
+}
+
+function checkDueReminders() {
+  if (!currentUser) return 0;
+  const now = new Date();
+  const due = reminders.filter(r => isReminderDue(r, now));
+  if (!due.length) return 0;
+
+  due.forEach(r => {
+    r.notifiedAt = new Date().toISOString();
+    showReminderPopup(r);
+    // Дубль в «Уведомления» — чтобы напоминание не потерялось, если попап закрыли.
+    notifyUser(r.createdBy, 'Напоминание: ' + r.title,
+      (r.description || '') + (r.time ? ' · ' + r.time : ''), null);
+  });
+
+  saveReminders();
+  return due.length;
+}
+
+// Всплывающая карточка в правом нижнем углу.
+function showReminderPopup(reminder) {
+  let host = document.getElementById('toastHost');
+  if (!host) {
+    host = document.createElement('div');
+    host.id = 'toastHost';
+    host.className = 'toast-host';
+    document.body.appendChild(host);
+  }
+
+  const level = reminderLevelInfo(reminder.color);
+  const client = reminder.clientId ? clients.find(c => c.id === reminder.clientId) : null;
+
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.style.borderLeftColor = level.color;
+  el.innerHTML = `
+    <div class="toast-head">
+      <span class="toast-dot" style="background:${level.color};"></span>
+      <strong>Напоминание</strong>
+      <button type="button" class="toast-close" title="Закрыть">✕</button>
+    </div>
+    <div class="toast-title">${escapeHtml(reminder.title)}</div>
+    ${reminder.description ? `<div class="toast-text">${escapeHtml(reminder.description)}</div>` : ''}
+    <div class="toast-meta">
+      🕐 ${escapeHtml(reminder.time || '')}${client ? ' · ' + escapeHtml(client.orgName) : ''} · ${escapeHtml(level.name)}
+    </div>
+    <div class="toast-actions">
+      <button type="button" class="btn btn-sm btn-secondary toast-done">Выполнено</button>
+      <button type="button" class="btn btn-sm btn-secondary toast-open">Открыть раздел</button>
+    </div>`;
+
+  el.querySelector('.toast-close').onclick = () => el.remove();
+  el.querySelector('.toast-done').onclick = () => { toggleReminderComplete(reminder.id); el.remove(); };
+  el.querySelector('.toast-open').onclick = () => { el.remove(); goToSection('reminders'); };
+
+  host.appendChild(el);
+  // Автоматически убираем, чтобы уведомления не копились на экране.
+  setTimeout(() => { if (el.parentNode) el.remove(); }, 60000);
+}
+
+/* ===== Форматирование даты и времени ===== */
 
 function formatDateTime(isoString) {
   if (!isoString) return '—';

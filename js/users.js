@@ -11,8 +11,8 @@ const SESSION_KEY = 'alvid_crm_session';
 const USERS_KEY = 'alvid_crm_users';
 
 const DEFAULT_USERS = [
-  { id: 1, login: 'Admin', password: 'Admin', role: 'admin', name: 'Администратор' },
-  { id: 2, login: 'manager', password: 'manager', role: 'user', name: 'Менеджер' }
+  { id: 1, login: 'Admin', password: 'Admin', role: 'admin', name: 'Администратор', position: '' },
+  { id: 2, login: 'manager', password: 'manager', role: 'user', name: 'Менеджер', position: '' }
 ];
 
 function loadUsers() {
@@ -43,6 +43,36 @@ function userRoleLabel(u) {
   return u && u.role === 'admin' ? 'Администратор' : 'Пользователь';
 }
 
+// Должность пользователя. Если не заполнена — показываем роль,
+// чтобы подпись никогда не оставалась пустой.
+function userPositionLabel(u) {
+  if (!u) return '';
+  return (u.position || '').trim() || userRoleLabel(u);
+}
+
+// Подпись для выбора коллег: «ФИО — Должность».
+function userDisplayName(u) {
+  if (!u) return '';
+  const name = (u.name || u.login || '').trim();
+  const pos = userPositionLabel(u);
+  return pos ? name + ' — ' + pos : name;
+}
+
+// Поиск пользователей по ФИО, логину и должности (выбор соисполнителя).
+// excludeIds — кого не показывать (например, уже выбранных).
+function searchUsers(query, excludeIds) {
+  const q = String(query == null ? '' : query).trim().toLowerCase();
+  const skip = excludeIds || [];
+  return users.filter(u => {
+    if (skip.indexOf(u.id) > -1) return false;
+    if (!q) return true;
+    return (u.name || '').toLowerCase().includes(q)
+      || (u.login || '').toLowerCase().includes(q)
+      || (u.position || '').toLowerCase().includes(q)
+      || userPositionLabel(u).toLowerCase().includes(q);
+  });
+}
+
 // Права определяются строго ролью из актуального массива users.
 // Ни сессия, ни LocalStorage не могут «подарить» доступ: роль всегда
 // перечитывается из последних данных (после поллинга/гидрации).
@@ -67,7 +97,8 @@ function addUser(data) {
     login: data.login.trim(),
     password: data.password,
     role: data.role === 'admin' ? 'admin' : 'user',
-    name: (data.name || '').trim() || data.login.trim()
+    name: (data.name || '').trim() || data.login.trim(),
+    position: (data.position || '').trim()
   });
   saveUsers();
   return { ok: true };
@@ -91,6 +122,7 @@ function updateUser(id, data) {
   if (data.password) u.password = data.password;
   u.role = newRole;
   u.name = (data.name || '').trim() || newLogin;
+  u.position = (data.position || '').trim();
 
   // Если правим текущего пользователя — обновляем сессию
   if (currentUser && currentUser.id === id) {

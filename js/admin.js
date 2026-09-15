@@ -533,13 +533,14 @@ function renderAdminUsers() {
       <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:auto;">
         <table class="admin-table">
           <thead><tr>
-            <th>Логин</th><th>Имя</th><th>Пароль</th><th>Роль</th><th style="text-align:right;">Действия</th>
+            <th>Логин</th><th>ФИО</th><th>Должность</th><th>Пароль</th><th>Роль</th><th style="text-align:right;">Действия</th>
           </tr></thead>
           <tbody>
             ${users.map(u => `
               <tr style="cursor:default;">
                 <td><strong>${escapeHtml(u.login)}</strong></td>
                 <td>${escapeHtml(u.name || '—')}</td>
+                <td>${escapeHtml((u.position || '').trim() || '—')}</td>
                 <td><span style="font-family:'Courier New',monospace;">${escapeHtml(u.password)}</span></td>
                 <td>${u.role === 'admin'
                   ? '<span class="badge" style="background:#dbeafe;color:#1e40af;">Администратор</span>'
@@ -563,6 +564,7 @@ function openUserModal(id = null) {
   document.getElementById('userId').value = u ? u.id : '';
   document.getElementById('userLogin').value = u ? u.login : '';
   document.getElementById('userName').value = u ? (u.name || '') : '';
+  document.getElementById('userPosition').value = u ? (u.position || '') : '';
   const pwdInput = document.getElementById('userPassword');
   pwdInput.value = u ? u.password : ''; // существующий пароль не сбрасываем
   pwdInput.placeholder = u ? 'Введите новый, если хотите сменить' : 'Пароль';
@@ -576,6 +578,7 @@ function saveUser(e) {
   const data = {
     login: document.getElementById('userLogin').value,
     name: document.getElementById('userName').value,
+    position: document.getElementById('userPosition').value,
     password: document.getElementById('userPassword').value,
     role: document.getElementById('userRole').value
   };
@@ -846,6 +849,9 @@ function injectAdminModals() {
           <div class="form-section">
             <div class="form-row"><div class="form-group"><label>Логин *</label><input type="text" id="userLogin" required></div></div>
             <div class="form-row"><div class="form-group"><label>Имя (отображаемое)</label><input type="text" id="userName"></div></div>
+            <div class="form-row"><div class="form-group"><label>Должность</label>
+              <input type="text" id="userPosition" placeholder="Например, менеджер по продажам">
+            </div></div>
             <div class="form-row"><div class="form-group"><label>Пароль *</label><input type="password" id="userPassword" required></div></div>
             <div class="form-row">
               <div class="form-group"><label>Роль</label>

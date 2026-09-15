@@ -138,7 +138,7 @@ async function importContactsFromExcel(event) {
   if (!file) return;
 
   try {
-    const rows = await parseContactFile(file);
+    const rows = await parseSpreadsheetFile(file);
     const imported = buildContactsFromRows(rows, currentContactsSubsection);
     if (imported.length === 0) {
       renderContacts();
@@ -155,7 +155,9 @@ async function importContactsFromExcel(event) {
   }
 }
 
-async function parseContactFile(file) {
+// Разбор файла таблицы в массив строк. Используется и справочником
+// контактов, и импортом клиентов (js/clients.js).
+async function parseSpreadsheetFile(file) {
   const lower = file.name.toLowerCase();
   if (lower.endsWith('.xlsx') || lower.endsWith('.xls')) {
     if (typeof XLSX === 'undefined') {
@@ -218,17 +220,49 @@ function parseCsv(text) {
   return rows;
 }
 
+// Колонки определяем по заголовку, а не по порядку: шаблоны отличаются
+// («ФИО, Отдел, Номер, Должность» против «Имя, Отдел, Должность, Номер»),
+// и при позиционном разборе номер попадал в должность, а должность — в номер.
+const CONTACT_COLUMN_ALIASES = {
+  name: ['фио', 'ф.и.о.', 'ф и о', 'имя', 'фамилия', 'name', 'fio', 'контактное лицо'],
+  department: ['отдел', 'департамент', 'подразделение', 'department'],
+  number: ['номер', 'телефон', 'тел', 'телефон номер', 'phone', 'номер телефона'],
+  position: ['должность', 'позиция', 'position']
+};
+
+function resolveContactColumns(headerRow) {
+  const headers = (headerRow || []).map(v => cleanCell(v).toLowerCase());
+  const map = {};
+  Object.keys(CONTACT_COLUMN_ALIASES).forEach(key => {
+    const idx = headers.findIndex(h => h && CONTACT_COLUMN_ALIASES[key].indexOf(h) > -1);
+    if (idx > -1) map[key] = idx;
+  });
+  return map;
+}
+
 function buildContactsFromRows(rows, type) {
   const result = [];
   let maxId = contacts.reduce((m, c) => Math.max(m, c.id || 0), 0);
-  const start = rows.length && isHeaderRow(rows[0]) ? 1 : 0;
+  if (!rows.length) return result;
+
+  const map = resolveContactColumns(rows[0]);
+  // Заголовок распознан, если нашлась хотя бы одна известная колонка.
+  const hasHeader = Object.keys(map).length > 0 || isHeaderRow(rows[0]);
+  const start = hasHeader ? 1 : 0;
+  // Незнакомые колонки берём по прежнему порядку.
+  const col = {
+    name: map.name !== undefined ? map.name : 0,
+    department: map.department !== undefined ? map.department : 1,
+    number: map.number !== undefined ? map.number : 2,
+    position: map.position !== undefined ? map.position : 3
+  };
 
   for (let i = start; i < rows.length; i++) {
     const row = rows[i];
-    const name = cleanCell(row[0]);
-    const department = cleanCell(row[1]);
-    const number = cleanCell(row[2]);
-    const position = cleanCell(row[3]);
+    const name = cleanCell(row[col.name]);
+    const department = cleanCell(row[col.department]);
+    const number = cleanCell(row[col.number]);
+    const position = cleanCell(row[col.position]);
     if (!name && !number) continue; // пустая строка
 
     result.push({

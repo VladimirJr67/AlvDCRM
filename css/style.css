@@ -422,3 +422,160 @@ select[multiple] option:checked { background: #3b82f6; color: #fff; }
 .integration-msg { font-size: 12px; margin-top: 10px; padding: 8px 10px; border-radius: 6px; display: none; }
 .integration-msg.ok { display: block; background: #d1fae5; color: #065f46; }
 .integration-msg.err { display: block; background: #fee2e2; color: #991b1b; }
+
+/* ============================================================
+   Быстрые действия в боковом меню
+   ============================================================ */
+.quick-actions { display: flex; flex-direction: column; gap: 8px; padding: 0 16px 14px; border-bottom: 1px solid #e5e7eb; }
+.quick-btn {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 12px;
+  border: 1px solid #d0d5dd; border-radius: 8px; background: #fff; color: #1a3a5c;
+  font-size: 12.5px; font-weight: 500; cursor: pointer; text-align: left; transition: all .15s;
+}
+.quick-btn:hover { border-color: #3b82f6; background: #eff6ff; }
+.quick-btn-icon { font-size: 14px; }
+
+/* ============================================================
+   Напоминания: адаптивная раскладка без центральной колонки
+   ============================================================ */
+.reminders-page { padding: 22px 24px 30px; width: 100%; box-sizing: border-box; }
+.reminders-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+.reminders-head-text h1 { font-size: 22px; font-weight: 600; color: #1a3a5c; }
+.reminders-sub { font-size: 12px; color: #9ca3af; margin-top: 4px; }
+.reminders-head-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.reminders-scope-filter {
+  padding: 8px 10px; border: 1px solid #d0d5dd; border-radius: 6px;
+  font-size: 13px; background: #fff; color: #374151; outline: none; cursor: pointer;
+}
+.reminders-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 22px; }
+.reminders-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 22px; align-items: start; }
+.reminders-main { min-width: 0; display: flex; flex-direction: column; gap: 22px; }
+.reminders-side { min-width: 0; }
+.reminders-group-title { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+.reminders-group-count { background: #f3f4f6; color: #6b7280; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 10px; }
+.reminders-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.reminders-empty { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 40px 24px; text-align: center; color: #9ca3af; }
+.reminders-empty h2 { font-size: 15px; color: #4b5563; margin-bottom: 6px; }
+.reminders-empty p { font-size: 12px; }
+
+/* Карточка напоминания */
+.reminder-card {
+  background: #fff; border: 1px solid #e5e7eb; border-left: 4px solid #10b981; border-radius: 10px;
+  padding: 14px; box-shadow: 0 1px 3px rgba(16,24,40,.06);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.reminder-card.done { opacity: .65; }
+.reminder-card.overdue { background: #fffbfb; }
+.reminder-card-head { display: flex; align-items: flex-start; gap: 9px; }
+.reminder-card-check { width: 15px; height: 15px; margin-top: 2px; cursor: pointer; flex-shrink: 0; }
+.reminder-card-title { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 500; color: #111; line-height: 1.35; word-break: break-word; }
+.reminder-card.done .reminder-card-title { text-decoration: line-through; }
+.reminder-card-actions { display: flex; gap: 2px; flex-shrink: 0; }
+.reminder-card-text { font-size: 12px; color: #6b7280; line-height: 1.45; }
+.reminder-card-when { font-size: 12px; color: #6b7280; }
+.reminder-card-when.overdue { color: #ef4444; font-weight: 500; }
+.reminder-card-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+.reminder-chip { font-size: 10.5px; font-weight: 600; padding: 2px 8px; border-radius: 10px; }
+.reminder-chip-scope { background: #f3f4f6; color: #6b7280; }
+.reminder-client-link { font-size: 11.5px; color: #3b82f6; text-decoration: none; }
+.reminder-client-link:hover { text-decoration: underline; }
+
+/* Календарь напоминаний */
+.reminders-calendar { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 14px; box-shadow: 0 1px 3px rgba(16,24,40,.06); }
+.reminders-calendar-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.reminders-calendar-head span { font-weight: 600; font-size: 13.5px; color: #1a3a5c; }
+.reminders-calendar-head button { background: none; border: none; cursor: pointer; font-size: 18px; color: #6b7280; line-height: 1; padding: 0 6px; border-radius: 5px; }
+.reminders-calendar-head button:hover { background: #f3f4f6; color: #1a3a5c; }
+.reminders-calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center; }
+.reminders-calendar-dow { font-size: 10.5px; color: #9ca3af; padding: 4px 0; font-weight: 500; }
+.reminders-calendar-day { cursor: pointer; padding: 3px 2px; border-radius: 5px; min-height: 38px; }
+.reminders-calendar-day:hover { background: #f3f4f6; }
+.reminders-calendar-day.selected { background: #eff6ff; }
+.reminders-calendar-num { font-size: 12px; color: #374151; }
+.reminders-calendar-day.today .reminders-calendar-num { color: #3b82f6; font-weight: 700; }
+.reminders-calendar-dots { display: flex; gap: 2px; justify-content: center; flex-wrap: wrap; margin-top: 2px; min-height: 5px; }
+.reminders-calendar-dots span { width: 5px; height: 5px; border-radius: 50%; display: inline-block; }
+
+/* На узком экране календарь уходит наверх и раскладка становится одноколоночной */
+@media (max-width: 1200px) {
+  .reminders-layout { grid-template-columns: minmax(0, 1fr); }
+  .reminders-side { order: -1; }
+}
+@media (max-width: 700px) {
+  .reminders-page { padding: 16px 14px 24px; }
+  .reminders-list { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ============================================================
+   Всплывающее уведомление о напоминании
+   ============================================================ */
+.toast-host { position: fixed; right: 18px; bottom: 18px; z-index: 500; display: flex; flex-direction: column; gap: 10px; max-width: 340px; }
+.toast {
+  background: #fff; border: 1px solid #e5e7eb; border-left: 4px solid #f59e0b; border-radius: 10px;
+  box-shadow: 0 12px 34px rgba(16,24,40,.18); padding: 12px 14px; animation: toast-in .18s ease-out;
+}
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.toast-head { display: flex; align-items: center; gap: 7px; font-size: 12px; color: #6b7280; }
+.toast-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.toast-close { margin-left: auto; background: none; border: none; color: #9ca3af; cursor: pointer; font-size: 12px; padding: 0 2px; }
+.toast-close:hover { color: #ef4444; }
+.toast-title { font-size: 13.5px; font-weight: 600; color: #111; margin-top: 6px; }
+.toast-text { font-size: 12px; color: #6b7280; margin-top: 4px; line-height: 1.4; }
+.toast-meta { font-size: 11px; color: #9ca3af; margin-top: 6px; }
+.toast-actions { display: flex; gap: 6px; margin-top: 10px; }
+
+/* ============================================================
+   Соисполнители (помощники) задачи
+   ============================================================ */
+.coassignee-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; min-height: 24px; align-items: center; }
+.coassignee-empty { font-size: 12px; color: #9ca3af; }
+.coassignee-chip { display: inline-flex; align-items: center; gap: 6px; background: #e0f2fe; color: #075985; font-size: 12px; font-weight: 500; padding: 3px 6px 3px 10px; border-radius: 12px; }
+.coassignee-chip button { background: none; border: none; color: #0284c7; cursor: pointer; font-size: 11px; line-height: 1; padding: 0 2px; }
+.coassignee-chip button:hover { color: #ef4444; }
+.coassignee-hint { font-size: 11px; color: #9ca3af; font-weight: 400; margin-left: 6px; }
+
+/* ============================================================
+   Переключатель типа напоминания
+   ============================================================ */
+.scope-switch { display: flex; border: 1px solid #d0d5dd; border-radius: 6px; overflow: hidden; }
+.scope-option { flex: 1; position: relative; }
+.scope-option input { position: absolute; opacity: 0; pointer-events: none; }
+.scope-option span { display: block; text-align: center; padding: 8px 6px; font-size: 12.5px; color: #4b5563; cursor: pointer; background: #fff; }
+.scope-option + .scope-option span { border-left: 1px solid #d0d5dd; }
+.scope-option input:checked + span { background: #1a3a5c; color: #fff; font-weight: 500; }
+
+/* ============================================================
+   Индикатор напоминаний в карточке клиента
+   ============================================================ */
+.client-reminder-dot {
+  display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-left: 7px;
+  vertical-align: middle; box-shadow: 0 0 0 2px #fff, 0 0 0 3px rgba(0,0,0,.06);
+}
+.client-reminder-badge {
+  display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600;
+  padding: 2px 9px; border-radius: 12px; border: 1px solid transparent;
+}
+
+/* ============================================================
+   Импорт: сообщение о результате
+   ============================================================ */
+.import-result { margin-bottom: 12px; padding: 9px 12px; border-radius: 6px; font-size: 12.5px; }
+.import-result.ok { background: #d1fae5; color: #065f46; }
+.import-result.error { background: #fee2e2; color: #991b1b; }
+
+/* ============================================================
+   Раздел «Новости»
+   ============================================================ */
+.news-page { padding: 22px 24px 30px; width: 100%; box-sizing: border-box; }
+.news-head { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+.news-head h1 { font-size: 22px; font-weight: 600; color: #1a3a5c; }
+.news-badge { font-size: 11px; font-weight: 600; color: #92400e; background: #fef3c7; border: 1px solid #fde68a; border-radius: 12px; padding: 2px 10px; }
+.news-empty { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; box-shadow: 0 1px 3px rgba(16,24,40,.06); padding: 50px 24px; text-align: center; max-width: 720px; }
+.news-empty-icon { font-size: 34px; margin-bottom: 10px; }
+.news-empty h2 { font-size: 16px; color: #374151; margin-bottom: 8px; }
+.news-empty p { font-size: 12.5px; color: #6b7280; line-height: 1.6; }
+.news-list { display: grid; gap: 12px; max-width: 900px; }
+.news-item { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px; box-shadow: 0 1px 3px rgba(16,24,40,.06); }
+.news-item-date { font-size: 11px; color: #9ca3af; margin-bottom: 4px; }
+.news-item h3 { font-size: 14.5px; color: #1a3a5c; margin-bottom: 6px; }
+.news-item p { font-size: 12.5px; color: #6b7280; line-height: 1.5; }

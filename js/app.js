@@ -27,6 +27,7 @@ const MENU_ICONS = {
   reminders: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg>',
   contacts: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/><path d="M2 21v-2a4 4 0 013-3.87M8 3.13a4 4 0 010 7.75"/></svg>',
   notifications: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg>',
+  news: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 22h16a2 2 0 002-2V4a2 2 0 00-2-2H8a2 2 0 00-2 2v16a2 2 0 01-2 2zm0 0a2 2 0 01-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8M15 18h-5M10 6h8v4h-8z"/></svg>',
   admin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>'
 };
 
@@ -56,6 +57,7 @@ function buildSidebar() {
   html += addItem('clients', 'Клиенты');
   html += addItem('tasks', 'Задачи', { badge: 'tasksMenuBadge' });
   html += addItem('reminders', 'Напоминания');
+  html += addItem('news', 'Новости');
   html += addItem('contacts', 'Контакты', { submenu: [
     { section: 'contacts-internal', label: 'Внутренние' },
     { section: 'contacts-mobile', label: 'Мобильные' }
@@ -170,6 +172,14 @@ async function enterApp() {
 
   renderSection(currentSection);
   startPolling();
+  // Проверка напоминаний: в назначенное время показывает всплывающее уведомление.
+  startReminderWatcher();
+}
+
+// Переход в раздел по имени (используется кнопками и всплывающими уведомлениями).
+function goToSection(section) {
+  setActiveMenuState(section);
+  renderSection(section);
 }
 
 // Предупреждение при открытии как файла (file://): реальное время и общая
@@ -358,8 +368,11 @@ function injectModals() {
     </div>
 
     <div class="modal-overlay" id="reminderModal">
-      <div class="modal">
-        <h2 id="reminderModalTitle">Новое напоминание</h2>
+      <div class="modal" style="width:660px;">
+        <div class="modal-head">
+          <h2 id="reminderModalTitle">Новое напоминание</h2>
+          <button type="button" class="modal-close-icon" onclick="closeModal('reminderModal')" title="Закрыть" aria-label="Закрыть">✕</button>
+        </div>
         <form onsubmit="saveReminder(event)">
           <input type="hidden" id="reminderId">
           <input type="hidden" id="reminderClientId">
@@ -371,26 +384,26 @@ function injectModals() {
               <div class="form-group"><label>Время *</label><input type="time" id="reminderTime" required></div>
             </div>
             <div class="form-row">
-              <div class="form-group"><label>Цвет</label><select id="reminderColor"></select></div>
-            </div>
-            <div class="form-row">
-              <div class="form-group client-typeahead-group">
-                <label>Клиент (компания)</label>
-                <input type="text" id="reminderClientSearch" placeholder="Начните вводить название компании..." autocomplete="off"
-                       oninput="onReminderClientSearch()" onfocus="onReminderClientSearch()"
-                       style="width:100%;padding:7px 9px;border:1px solid #d0d5dd;border-radius:5px;font-size:12px;">
-                <div class="client-typeahead-dropdown" id="reminderClientDropdown"></div>
+              <div class="form-group">
+                <label>Тип напоминания</label>
+                <div class="scope-switch">
+                  <label class="scope-option"><input type="radio" name="reminderScope" value="self" checked onchange="onReminderScopeChange()"><span>Для себя</span></label>
+                  <label class="scope-option"><input type="radio" name="reminderScope" value="client" onchange="onReminderScopeChange()"><span>Для клиента</span></label>
+                </div>
+                <div style="font-size:11px;color:#9ca3af;margin-top:5px;">Личные напоминания видите только вы.</div>
+              </div>
+              <div class="form-group">
+                <label>Важность</label>
+                <select id="reminderLevel"></select>
+                <div style="font-size:11px;color:#9ca3af;margin-top:5px;">Цвет индикатора в карточке клиента.</div>
               </div>
             </div>
-            <div class="form-row">
-              <div class="form-group">
-                <label>Назначить</label>
-                <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-                  <input type="checkbox" id="reminderAssignMe" style="width:16px;height:16px;">
-                  <label for="reminderAssignMe" style="margin:0;font-size:13px;cursor:pointer;">Я (${currentUser ? escapeHtml(currentUser.login) : ''})</label>
-                </div>
-                <select id="reminderAssignees" multiple style="min-height:100px;"></select>
-                <div style="font-size:11px;color:#9ca3af;margin-top:4px;">Ctrl+клик для нескольких</div>
+            <div class="form-row" id="reminderClientRow" style="display:none;">
+              <div class="form-group client-typeahead-group">
+                <label>Клиент (компания) *</label>
+                <input type="text" id="reminderClientSearch" placeholder="Начните вводить название компании..." autocomplete="off"
+                       oninput="onReminderClientSearch()" onfocus="onReminderClientSearch()">
+                <div class="client-typeahead-dropdown" id="reminderClientDropdown"></div>
               </div>
             </div>
             <div id="reminderClientLink" style="display:none;font-size:13px;color:#6b7280;padding:8px;background:#f9fafb;border-radius:6px;margin-top:8px;"></div>
@@ -433,14 +446,19 @@ function injectModals() {
               </div>
             </div>
             <div class="form-row">
+              <div class="form-group client-typeahead-group">
+                <label>Соисполнитель (помощник)</label>
+                <input type="text" id="coAssigneeSearch" placeholder="Начните вводить ФИО или должность коллеги..."
+                       autocomplete="off" oninput="onCoAssigneeSearch()" onfocus="onCoAssigneeSearch()">
+                <div class="client-typeahead-dropdown" id="coAssigneeDropdown"></div>
+              </div>
+            </div>
+            <div class="form-row">
               <div class="form-group">
-                <label>Назначить (исполнители в канбане)</label>
-                <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-                  <input type="checkbox" id="taskAssignMe" style="width:16px;height:16px;">
-                  <label for="taskAssignMe" style="margin:0;font-size:13px;cursor:pointer;">Я (${currentUser ? escapeHtml(currentUser.login) : ''})</label>
+                <div class="coassignee-chips" id="coAssigneeChips"></div>
+                <div style="font-size:11px;color:#9ca3af;">
+                  Помощник получит уведомление, а задача появится у него в столбце «Совместные задачи».
                 </div>
-                <select id="taskAssignees" multiple style="min-height:100px;"></select>
-                <div style="font-size:11px;color:#9ca3af;margin-top:4px;">Ctrl+клик для нескольких</div>
               </div>
             </div>
             <div id="taskClientLink" style="display:none;font-size:13px;color:#6b7280;padding:8px;background:#f9fafb;border-radius:6px;margin-top:8px;"></div>
@@ -489,7 +507,10 @@ function renderSection(section) {
           <div class="clients-top-header">
             <div class="main-header">
               <h1>Клиенты</h1>
-              <div style="display:flex;gap:6px;">
+              <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                <input type="file" id="clientsFileInput" accept=".xlsx,.xls,.csv" style="display:none" onchange="importClientsFromExcel(event)">
+                <button class="btn btn-sm btn-secondary" onclick="document.getElementById('clientsFileInput').click()" title="Импортировать клиентов из Excel или CSV по шаблону">Импорт</button>
+                <button class="btn btn-sm btn-secondary" onclick="downloadClientsTemplate()" title="Скачать шаблон импорта с примером заполнения">Шаблон</button>
                 <button class="btn btn-sm btn-secondary" onclick="exportClientsExcel()" title="Выгрузить текущий список клиентов в Excel">Экспорт</button>
                 <button class="btn btn-sm btn-danger" onclick="deleteSelectedClient()">Удалить</button>
                 <button class="btn" onclick="openClientModal()">+ Добавить</button>
@@ -499,6 +520,7 @@ function renderSection(section) {
               ${managerPickerHtml()}
               <input type="text" class="search-bar" id="searchInput" placeholder="Поиск по названию, сайту, почте, телефону, адресу, ИНН/ОГРН..." oninput="scheduleClientsSearch()" style="margin-bottom:0;flex:1;">
             </div>
+            <div id="clientsImportResult" class="import-result" style="display:none;"></div>
           </div>
           <div class="clients-top-content" id="tableWrap"></div>
         </div>
@@ -531,6 +553,8 @@ function renderSection(section) {
     renderTasks();
   } else if (section === 'notifications') {
     renderNotifications();
+  } else if (section === 'news') {
+    renderNews();
   } else if (section.startsWith('admin')) {
     if (!isAdmin()) {
       main.innerHTML = `<div class="placeholder"><h2>Доступ запрещён</h2><p>У вас нет прав на этот раздел</p></div>`;

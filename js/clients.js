@@ -252,7 +252,7 @@ function renderClientsTable() {
       ? (countryName(c.orgCountry) || c.orgCountry)
       : '';
     html += `<tr onclick="selectClient(${c.id})" ondblclick="openClientCard(${c.id})" class="${selectedClientId === c.id ? 'selected' : ''}">
-      <td><strong>${escapeHtml(c.orgName)}</strong></td>
+      <td><strong>${escapeHtml(c.orgName)}</strong>${clientReminderDotHtml(c.id)}</td>
       <td><span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:12px;height:12px;background:${st.color};border-radius:2px;display:inline-block;flex-shrink:0;"></span>${escapeHtml(st.label)}</span></td>
       <td>${escapeHtml(c.orgDirection || '—')}</td>
       <td>${escapeHtml(c.orgCity || '—')}${otherCountry ? ` <span style="color:#9ca3af;font-size:11px;">(${escapeHtml(otherCountry)})</span>` : ''}</td>
@@ -555,6 +555,7 @@ function renderClientCard(id) {
               <span>ID: ${client.id}</span>
               <span class="cc-sep">|</span>
               <span>Менеджер: <strong>${escapeHtml(managerName)}</strong></span>
+              ${clientReminderBadgeHtml(client.id)}
             </div>
           </div>
           <div class="cc-actions">
@@ -1030,12 +1031,12 @@ function openTaskModalWithClient(clientId) {
     `<option value="${c.id}">${escapeHtml(c.name)}</option>`
   ).join('');
   
-  const meCheckbox = document.getElementById('taskAssignMe');
-  const assigneesSelect = document.getElementById('taskAssignees');
-  meCheckbox.checked = false;
-  assigneesSelect.innerHTML = contacts.map(c => 
-    `<option value="${c.id}">${escapeHtml(c.name)} (${escapeHtml(c.department || '—')})</option>`
-  ).join('');
+  // Форма открыта для конкретного клиента: помощники ещё не выбраны.
+  taskCoAssignees = [];
+  const coAssigneeInput = document.getElementById('coAssigneeSearch');
+  if (coAssigneeInput) coAssigneeInput.value = '';
+  hideCoAssigneeDropdown();
+  renderCoAssigneeChips();
   
   const client = clients.find(c => c.id === clientId);
   const clientLink = document.getElementById('taskClientLink');
@@ -1185,6 +1186,202 @@ async function fillClientByInn() {
   if (p.management) bits.push('Руководитель: ' + p.management);
   if (p.status) bits.push('Статус в ЕГРЮЛ: ' + p.status);
   setInnStatus('Реквизиты заполнены.' + (bits.length ? ' ' + bits.join(' · ') : ''), 'ok');
+}
+
+/* ===== Импорт клиентов из Excel/CSV =====
+   Колонки ищутся по названиям, а не по порядку, поэтому шаблон можно
+   дополнять и переставлять столбцы. Файл читается тем же разбором,
+   что и справочник контактов (js/contacts.js). */
+
+const CLIENT_IMPORT_COLUMNS = [
+  'Организация', 'Страна', 'Город', 'Тип организации', 'Статус', 'Адрес',
+  'Телефоны', 'Email', 'Сайт', 'ИНН', 'ОГРН',
+  'Контактное лицо', 'Должность', 'Телефон контакта', 'Email контакта'
+];
+
+// Синонимы заголовков: в чужих файлах колонки часто названы иначе.
+const CLIENT_IMPORT_ALIASES = {
+  'Организация': ['организация', 'название', 'название организации', 'компания', 'наименование', 'клиент'],
+  'Страна': ['страна'],
+  'Город': ['город'],
+  'Тип организации': ['тип организации', 'тип', 'направление'],
+  'Статус': ['статус'],
+  'Адрес': ['адрес', 'адрес организации'],
+  'Телефоны': ['телефоны', 'телефон', 'тел'],
+  'Email': ['email', 'почта', 'электронная почта'],
+  'Сайт': ['сайт', 'сайт организации', 'website'],
+  'ИНН': ['инн'],
+  'ОГРН': ['огрн'],
+  'Контактное лицо': ['контактное лицо', 'фио', 'контакт', 'основной контакт'],
+  'Должность': ['должность'],
+  'Телефон контакта': ['телефон контакта', 'сотовый', 'мобильный', 'телефон контактного лица'],
+  'Email контакта': ['email контакта', 'почта контакта']
+};
+
+const CLIENT_STATUS_ALIASES = {
+  cooperation: ['сотрудничество', 'работаем', 'cooperation'],
+  in_progress: ['в работе', 'в процессе', 'in_progress'],
+  not_working: ['не прорабатывать', 'не работаем', 'not_working']
+};
+
+function normalizeImportHeader(value) {
+  return String(value == null ? '' : value).trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function parseClientStatus(value) {
+  const v = String(value || '').trim().toLowerCase();
+  if (!v) return 'cooperation';
+  const found = Object.keys(CLIENT_STATUS_ALIASES).find(k => CLIENT_STATUS_ALIASES[k].indexOf(v) > -1);
+  return found || 'cooperation';
+}
+
+function resolveCountryCode(value) {
+  const v = String(value || '').trim();
+  if (!v) return DEFAULT_COUNTRY;
+  if (countryExists(v.toUpperCase())) return v.toUpperCase();
+  const byName = COUNTRIES.find(c => c.name.toLowerCase() === v.toLowerCase());
+  return byName ? byName.code : DEFAULT_COUNTRY;
+}
+
+// Соответствие «колонка шаблона → индекс в файле».
+function resolveClientImportColumns(headerRow) {
+  const headers = (headerRow || []).map(normalizeImportHeader);
+  const map = {};
+  CLIENT_IMPORT_COLUMNS.forEach(col => {
+    const aliases = CLIENT_IMPORT_ALIASES[col] || [normalizeImportHeader(col)];
+    const idx = headers.findIndex(h => h && aliases.indexOf(h) > -1);
+    if (idx > -1) map[col] = idx;
+  });
+  return map;
+}
+
+function buildClientsFromRows(rows) {
+  if (!rows.length) return { list: [], skipped: 0 };
+
+  const map = resolveClientImportColumns(rows[0]);
+  if (map['Организация'] === undefined) {
+    throw new Error('в файле не найдена колонка «Организация» — скачайте шаблон кнопкой «Шаблон»');
+  }
+
+  const list = [];
+  let maxId = clients.reduce((m, c) => Math.max(m, c.id || 0), 0);
+  let skipped = 0;
+
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    const cell = (col) => {
+      const idx = map[col];
+      if (idx === undefined) return '';
+      const raw = row[idx];
+      return (raw === undefined || raw === null) ? '' : cleanCell(raw);
+    };
+
+    const orgName = cell('Организация');
+    if (!orgName) { skipped++; continue; }
+
+    const contactName = cell('Контактное лицо');
+    const contacts = contactName ? [{
+      name: contactName,
+      position: cell('Должность'),
+      phoneWork: '',
+      phoneMobile: cell('Телефон контакта'),
+      email: cell('Email контакта'),
+      messengers: []
+    }] : [];
+
+    list.push({
+      id: ++maxId,
+      orgName: orgName,
+      orgCountry: resolveCountryCode(cell('Страна')),
+      orgCity: cell('Город'),
+      orgDirection: cell('Тип организации'),
+      orgAddress: cell('Адрес'),
+      orgPhones: cell('Телефоны'),
+      orgStatus: parseClientStatus(cell('Статус')),
+      orgEmails: cell('Email'),
+      orgWebsite: cell('Сайт'),
+      orgInn: cell('ИНН'),
+      orgOgrn: cell('ОГРН'),
+      contacts: contacts,
+      history: [],
+      createdBy: currentUser ? currentUser.id : null
+    });
+  }
+
+  return { list: list, skipped: skipped };
+}
+
+async function importClientsFromExcel(event) {
+  const file = event.target.files && event.target.files[0];
+  event.target.value = '';
+  if (!file) return;
+
+  try {
+    const rows = await parseSpreadsheetFile(file);
+    const result = buildClientsFromRows(rows);
+
+    if (!result.list.length) {
+      showClientsImportResult('В файле нет ни одной строки с названием организации. Проверьте шаблон.', true);
+      return;
+    }
+
+    // Значения из файла пополняют общие справочники.
+    result.list.forEach(c => {
+      if (c.orgDirection) dictAdd('orgTypes', c.orgDirection);
+      (c.contacts || []).forEach(ct => { if (ct.position) dictAdd('positions', ct.position); });
+    });
+
+    clients = clients.concat(result.list);
+    saveClients(clients);
+    renderClientsTable();
+
+    showClientsImportResult(
+      'Импортировано клиентов: ' + result.list.length +
+      (result.skipped ? '. Пропущено строк без названия: ' + result.skipped : ''),
+      false
+    );
+  } catch (err) {
+    showClientsImportResult('Ошибка при импорте: ' + err.message, true);
+  }
+}
+
+// Шаблон с нужными колонками и примером заполнения.
+function downloadClientsTemplate() {
+  if (typeof XLSX === 'undefined') {
+    alert('Библиотека экспорта Excel не загружена.');
+    return;
+  }
+  const example = {
+    'Организация': 'ООО «Пример»',
+    'Страна': 'Россия',
+    'Город': 'Москва',
+    'Тип организации': 'Оптовая торговля',
+    'Статус': 'В работе',
+    'Адрес': 'г. Москва, ул. Примерная, д. 1',
+    'Телефоны': '+7 495 000-00-00',
+    'Email': 'info@example.ru',
+    'Сайт': 'example.ru',
+    'ИНН': '7707083893',
+    'ОГРН': '1027700132195',
+    'Контактное лицо': 'Иванов Иван Иванович',
+    'Должность': 'Директор',
+    'Телефон контакта': '+7 916 000-00-00',
+    'Email контакта': 'ivanov@example.ru'
+  };
+  const ws = XLSX.utils.json_to_sheet([example], { header: CLIENT_IMPORT_COLUMNS });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Клиенты');
+  XLSX.writeFile(wb, 'Шаблон_импорта_клиентов.xlsx');
+}
+
+function showClientsImportResult(text, isError) {
+  const el = document.getElementById('clientsImportResult');
+  if (!el) return;
+  el.style.display = 'block';
+  el.className = 'import-result ' + (isError ? 'error' : 'ok');
+  el.textContent = text;
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => { el.style.display = 'none'; }, 9000);
 }
 
 /* ===== Совместимость со старыми записями =====

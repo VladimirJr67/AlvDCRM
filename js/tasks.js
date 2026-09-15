@@ -9,6 +9,9 @@
 let tasks = [];
 let taskColumns = [];
 
+// Соисполнители, выбранные в открытой форме задачи (id пользователей).
+let taskCoAssignees = [];
+
 const DEFAULT_COLUMNS = [
   { id: 'new', name: 'Новые', color: '#3b82f6' },
   { id: 'in_progress', name: 'В работе', color: '#f59e0b' },
@@ -85,16 +88,23 @@ function saveTaskColumns() {
   queueServerSave();
 }
 
+// Задачи, где текущий пользователь — соисполнитель (помощник).
+function isCoAssignee(task, uid) {
+  if (!task || !uid) return false;
+  return (task.coAssignees || []).indexOf(uid) > -1;
+}
+
 function visibleTasks() {
   if (!currentUser) return tasks;
   const uid = currentUser.id;
   if (isAdmin()) {
     // Личный канбан администратора — только собственные задачи, которые не
-    // назначены другим пользователям. Назначенные задачи админ отслеживает
-    // в разделе «Администрирование → Задачи».
-    return tasks.filter(t => t.ownerId === uid && (!t.assignedTo || t.assignedTo === uid));
+    // назначены другим пользователям, плюс задачи, где он соисполнитель.
+    // Назначенные задачи админ отслеживает в разделе «Администрирование → Задачи».
+    return tasks.filter(t =>
+      (t.ownerId === uid && (!t.assignedTo || t.assignedTo === uid)) || isCoAssignee(t, uid));
   }
-  return tasks.filter(t => t.ownerId === uid || t.assignedTo === uid);
+  return tasks.filter(t => t.ownerId === uid || t.assignedTo === uid || isCoAssignee(t, uid));
 }
 
 // Столбцы, задачи из которых считаются завершёнными.
@@ -147,6 +157,8 @@ function renderTasks() {
           ${sortedColumns.map(col => renderTaskColumn(col, boardTasks, canManageBoard)).join('')}
 
           ${renderAssignedColumn(boardTasks)}
+
+          ${renderCoopColumn(boardTasks)}
 
           ${canManageBoard ? `
             <div style="min-width:200px;flex-shrink:0;">
@@ -247,24 +259,63 @@ function assignmentStatusInfo(status) {
   return ASSIGNMENT_STATUSES.find(s => s.value === status) || ASSIGNMENT_STATUSES[0];
 }
 
+// Обязательная колонка «Совместные задачи»: задачи, где текущий пользователь
+// выбран соисполнителем. Как и «Назначенные задачи», это представление-фильтр,
+// а не отдельный статус: задача остаётся в своей колонке, но видна помощнику
+// отдельным столбцом — он есть у всех пользователей по умолчанию.
+function renderCoopColumn(boardTasks) {
+  const uid = currentUser ? currentUser.id : null;
+  const colTasks = boardTasks
+    .filter(t => isCoAssignee(t, uid))
+    .sort((a, b) => (a.order || 0) - (b.order || 0));
+  const fakeCol = { id: 'coop', name: 'Совместные задачи', coop: true };
+
+  return `
+    <div class="task-column coop-column" style="min-width:280px;max-width:280px;flex-shrink:0;display:flex;flex-direction:column;border-radius:10px;overflow:hidden;">
+      <div style="padding:12px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #e5e7eb;background:#fff;">
+        <div style="width:4px;height:20px;border-radius:2px;background:#0ea5e9;flex-shrink:0;"></div>
+        <div style="flex:1;font-weight:600;font-size:14px;color:#1a3a5c;">Совместные задачи</div>
+        <div style="background:#e0f2fe;color:#075985;font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px;">${colTasks.length}</div>
+        <span title="Задачи, где вы соисполнитель" style="color:#7dd3fc;font-size:12px;">👥</span>
+      </div>
+
+      <div style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:10px;display:flex;flex-direction:column;gap:10px;">
+        ${colTasks.length === 0
+          ? '<div style="font-size:12px;color:#9ca3af;text-align:center;padding:20px 10px;">Нет совместных задач</div>'
+          : colTasks.map(t => renderTaskCard(t, fakeCol)).join('')}
+      </div>
+    </div>
+  `;
+}
+
+// Инициалы из ФИО: «Иванов Иван» → «ИИ».
+function userInitials(name) {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '?';
+  return ((parts[0][0] || '') + (parts[1] ? parts[1][0] : '')).toUpperCase();
+}
+
 function canManageAssignment(task) {
   if (!currentUser) return false;
   if (isAdmin()) return true;
   return task.assignedTo === currentUser.id;
 }
 
+// Автор задачи — для подписи «от кого» в колонке совместных задач.
+function taskOwnerName(task) {
+  const u = task && task.ownerId ? findUserById(task.ownerId) : null;
+  return u ? (u.name || u.login) : '—';
+}
+
 function renderTaskCard(task, col) {
   const priority = TASK_PRIORITIES.find(p => p.value === task.priority) || TASK_PRIORITIES[1];
   const isOverdue = taskOverdue(task);
 
-  const assignees = (task.assignees || []).map(a => {
-    if (a.type === 'me') return { name: currentUser ? currentUser.login : 'Admin', initials: (currentUser ? currentUser.login[0] : 'A').toUpperCase() };
-    const contact = contacts.find(c => c.id === a.id);
-    if (contact) {
-      const parts = contact.name.split(' ');
-      return { name: contact.name, initials: (parts[0][0] + (parts[1]?.[0] || '')).toUpperCase().substring(0,2) };
-    }
-    return null;
+  // Соисполнители (помощники) — пользователи системы, а не контакты клиента.
+  const assignees = (task.coAssignees || []).map(id => {
+    const u = findUserById(id);
+    if (!u) return null;
+    return { name: userDisplayName(u), initials: userInitials(u.name || u.login) };
   }).filter(Boolean);
 
   const client = task.clientId ? clients.find(c => c.id === task.clientId) : null;
@@ -275,7 +326,7 @@ function renderTaskCard(task, col) {
   return `
     <div ${col.assigned ? '' : `draggable="true" ondragstart="handleDragStart(event, ${task.id})" ondragend="handleDragEnd(event)"`}
          onclick="openTaskModal(tasks.find(t=>t.id===${task.id}))"
-         style="background:#fff;border-radius:8px;padding:12px;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,0.08);border-left:3px solid ${col.assigned ? '#7c3aed' : priority.color};transition:all 0.15s;"
+         style="background:#fff;border-radius:8px;padding:12px;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,0.08);border-left:3px solid ${col.assigned ? '#7c3aed' : (col.coop ? '#0ea5e9' : priority.color)};transition:all 0.15s;"
          onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.12)'"
          onmouseout="this.style.boxShadow='0 1px 3px rgba(0,0,0,0.08)'">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:6px;">
@@ -293,6 +344,7 @@ function renderTaskCard(task, col) {
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
         ${task.deadline ? `<span style="font-size:11px;color:${isOverdue ? '#ef4444' : '#6b7280'};font-weight:${isOverdue ? '600' : '400'};">${formatDate(task.deadline)}</span>` : ''}
         ${client ? `<span style="font-size:11px;color:#3b82f6;">${escapeHtml(client.orgName)}</span>` : ''}
+        ${col.coop ? `<span style="font-size:11px;color:#0ea5e9;">от ${escapeHtml(taskOwnerName(task))}</span>` : ''}
       </div>
 
       ${assignInfo ? `
@@ -534,14 +586,12 @@ function openTaskModal(task = null, clientId = null, defaultColumn = null) {
     `<option value="${c.id}" ${task?.status === c.id || (!task && defaultColumn === c.id) ? 'selected' : ''}>${escapeHtml(c.name)}</option>`
   ).join('');
 
-  const meCheckbox = document.getElementById('taskAssignMe');
-  const assigneesSelect = document.getElementById('taskAssignees');
-  const hasMe = task?.assignees?.some(a => a.type === 'me');
-  meCheckbox.checked = hasMe || false;
-  assigneesSelect.innerHTML = contacts.map(c => {
-    const isSelected = task?.assignees?.some(a => a.type === 'contact' && a.id === c.id);
-    return `<option value="${c.id}" ${isSelected ? 'selected' : ''}>${escapeHtml(c.name)} (${escapeHtml(c.department || '—')})</option>`;
-  }).join('');
+  // Соисполнители: подсказки берутся из списка пользователей системы.
+  taskCoAssignees = (task?.coAssignees || []).slice();
+  const coInput = document.getElementById('coAssigneeSearch');
+  if (coInput) coInput.value = '';
+  hideCoAssigneeDropdown();
+  renderCoAssigneeChips();
 
   updateTaskContactSelect();
 
@@ -592,17 +642,81 @@ function unlinkTaskFromClient() {
   updateTaskContactSelect();
 }
 
+/* ===== Соисполнители (помощники) =====
+   Выбираются из пользователей системы — с ФИО и должностью и поиском по ним,
+   а не из контактов клиента. Выбранному коллеге уходит уведомление, а задача
+   появляется в его колонке «Совместные задачи». */
+
+function hideCoAssigneeDropdown() {
+  const dd = document.getElementById('coAssigneeDropdown');
+  if (dd) dd.style.display = 'none';
+}
+
+// Плашки выбранных помощников с возможностью убрать.
+function renderCoAssigneeChips() {
+  const box = document.getElementById('coAssigneeChips');
+  if (!box) return;
+  if (!taskCoAssignees.length) {
+    box.innerHTML = '<span class="coassignee-empty">Помощники не выбраны</span>';
+    return;
+  }
+  box.innerHTML = taskCoAssignees.map(id => {
+    const u = findUserById(id);
+    if (!u) return '';
+    return `<span class="coassignee-chip" title="${escapeHtml(userPositionLabel(u))}">
+      ${escapeHtml(userDisplayName(u))}
+      <button type="button" onclick="removeCoAssignee(${id})" title="Убрать помощника">✕</button>
+    </span>`;
+  }).join('');
+}
+
+function onCoAssigneeSearch() {
+  const input = document.getElementById('coAssigneeSearch');
+  const dd = document.getElementById('coAssigneeDropdown');
+  if (!input || !dd) return;
+
+  const found = searchUsers(input.value, taskCoAssignees).slice(0, 12);
+  if (!found.length) {
+    dd.innerHTML = '<div class="manager-option-empty">Коллеги не найдены</div>';
+    dd.style.display = 'block';
+    return;
+  }
+  dd.innerHTML = found.map(u => `
+    <div class="client-typeahead-item" data-coassignee="${u.id}">
+      <strong>${escapeHtml(u.name || u.login)}</strong>
+      <span class="coassignee-hint">${escapeHtml(userPositionLabel(u))}</span>
+    </div>`).join('');
+  dd.style.display = 'block';
+}
+
+function addCoAssignee(id) {
+  const uid = parseInt(id, 10);
+  if (!uid || taskCoAssignees.indexOf(uid) > -1) return;
+  taskCoAssignees.push(uid);
+  const input = document.getElementById('coAssigneeSearch');
+  if (input) { input.value = ''; input.focus(); }
+  hideCoAssigneeDropdown();
+  renderCoAssigneeChips();
+}
+
+function removeCoAssignee(id) {
+  const uid = parseInt(id, 10);
+  taskCoAssignees = taskCoAssignees.filter(x => x !== uid);
+  renderCoAssigneeChips();
+}
+
+// Клик по подсказке в списке коллег.
+document.addEventListener('click', (e) => {
+  if (!e.target || !e.target.closest) return;
+  const item = e.target.closest('[data-coassignee]');
+  if (item) addCoAssignee(item.dataset.coassignee);
+});
+
 function saveTask(e) {
   e.preventDefault();
   const id = document.getElementById('taskId').value;
   const clientIdVal = document.getElementById('taskClientId').value;
   const contactIdVal = document.getElementById('taskContactSelect').value;
-
-  const assignees = [];
-  if (document.getElementById('taskAssignMe').checked) assignees.push({ type: 'me' });
-  Array.from(document.getElementById('taskAssignees').selectedOptions).forEach(opt => {
-    assignees.push({ type: 'contact', id: parseInt(opt.value) });
-  });
 
   const data = {
     title: document.getElementById('taskTitle').value.trim(),
@@ -610,17 +724,22 @@ function saveTask(e) {
     deadline: document.getElementById('taskDeadline').value,
     priority: document.getElementById('taskPriority').value,
     status: document.getElementById('taskColumn').value,
-    assignees: assignees,
+    coAssignees: taskCoAssignees.slice(),
     clientId: clientIdVal ? parseInt(clientIdVal) : null,
     contactId: contactIdVal ? parseInt(contactIdVal) : null
   };
 
+  let task = null;
+  let previousCoAssignees = [];
+
   if (id) {
     const idx = tasks.findIndex(t => t.id === parseInt(id));
     if (idx !== -1) {
+      previousCoAssignees = (tasks[idx].coAssignees || []).slice();
       if (!tasks[idx].ownerId) tasks[idx].ownerId = currentUser ? currentUser.id : null;
       if (tasks[idx].status !== data.status) data.statusUpdatedAt = new Date().toISOString();
       tasks[idx] = { ...tasks[idx], ...data };
+      task = tasks[idx];
     }
   } else {
     const maxId = tasks.reduce((m, t) => Math.max(m, t.id || 0), 0);
@@ -630,6 +749,22 @@ function saveTask(e) {
     data.ownerId = currentUser ? currentUser.id : null;
     data.order = tasks.filter(t => t.status === data.status).length;
     tasks.push(data);
+    task = data;
+  }
+
+  // Новым соисполнителям уходит уведомление (себе — не отправляем).
+  if (task) {
+    const meId = currentUser ? currentUser.id : null;
+    data.coAssignees.forEach(uid => {
+      if (uid === meId) return;
+      if (previousCoAssignees.indexOf(uid) > -1) return;
+      notifyUser(
+        uid,
+        'Вы соисполнитель задачи «' + data.title + '»',
+        'Задача появилась у вас в столбце «Совместные задачи».',
+        task.id
+      );
+    });
   }
 
   saveTasks();
