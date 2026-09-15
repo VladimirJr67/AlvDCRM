@@ -66,7 +66,8 @@ function buildSidebar() {
       { section: 'admin-analysis', label: 'Анализ' },
       { section: 'admin-users', label: 'Пользователи' },
       { section: 'admin-assignments', label: 'Задачи' },
-      { section: 'admin-interaction-types', label: 'Типы взаимодействий' }
+      { section: 'admin-interaction-types', label: 'Типы взаимодействий' },
+      { section: 'admin-integrations', label: 'Интеграции' }
     ] });
   }
 
@@ -149,6 +150,10 @@ async function enterApp() {
   const serverOk = await apiInit();
   if (serverOk) resolveCurrentUserAfterHydrate();
 
+  // Приводим ранее сохранённые карточки к актуальной структуре
+  // (после гидратации — уже на серверных данных).
+  migrateLegacyClientData();
+
   ensureRequiredTaskColumns();
   injectModals();
   attachMenuHandler();
@@ -193,12 +198,15 @@ function injectModals() {
             <h3>Организация</h3>
             <div class="form-row"><div class="form-group"><label>Название *</label><input type="text" id="orgName" required></div></div>
             <div class="form-row">
-              <div class="form-group"><label>Город</label><input type="text" id="orgCity"></div>
-              <div class="form-group"><label>Направление</label><input type="text" id="orgDirection"></div>
+              <div class="form-group"><label>Страна</label><select id="orgCountry" onchange="onCountryChange()"></select></div>
+              <div class="form-group client-typeahead-group">
+                <label>Город</label>
+                <input type="text" id="orgCity" placeholder="Начните вводить название города…" autocomplete="off" oninput="onCityInput()">
+                <div class="client-typeahead-dropdown" id="orgCityDropdown"></div>
+              </div>
             </div>
-            <div class="form-row"><div class="form-group"><label>Адрес</label><input type="text" id="orgAddress"></div></div>
             <div class="form-row">
-              <div class="form-group"><label>Телефоны</label><input type="text" id="orgPhones"></div>
+              <div class="form-group"><label>Тип организации</label><input type="text" id="orgDirection"></div>
               <div class="form-group"><label>Статус</label>
                 <select id="orgStatus">
                   <option value="cooperation">Сотрудничество</option>
@@ -207,23 +215,23 @@ function injectModals() {
                 </select>
               </div>
             </div>
+            <div class="form-row"><div class="form-group"><label>Адрес</label><input type="text" id="orgAddress"></div></div>
             <div class="form-row">
+              <div class="form-group"><label>Телефоны</label><input type="text" id="orgPhones"></div>
               <div class="form-group"><label>Email</label><input type="text" id="orgEmails"></div>
-              <div class="form-group"><label>ИНН/ОГРН</label><input type="text" id="orgInn"></div>
             </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>ИНН</label>
+                <div style="display:flex;gap:6px;">
+                  <input type="text" id="orgInn" style="flex:1;" oninput="setInnStatus('')">
+                  <button type="button" class="btn btn-sm btn-secondary" style="white-space:nowrap;" onclick="fillClientByInn()" title="Заполнить название, адрес, город, ОГРН по ИНН">Заполнить по ИНН</button>
+                </div>
+              </div>
+              <div class="form-group"><label>ОГРН</label><input type="text" id="orgOgrn"></div>
+            </div>
+            <div id="clientInnStatus" class="integration-msg"></div>
             <div class="form-row"><div class="form-group"><label>Сайт</label><input type="text" id="orgWebsite" placeholder="example.ru"></div></div>
-          </div>
-          <div class="form-section">
-            <h3>Основной контакт</h3>
-            <div class="form-row">
-              <div class="form-group"><label>ФИО</label><input type="text" id="contactName"></div>
-              <div class="form-group"><label>Должность</label><input type="text" id="contactPosition"></div>
-            </div>
-            <div class="form-row">
-              <div class="form-group"><label>Рабочий тел.</label><input type="text" id="contactPhoneWork"></div>
-              <div class="form-group"><label>Сотовый</label><input type="text" id="contactPhoneMobile"></div>
-            </div>
-            <div class="form-row"><div class="form-group"><label>Email</label><input type="email" id="contactEmail"></div></div>
           </div>
           <div class="modal-actions">
             <button type="button" class="btn btn-secondary" onclick="closeModal('clientModal')">Отмена</button>
@@ -449,9 +457,7 @@ function renderSection(section) {
               </div>
             </div>
             <div class="clients-filter-row">
-              <select id="clientManagerFilter" class="clients-filter-select" onchange="setClientManagerFilter(this.value)" title="Фильтр по менеджеру">
-                ${clientManagerFilterOptions()}
-              </select>
+              ${managerPickerHtml()}
               <input type="text" class="search-bar" id="searchInput" placeholder="Поиск по названию, сайту, почте, телефону, адресу, ИНН/ОГРН..." oninput="scheduleClientsSearch()" style="margin-bottom:0;flex:1;">
             </div>
           </div>
@@ -728,6 +734,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const data = loadData();
   clients = data.clients;
   contacts = data.contacts;
+  migrateLegacyClientData();
   loadUsers();
   loadInteractionTypes();
   loadTasks();

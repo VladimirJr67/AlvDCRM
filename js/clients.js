@@ -14,8 +14,12 @@ const CLIENT_STATUSES = {
   not_working: { label: 'Не прорабатывать', color: '#ef4444' }   // красный
 };
 
+// Статус клиента хранится в поле orgStatus. Раньше чтение шло из ключа
+// `status`, которого никто не записывал, поэтому колонка «Статус» всегда
+// показывала «—», а при редактировании сохранённое значение затиралось.
 function clientStatusInfo(c) {
-  const s = c && c.status ? CLIENT_STATUSES[c.status] : null;
+  const raw = c && (c.orgStatus || c.status);
+  const s = raw ? CLIENT_STATUSES[raw] : null;
   return s || { label: '—', color: '#9ca3af' };
 }
 
@@ -70,8 +74,7 @@ function searchClient(c, q) {
   if (!q) return true;
   const fields = [
     c.orgName, c.orgCity, c.orgDirection, c.orgAddress,
-    c.orgPhones, c.orgEmails, c.orgWebsite, c.orgInn,
-    c.contactName
+    c.orgPhones, c.orgEmails, c.orgWebsite, c.orgInn, c.orgOgrn
   ];
   return fields.some(f => (f || '').toLowerCase().includes(q));
 }
@@ -82,24 +85,136 @@ function scheduleClientsSearch() {
   clientSearchTimer = setTimeout(renderClientsTable, 350);
 }
 
+// Программная смена фильтра (вызывается из выбора менеджера).
 function setClientManagerFilter(value) {
   clientManagerFilter = value;
   renderClientsTable();
   if (selectedClientId) renderClientContacts(selectedClientId);
 }
 
-// Опции выпадающего фильтра «по менеджеру»: только мои / все / конкретный.
-// В списке менеджеров — только ФИО (без префикса «Менеджер:»).
-function clientManagerFilterOptions() {
-  const cur = clientManagerFilter;
-  const sel = (v) => String(cur) === String(v) ? ' selected' : '';
-  let html = `<option value="mine"${sel('mine')}>Только мои компании</option>`;
-  html += `<option value="all"${sel('all')}>Все компании</option>`;
-  users.forEach(u => {
-    html += `<option value="${u.id}"${sel(u.id)}>${escapeHtml(u.name || u.login)}</option>`;
-  });
-  return html;
+/* ===== Поиск ответственного менеджера =====
+   Раньше это был обычный <select>: чтобы дойти до нужного человека,
+   приходилось прокручивать список. Теперь это поле ввода с фильтрацией
+   по имени/фамилии и логину, плюс те же два фиксированных варианта. */
+
+// Подпись текущего фильтра — то, что видно в поле ввода.
+function managerFilterLabel() {
+  const f = clientManagerFilter;
+  if (f === 'mine') return 'Только мои компании';
+  if (f === 'all') return 'Все компании';
+  const u = findUserById(parseInt(f, 10));
+  return u ? (u.name || u.login) : 'Все компании';
 }
+
+// Разметка поля поиска менеджера над таблицей клиентов.
+function managerPickerHtml() {
+  return `
+    <div class="manager-picker" id="managerPicker">
+      <input type="text" id="managerSearchInput" class="manager-picker-input"
+             placeholder="Менеджер: начните вводить имя..."
+             autocomplete="off" value="${escapeHtml(managerFilterLabel())}"
+             oninput="onManagerSearchInput()" onfocus="onManagerSearchFocus(event)"
+             onkeydown="onManagerSearchKeydown(event)">
+      <button type="button" class="manager-picker-clear" onclick="resetManagerFilter()" title="Сбросить фильтр">✕</button>
+      <div class="manager-picker-dropdown" id="managerDropdown" onmousedown="event.preventDefault()"></div>
+    </div>`;
+}
+
+const MANAGER_FIXED_OPTIONS = [
+  { value: 'mine', label: 'Только мои компании', hint: 'по умолчанию' },
+  { value: 'all', label: 'Все компании', hint: '' }
+];
+
+// Варианты с учётом введённого текста: сначала служебные, затем люди.
+function managerOptions(query) {
+  const q = (query || '').trim().toLowerCase();
+  const fixed = MANAGER_FIXED_OPTIONS.filter(o => !q || o.label.toLowerCase().includes(q));
+  const people = users
+    .filter(u => !q
+      || (u.name || '').toLowerCase().includes(q)
+      || (u.login || '').toLowerCase().includes(q))
+    .map(u => ({ value: String(u.id), label: u.name || u.login, hint: u.login }));
+  return fixed.concat(people);
+}
+
+let managerHighlight = -1;
+
+function renderManagerDropdown(query) {
+  const dd = document.getElementById('managerDropdown');
+  if (!dd) return;
+  const opts = managerOptions(query);
+  managerHighlight = opts.length ? 0 : -1;
+  dd.innerHTML = opts.length
+    ? opts.map((o, i) => `
+        <div class="manager-option${i === 0 ? ' highlight' : ''}${String(clientManagerFilter) === o.value ? ' active' : ''}"
+             data-mvalue="${o.value}" data-mlabel="${escapeHtml(o.label)}">
+          <span>${escapeHtml(o.label)}</span>
+          ${o.hint ? `<span class="mo-hint">${escapeHtml(o.hint)}</span>` : ''}
+        </div>`).join('')
+    : '<div class="manager-option-empty">Никого не найдено</div>';
+  dd.classList.add('show');
+}
+
+function closeManagerDropdown() {
+  const dd = document.getElementById('managerDropdown');
+  if (dd) dd.classList.remove('show');
+}
+
+function onManagerSearchFocus(e) {
+  const input = (e && e.target) || document.getElementById('managerSearchInput');
+  if (input && input.select) input.select(); // сразу можно печатать поверх подписи
+  renderManagerDropdown('');
+}
+
+function onManagerSearchInput() {
+  closeManagerDropdown();
+  renderManagerDropdown((document.getElementById('managerSearchInput') || {}).value || '');
+}
+
+// Стрелки и Enter — выбор без мыши.
+function onManagerSearchKeydown(e) {
+  const dd = document.getElementById('managerDropdown');
+  const items = dd ? Array.from(dd.querySelectorAll('.manager-option')) : [];
+  if (e.key === 'Escape') { closeManagerDropdown(); return; }
+  if (!items.length) return;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    managerHighlight = e.key === 'ArrowDown'
+      ? (managerHighlight + 1) % items.length
+      : (managerHighlight - 1 + items.length) % items.length;
+    items.forEach((el, i) => el.classList.toggle('highlight', i === managerHighlight));
+    items[managerHighlight].scrollIntoView({ block: 'nearest' });
+    return;
+  }
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    const el = items[managerHighlight] || items[0];
+    if (el) applyManagerFilter(el.dataset.mvalue, el.dataset.mlabel);
+  }
+}
+
+// Применить выбранного ответственного и перерисовать список.
+function applyManagerFilter(value, label) {
+  const input = document.getElementById('managerSearchInput');
+  if (input) input.value = label || managerFilterLabel();
+  closeManagerDropdown();
+  setClientManagerFilter(value);
+}
+
+function resetManagerFilter() {
+  applyManagerFilter('mine', 'Только мои компании');
+}
+
+// Клик по варианту в списке и закрытие списка при клике вне поля.
+document.addEventListener('click', (e) => {
+  if (!e.target || !e.target.closest) return;
+  const opt = e.target.closest('.manager-option');
+  if (opt) {
+    applyManagerFilter(opt.dataset.mvalue, opt.dataset.mlabel);
+    return;
+  }
+  if (!e.target.closest('#managerPicker')) closeManagerDropdown();
+});
 
 function renderClientsTable() {
   const search = (document.getElementById('searchInput')?.value || '').toLowerCase();
@@ -115,7 +230,7 @@ function renderClientsTable() {
   }
 
   let html = `<table><thead><tr>
-    <th>Организация</th><th>Статус</th><th>Направление</th><th>Город</th><th>Телефон</th><th>Почта</th><th>Менеджер</th><th>Сайт</th>
+    <th>Организация</th><th>Статус</th><th>Тип организации</th><th>Город</th><th>Телефон</th><th>Почта</th><th>Менеджер</th><th>Сайт</th>
   </tr></thead><tbody>`;
   filtered.forEach(c => {
     const phones = (c.orgPhones || '').split(',').map(p => p.trim()).filter(Boolean);
@@ -123,11 +238,16 @@ function renderClientsTable() {
     const site = normalizeSite(c.orgWebsite);
     const st = clientStatusInfo(c);
     const managerName = clientManagerName(c);
+    // Страну показываем рядом с городом, только если она не Россия —
+    // иначе колонка превращается в шум.
+    const otherCountry = (c.orgCountry && c.orgCountry !== DEFAULT_COUNTRY)
+      ? (countryName(c.orgCountry) || c.orgCountry)
+      : '';
     html += `<tr onclick="selectClient(${c.id})" ondblclick="openClientCard(${c.id})" class="${selectedClientId === c.id ? 'selected' : ''}">
       <td><strong>${escapeHtml(c.orgName)}</strong></td>
       <td><span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:12px;height:12px;background:${st.color};border-radius:2px;display:inline-block;flex-shrink:0;"></span>${escapeHtml(st.label)}</span></td>
       <td>${escapeHtml(c.orgDirection || '—')}</td>
-      <td>${escapeHtml(c.orgCity || '—')}</td>
+      <td>${escapeHtml(c.orgCity || '—')}${otherCountry ? ` <span style="color:#9ca3af;font-size:11px;">(${escapeHtml(otherCountry)})</span>` : ''}</td>
       <td>${phones.length ? escapeHtml(phones[0]) : '—'}</td>
       <td>${emails.length ? `<a href="mailto:${escapeHtml(emails[0])}" title="Написать на ${escapeHtml(emails[0])}" onclick="event.stopPropagation()">${escapeHtml(emails[0])}</a>` : '—'}</td>
       <td>${escapeHtml(managerName)}</td>
@@ -154,8 +274,11 @@ function exportClientsExcel() {
     return {
       'Организация': c.orgName || '—',
       'Статус': st.label,
-      'Направление': c.orgDirection || '—',
+      'Тип организации': c.orgDirection || '—',
+      'Страна': countryName(c.orgCountry) || countryName(DEFAULT_COUNTRY),
       'Город': c.orgCity || '—',
+      'ИНН': c.orgInn || '—',
+      'ОГРН': c.orgOgrn || '—',
       'Телефон': phones.join(', ') || '—',
       'Почта': emails.join(', ') || '—',
       'Менеджер': clientManagerName(c),
@@ -269,6 +392,8 @@ function openClientCard(id) {
   if (modal) modal.classList.add('active');
 }
 
+// Карточка просмотра: информация сгруппирована в блоки с рамками,
+// чтобы реквизиты, контакты и история читались отдельно друг от друга.
 function renderClientCard(id) {
   const content = document.getElementById('clientCardContent');
   if (!content) return;
@@ -283,68 +408,103 @@ function renderClientCard(id) {
   const editable = canEditClient(client);
   const st = clientStatusInfo(client);
   const managerName = clientManagerName(client);
+  const country = countryName(client.orgCountry) || countryName(DEFAULT_COUNTRY);
 
   const filteredHistory = historyFilter === 'all' ? history : history.filter(h => h.contactPerson === historyFilter);
   const sortedHistory = [...filteredHistory].sort((a, b) => new Date(b.date) - new Date(a.date));
 
-  let html = `
-    <div class="detail-header">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;">
-        <div>
-          <h2>${escapeHtml(client.orgName)}</h2>
-          <div class="meta">ID: ${client.id} | ${escapeHtml(client.orgCity || '—')} | ${escapeHtml(client.orgDirection || '—')}</div>
-          <div style="margin-top:8px;">
-            <span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#4b5563;">
-              <span style="width:14px;height:14px;background:${st.color};border-radius:2px;display:inline-block;"></span>
-              ${escapeHtml(st.label)}
-            </span>
-            <span style="margin-left:14px;font-size:12px;color:#6b7280;">Менеджер: <strong>${escapeHtml(managerName)}</strong></span>
+  // Одно поле карточки: подпись сверху, значение снизу.
+  const field = (label, value, mono) =>
+    `<div class="cc-item">
+       <div class="cc-label">${escapeHtml(label)}</div>
+       <div class="cc-value${mono ? ' mono' : ''}">${value || '—'}</div>
+     </div>`;
+
+  const html = `
+    <div class="client-card">
+      <div class="cc-head">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
+          <div style="min-width:0;">
+            <div class="cc-title">${escapeHtml(client.orgName || '—')}</div>
+            <div class="cc-sub">
+              <span class="cc-status"><span class="cc-status-dot" style="background:${st.color};"></span>${escapeHtml(st.label)}</span>
+              <span class="cc-sep">|</span>
+              <span>ID: ${client.id}</span>
+              <span class="cc-sep">|</span>
+              <span>Менеджер: <strong>${escapeHtml(managerName)}</strong></span>
+            </div>
+          </div>
+          <div class="cc-actions">
+            <button class="btn btn-sm btn-secondary" onclick="openTaskModalWithClient(${client.id})">+ Задача</button>
+            <button class="btn btn-sm btn-secondary" onclick="openReminderModal(null, ${client.id})">+ Напоминание</button>
           </div>
         </div>
-        <div style="display:flex;gap:6px;">
-          <button class="btn btn-sm btn-secondary" onclick="openTaskModalWithClient(${client.id})">+ Задача</button>
-          <button class="btn btn-sm btn-secondary" onclick="openReminderModal(null, ${client.id})">+ Напоминание</button>
+      </div>
+
+      <div class="cc-block">
+        <div class="cc-block-head">
+          <h3>Реквизиты организации</h3>
+          ${editable ? `<button class="btn btn-sm btn-secondary" onclick="openClientModal(clients.find(c=>c.id===${client.id}))">Редактировать</button>` : ''}
+        </div>
+        <div class="cc-block-body">
+          <div class="cc-grid">
+            ${field('Страна', escapeHtml(country))}
+            ${field('Город', escapeHtml(client.orgCity || ''))}
+            ${field('Тип организации', escapeHtml(client.orgDirection || ''))}
+            ${field('Адрес', escapeHtml(client.orgAddress || ''))}
+            ${field('ИНН', escapeHtml(client.orgInn || ''), true)}
+            ${field('ОГРН', escapeHtml(client.orgOgrn || ''), true)}
+            ${field('Сайт', site ? `<a href="${site}" target="_blank" rel="noopener">${escapeHtml(client.orgWebsite)}</a>` : '')}
+          </div>
         </div>
       </div>
-    </div>
-    <div class="detail-section">
-      <div class="section-header"><h3>Информация об организации</h3>
-        ${editable ? `<button class="btn btn-sm btn-secondary" onclick="openClientModal(clients.find(c=>c.id===${client.id}))">Редактировать</button>` : ''}
+
+      <div class="cc-block">
+        <div class="cc-block-head"><h3>Контакты</h3></div>
+        <div class="cc-block-body">
+          <div class="cc-grid">
+            ${field('Телефоны', phones.length ? phones.map(escapeHtml).join(', ') : '')}
+            ${field('Электронная почта', emails.length
+              ? emails.map(e => `<a href="mailto:${escapeHtml(e)}" title="Написать на ${escapeHtml(e)}">${escapeHtml(e)}</a>`).join(', ')
+              : '')}
+          </div>
+        </div>
       </div>
-      <div class="info-grid">
-        <div class="info-item"><label>Адрес</label><value>${escapeHtml(client.orgAddress || '—')}</value></div>
-        <div class="info-item"><label>Направление</label><value>${escapeHtml(client.orgDirection || '—')}</value></div>
-        <div class="info-item"><label>Телефоны</label><value>${phones.length ? phones.map(escapeHtml).join(', ') : '—'}</value></div>
-        <div class="info-item"><label>Электронная почта</label><value>${emails.length ? emails.map(e => `<a href="mailto:${escapeHtml(e)}" title="Написать на ${escapeHtml(e)}">${escapeHtml(e)}</a>`).join(', ') : '—'}</value></div>
-        <div class="info-item"><label>Сайт</label><value>${site ? `<a href="${site}" target="_blank" rel="noopener">${escapeHtml(client.orgWebsite)}</a>` : '—'}</value></div>
-        <div class="info-item"><label>ИНН/ОГРН</label><value>${escapeHtml(client.orgInn || '—')}</value></div>
+
+      <div class="cc-block">
+        <div class="cc-block-head">
+          <h3>История взаимодействий <span class="cc-count">${sortedHistory.length}</span></h3>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <select onchange="changeHistoryFilter(this.value)" style="padding:5px 9px;border:1px solid #d0d5dd;border-radius:5px;font-size:12px;outline:none;">
+              <option value="all" ${historyFilter === 'all' ? 'selected' : ''}>Все контакты</option>
+              ${historyContacts(client).map(ct => `<option value="${escapeHtml(ct)}" ${historyFilter === ct ? 'selected' : ''}>${escapeHtml(ct)}</option>`).join('')}
+            </select>
+            ${editable ? `<button class="btn btn-sm" onclick="openHistoryModal(${client.id})">+ Добавить</button>` : ''}
+          </div>
+        </div>
+        <div class="cc-block-body flush">
+          ${sortedHistory.length === 0
+            ? '<div class="cc-empty" style="padding:14px 16px;">Нет записей</div>'
+            : `<div class="scrollable-table" style="border:none;border-radius:0;">
+            <div class="table-body" style="max-height:300px;">
+              <table>
+                <thead><tr>
+                  <th style="width:110px">Дата</th><th style="width:130px">Тип</th><th style="width:150px">Контакт</th><th style="width:120px">Менеджер</th><th>Комментарий</th>
+                </tr></thead>
+                <tbody>
+                  ${sortedHistory.map(h => `<tr style="cursor:default;">
+                    <td>${formatDate(h.date)}</td>
+                    <td><span class="badge">${escapeHtml(h.type)}</span></td>
+                    <td>${escapeHtml(h.contactPerson || '—')}</td>
+                    <td>${escapeHtml(h.manager || '—')}</td>
+                    <td><div class="history-comment">${escapeHtml(h.comment)}</div></td>
+                  </tr>`).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>`}
+        </div>
       </div>
-    </div>
-    <div class="detail-section">
-      <div class="section-header">
-        <h3>История взаимодействий (${sortedHistory.length})</h3>
-        ${editable ? `<button class="btn btn-sm" onclick="openHistoryModal(${client.id})">+ Добавить</button>` : ''}
-      </div>
-      <div class="filter-bar">
-        <label style="font-size:12px;color:#6b7280">Фильтр:</label>
-        <select onchange="changeHistoryFilter(this.value)">
-          <option value="all" ${historyFilter === 'all' ? 'selected' : ''}>Все контакты</option>
-          ${historyContacts(client).map(ct => `<option value="${escapeHtml(ct)}" ${historyFilter === ct ? 'selected' : ''}>${escapeHtml(ct)}</option>`).join('')}
-        </select>
-      </div>
-      ${sortedHistory.length === 0 ? '<p style="color:#9ca3af;font-size:12px;padding:10px 0">Нет записей</p>' : `
-      <div class="scrollable-table history-table">
-        <div class="table-header"><table><thead><tr><th style="width:120px">Дата</th><th style="width:130px">Тип</th><th style="width:150px">Контакт</th><th style="width:120px">Менеджер</th><th>Комментарий</th></tr></thead></table></div>
-        <div class="table-body"><table><tbody>
-          ${sortedHistory.map(h => `<tr>
-            <td>${formatDate(h.date)}</td>
-            <td><span class="badge">${escapeHtml(h.type)}</span></td>
-            <td>${escapeHtml(h.contactPerson || '—')}</td>
-            <td>${escapeHtml(h.manager || '—')}</td>
-            <td><div class="history-comment">${escapeHtml(h.comment)}</div></td>
-          </tr>`).join('')}
-        </tbody></table></div>
-      </div>`}
     </div>`;
   content.innerHTML = html;
 }
@@ -359,27 +519,38 @@ function openClientModal(client = null) {
   document.getElementById('clientModalTitle').textContent = client ? 'Редактировать клиента' : 'Новый клиент';
   document.getElementById('clientId').value = client?.id || '';
   document.getElementById('orgName').value = client?.orgName || '';
+
+  // Страна: список формируется из справочника js/geo.js, выбранное значение
+  // определяет, по каким городам искать подсказки.
+  const countrySelect = document.getElementById('orgCountry');
+  countrySelect.innerHTML = countryOptionsHtml(client?.orgCountry);
+  countrySelect.value = (client?.orgCountry && countryExists(client.orgCountry))
+    ? client.orgCountry
+    : DEFAULT_COUNTRY;
+
   document.getElementById('orgCity').value = client?.orgCity || '';
   document.getElementById('orgDirection').value = client?.orgDirection || '';
   document.getElementById('orgAddress').value = client?.orgAddress || '';
   document.getElementById('orgPhones').value = client?.orgPhones || '';
-  document.getElementById('orgStatus').value = client?.status || 'cooperation';
+  document.getElementById('orgStatus').value = client?.orgStatus || 'cooperation';
   document.getElementById('orgEmails').value = client?.orgEmails || '';
   document.getElementById('orgWebsite').value = client?.orgWebsite || '';
   document.getElementById('orgInn').value = client?.orgInn || '';
-  document.getElementById('contactName').value = client?.contactName || '';
-  document.getElementById('contactPosition').value = client?.contactPosition || '';
-  document.getElementById('contactPhoneWork').value = client?.contactPhoneWork || '';
-  document.getElementById('contactPhoneMobile').value = client?.contactPhoneMobile || '';
-  document.getElementById('contactEmail').value = client?.contactEmail || '';
+  document.getElementById('orgOgrn').value = client?.orgOgrn || '';
+
+  hideCitySuggestions();
+  setInnStatus('');
   document.getElementById('clientModal').classList.add('active');
 }
 
 function saveClient(e) {
   e.preventDefault();
   const id = document.getElementById('clientId').value;
+  // Поля «Основного контакта» больше не собираются: блок удалён из формы,
+  // а старые ключи вычищаются из записи при сохранении.
   const data = {
     orgName: document.getElementById('orgName').value.trim(),
+    orgCountry: document.getElementById('orgCountry').value || DEFAULT_COUNTRY,
     orgCity: document.getElementById('orgCity').value.trim(),
     orgDirection: document.getElementById('orgDirection').value.trim(),
     orgAddress: document.getElementById('orgAddress').value.trim(),
@@ -388,11 +559,7 @@ function saveClient(e) {
     orgEmails: document.getElementById('orgEmails').value.trim(),
     orgWebsite: document.getElementById('orgWebsite').value.trim(),
     orgInn: document.getElementById('orgInn').value.trim(),
-    contactName: document.getElementById('contactName').value.trim(),
-    contactPosition: document.getElementById('contactPosition').value.trim(),
-    contactPhoneWork: document.getElementById('contactPhoneWork').value.trim(),
-    contactPhoneMobile: document.getElementById('contactPhoneMobile').value.trim(),
-    contactEmail: document.getElementById('contactEmail').value.trim(),
+    orgOgrn: document.getElementById('orgOgrn').value.trim()
   };
 
   if (id) {
@@ -417,6 +584,7 @@ function saveClient(e) {
     clients.push(data);
   }
   saveClients(clients);
+  hideCitySuggestions();
   closeModal('clientModal');
   renderClientsTable();
   if (selectedClientId) renderClientContacts(selectedClientId);
@@ -717,3 +885,191 @@ function openTaskModalWithClient(clientId) {
   
   document.getElementById('taskModal').classList.add('active');
 }
+
+/* ===== Умный ввод города =====
+   Подсказки зависят от выбранной страны. Источник — Дадата, если она
+   настроена; иначе (или при сбое запроса) локальный справочник js/geo.js. */
+
+let citySuggestTimer = null;
+
+function hideCitySuggestions() {
+  const dd = document.getElementById('orgCityDropdown');
+  if (dd) dd.style.display = 'none';
+}
+
+// Задержка 250 мс: не дёргаем сервис на каждую букву.
+function onCityInput() {
+  clearTimeout(citySuggestTimer);
+  hideCitySuggestions();
+  citySuggestTimer = setTimeout(runCitySuggestions, 250);
+}
+
+async function runCitySuggestions() {
+  const input = document.getElementById('orgCity');
+  const dd = document.getElementById('orgCityDropdown');
+  if (!input || !dd) return;
+
+  const query = input.value.trim();
+  if (query.length < 2) return;
+
+  const countrySelect = document.getElementById('orgCountry');
+  const country = (countrySelect && countrySelect.value) || DEFAULT_COUNTRY;
+  const res = await citySuggestions(query, country, 10);
+
+  // Пока шёл запрос, пользователь мог стереть текст.
+  if (input.value.trim() !== query) return;
+
+  if (!res.items.length) {
+    dd.innerHTML = '<div class="manager-option-empty">Города не найдены</div>';
+    dd.style.display = 'block';
+    return;
+  }
+  dd.innerHTML = res.items.map(name =>
+    `<div class="client-typeahead-item" data-city="${escapeHtml(name)}">${escapeHtml(name)}</div>`
+  ).join('') + `<div class="client-typeahead-source">${
+    res.source === 'dadata' ? 'Источник: Дадата' : 'Источник: встроенный справочник'
+  }</div>`;
+  dd.style.display = 'block';
+}
+
+function selectCity(name) {
+  const input = document.getElementById('orgCity');
+  if (input) input.value = name;
+  hideCitySuggestions();
+}
+
+// Список городов привязан к стране — при её смене пересчитываем подсказки.
+function onCountryChange() {
+  hideCitySuggestions();
+  const input = document.getElementById('orgCity');
+  if (input && input.value.trim().length >= 2) runCitySuggestions();
+}
+
+/* ===== Автозаполнение реквизитов по ИНН ===== */
+
+function setInnStatus(text, kind) {
+  const el = document.getElementById('clientInnStatus');
+  if (!el) return;
+  if (!text) {
+    el.style.display = 'none';
+    el.textContent = '';
+    return;
+  }
+  el.style.display = 'block';
+  el.style.background = kind === 'error' ? '#fee2e2' : (kind === 'ok' ? '#d1fae5' : '#f9fafb');
+  el.style.color = kind === 'error' ? '#991b1b' : (kind === 'ok' ? '#065f46' : '#6b7280');
+  el.textContent = text;
+}
+
+// Заполнение названия, адреса, ИНН, ОГРН, города и страны по ИНН/ОГРН.
+async function fillClientByInn() {
+  const innInput = document.getElementById('orgInn');
+  if (!innInput) return;
+
+  const inn = innInput.value.replace(/\D/g, '');
+  if (!/^(\d{10}|\d{12}|\d{13}|\d{15})$/.test(inn)) {
+    setInnStatus('Укажите ИНН (10 цифр) или ОГРН (13 или 15 цифр)', 'error');
+    return;
+  }
+
+  const status = await dadataStatus();
+  if (!status.configured) {
+    setInnStatus(DADATA_NOT_CONFIGURED, 'error');
+    return;
+  }
+
+  setInnStatus('Ищу организацию…');
+  const res = await fetchPartyByInn(inn);
+  if (!res.ok) {
+    setInnStatus(res.notConfigured ? DADATA_NOT_CONFIGURED : 'Не удалось получить данные: ' + res.error, 'error');
+    return;
+  }
+  const p = res.party;
+  if (!p) {
+    setInnStatus('Организация с таким ИНН/ОГРН не найдена', 'error');
+    return;
+  }
+
+  const set = (id, value) => {
+    const el = document.getElementById(id);
+    if (el && value) el.value = value;
+  };
+  set('orgName', p.name);
+  set('orgAddress', p.address);
+  set('orgInn', p.inn);
+  set('orgOgrn', p.ogrn);
+  if (p.city) set('orgCity', p.city);
+  if (p.country && countryExists(p.country)) document.getElementById('orgCountry').value = p.country;
+
+  // Телефоны и почту не перетираем: если их уже вводили вручную — оставляем.
+  const phonesEl = document.getElementById('orgPhones');
+  if (p.phones.length && phonesEl && !phonesEl.value.trim()) phonesEl.value = p.phones.join(', ');
+  const emailsEl = document.getElementById('orgEmails');
+  if (p.emails.length && emailsEl && !emailsEl.value.trim()) emailsEl.value = p.emails.join(', ');
+
+  hideCitySuggestions();
+
+  const bits = [];
+  if (p.fullName) bits.push(p.fullName);
+  if (p.management) bits.push('Руководитель: ' + p.management);
+  if (p.status) bits.push('Статус в ЕГРЮЛ: ' + p.status);
+  setInnStatus('Реквизиты заполнены.' + (bits.length ? ' ' + bits.join(' · ') : ''), 'ok');
+}
+
+/* ===== Совместимость со старыми записями =====
+   Блок «Основной контакт» удалён из формы как неиспользуемый, а ИНН и ОГРН
+   теперь хранятся раздельно. Приводим ранее сохранённые карточки к новой
+   структуре один раз — при загрузке и после синхронизации с сервером. */
+
+const LEGACY_CONTACT_FIELDS = [
+  'contactName', 'contactPosition', 'contactPhoneWork', 'contactPhoneMobile', 'contactEmail'
+];
+
+function migrateLegacyClientData() {
+  let changed = false;
+
+  clients.forEach(c => {
+    LEGACY_CONTACT_FIELDS.forEach(f => {
+      if (Object.prototype.hasOwnProperty.call(c, f)) {
+        delete c[f];
+        changed = true;
+      }
+    });
+
+    if (!c.orgCountry) {
+      c.orgCountry = DEFAULT_COUNTRY;
+      changed = true;
+    } else if (!countryExists(c.orgCountry)) {
+      // На случай, если страна была сохранена названием, а не кодом.
+      const byName = COUNTRIES.find(x => x.name.toLowerCase() === String(c.orgCountry).trim().toLowerCase());
+      if (byName) {
+        c.orgCountry = byName.code;
+        changed = true;
+      }
+    }
+
+    // Склеенные реквизиты вида «7712345678 / 1234567890123» разбираем:
+    // ИНН остаётся в своём поле, ОГРН уходит в отдельное.
+    if (!c.orgOgrn && typeof c.orgInn === 'string' && /[/,;]/.test(c.orgInn)) {
+      const parts = c.orgInn.split(/[/,;]/).map(s => s.trim()).filter(Boolean);
+      const ogrnPart = parts.find(p => /^(\d{13}|\d{15})$/.test(p.replace(/\D/g, '')));
+      if (ogrnPart) {
+        const innPart = parts.find(p => p !== ogrnPart) || '';
+        c.orgInn = innPart.replace(/\D/g, '');
+        c.orgOgrn = ogrnPart.replace(/\D/g, '');
+        changed = true;
+      }
+    }
+  });
+
+  if (changed) saveClients(clients);
+  return changed;
+}
+
+// Клик по подсказке города (общий делегированный обработчик в js/app.js
+// передаёт сюда выбор элемента списка).
+document.addEventListener('click', (e) => {
+  if (!e.target || !e.target.closest) return;
+  const item = e.target.closest('#orgCityDropdown .client-typeahead-item');
+  if (item && item.dataset.city) selectCity(item.dataset.city);
+});
