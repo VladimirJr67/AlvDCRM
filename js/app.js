@@ -191,7 +191,10 @@ function injectModals() {
   const modalsHTML = `
     <div class="modal-overlay" id="clientModal">
       <div class="modal">
-        <h2 id="clientModalTitle">Новый клиент</h2>
+        <div class="modal-head">
+          <h2 id="clientModalTitle">Новый клиент</h2>
+          <button type="button" class="modal-close-icon" onclick="cancelClientEdit()" title="Закрыть" aria-label="Закрыть">✕</button>
+        </div>
         <form onsubmit="saveClient(event)">
           <input type="hidden" id="clientId">
           <div class="form-section">
@@ -234,7 +237,7 @@ function injectModals() {
             <div class="form-row"><div class="form-group"><label>Сайт</label><input type="text" id="orgWebsite" placeholder="example.ru"></div></div>
           </div>
           <div class="modal-actions">
-            <button type="button" class="btn btn-secondary" onclick="closeModal('clientModal')">Отмена</button>
+            <button type="button" class="btn btn-secondary" onclick="cancelClientEdit()">Отмена</button>
             <button type="submit" class="btn">Сохранить</button>
           </div>
         </form>
@@ -426,8 +429,8 @@ function injectModals() {
 
     <div class="modal-overlay" id="clientCardModal" onclick="if(event.target===this)closeModal('clientCardModal')">
       <div class="modal" style="width:760px;max-width:94vw;">
-        <div style="display:flex;justify-content:flex-end;margin-bottom:6px;">
-          <button type="button" class="btn btn-sm btn-secondary" onclick="closeModal('clientCardModal')">✕ Закрыть</button>
+        <div class="modal-head" style="margin-bottom:6px;justify-content:flex-end;">
+          <button type="button" class="modal-close-icon" onclick="closeModal('clientCardModal')" title="Закрыть" aria-label="Закрыть">✕</button>
         </div>
         <div id="clientCardContent"></div>
       </div>

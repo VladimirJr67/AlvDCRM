@@ -3,6 +3,10 @@ let selectedClientId = null;
 let historyFilter = 'all';
 let cardClientId = null;
 
+// Карточка просмотра, из которой открыли форму редактирования. Пока форма
+// открыта, карточка закрыта; после сохранения или отмены возвращаемся в неё.
+let editReturnToCardId = null;
+
 // Фильтр списка клиентов: 'mine' (только мои) | 'all' (все) | id менеджера.
 let clientManagerFilter = 'mine';
 let clientSearchTimer = null;
@@ -516,6 +520,13 @@ function historyContacts(client) {
 function changeHistoryFilter(value) { historyFilter = value; renderClientCard(cardClientId || selectedClientId); }
 
 function openClientModal(client = null) {
+  // Форма заменяет карточку, а не открывается поверх неё: иначе карточка
+  // с блоком истории остаётся видна за формой и мешает работать.
+  const cardEl = document.getElementById('clientCardModal');
+  const cardActive = !!(cardEl && cardEl.classList.contains('active'));
+  editReturnToCardId = (client && client.id && cardActive) ? client.id : null;
+  if (cardActive) closeModal('clientCardModal');
+
   document.getElementById('clientModalTitle').textContent = client ? 'Редактировать клиента' : 'Новый клиент';
   document.getElementById('clientId').value = client?.id || '';
   document.getElementById('orgName').value = client?.orgName || '';
@@ -588,7 +599,22 @@ function saveClient(e) {
   closeModal('clientModal');
   renderClientsTable();
   if (selectedClientId) renderClientContacts(selectedClientId);
-  if (document.getElementById('clientCardModal')?.classList.contains('active')) renderClientCard(cardClientId);
+  // Форму открывали из карточки — возвращаем пользователя в неё с новыми данными.
+  returnToClientCard();
+}
+
+// Отмена редактирования: закрываем форму и возвращаемся в карточку просмотра.
+function cancelClientEdit() {
+  hideCitySuggestions();
+  closeModal('clientModal');
+  returnToClientCard();
+}
+
+// Вернуть пользователя в карточку просмотра, если форма открывалась из неё.
+function returnToClientCard() {
+  const id = editReturnToCardId;
+  editReturnToCardId = null;
+  if (id) openClientCard(id);
 }
 
 function openContactModal(clientId) {
