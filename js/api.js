@@ -48,6 +48,8 @@ function rehydrateAll(db) {
   notifications = db.notifications || [];
   interactionTypes = db.interactionTypes || [];
   orders = db.orders || [];
+  orgTypes = db.orgTypes || [];
+  contactPositions = db.contactPositions || [];
 }
 
 // Собрать полный снапшот из глобалов приложения.
@@ -62,7 +64,9 @@ function assembleDb() {
     reminders: reminders || [],
     notifications: notifications || [],
     interactionTypes: interactionTypes || [],
-    orders: orders || []
+    orders: orders || [],
+    orgTypes: orgTypes || [],
+    contactPositions: contactPositions || []
   };
 }
 
