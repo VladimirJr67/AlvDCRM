@@ -591,7 +591,7 @@ function injectModals() {
         <input type="hidden" id="notesClientId">
         <input type="hidden" id="noteEditIdx" value="">
 
-        <div class="note-form">
+        <div class="note-form" id="noteForm">
           <textarea id="noteText" rows="3" placeholder="Текст отметки по клиенту…"></textarea>
           <div class="note-form-row">
             <select id="noteType" title="Тип взаимодействия"></select>
@@ -600,11 +600,14 @@ function injectModals() {
               <label class="tag-option"><input type="checkbox" id="noteTagReport"> <span>Для отчёта</span></label>
             </div>
             <button type="button" class="btn" id="noteSaveBtn" onclick="saveClientNote()">Добавить отметку</button>
-            <button type="button" class="btn btn-secondary" id="noteCancelBtn" style="display:none;" onclick="resetNotesForm()">Отмена</button>
+            <button type="button" class="btn btn-secondary" id="noteCancelBtn" style="display:none;" onclick="cancelNoteEdit()">Отмена</button>
           </div>
         </div>
 
-        <div class="notes-head">Отметки <span class="cc-count" id="notesModalCount"></span></div>
+        <div class="notes-head">
+          <span>Отметки <span class="cc-count" id="notesModalCount"></span></span>
+          <button type="button" class="btn btn-sm" id="noteAddBtn" onclick="showNotesAddForm()">+ Добавить отметку</button>
+        </div>
         <div class="notes-list" id="notesList"></div>
       </div>
     </div>

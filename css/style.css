@@ -683,7 +683,7 @@ select[multiple] option:checked { background: #3b82f6; color: #fff; }
   padding: 7px 10px; border: 1px solid #d0d5dd; border-radius: 6px;
   font-size: 12.5px; outline: none; background: #fff; color: #374151;
 }
-.notes-head { font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 10px; }
+.notes-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 10px; }
 .notes-list { display: flex; flex-direction: column; gap: 10px; max-height: 46vh; overflow-y: auto; }
 .note-item { border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px 12px; background: #fff; }
 .note-item-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
@@ -691,3 +691,29 @@ select[multiple] option:checked { background: #3b82f6; color: #fff; }
 .note-date { font-size: 11px; color: #9ca3af; }
 .note-item-head .btn-icon-btn { margin-left: auto; }
 .note-text { font-size: 12.5px; color: #374151; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+
+/* ============================================================
+   Модалки, открытые из карточки клиента
+   ============================================================ */
+/* Карточка лежит ниже остальных окон: задача, напоминание, отметки и
+   история, открытые из неё, показываются поверх карточки, а не под ней.
+   Все окна лежат прямо в body, поэтому overflow карточки им не мешает. */
+#clientCardModal { z-index: 90; }
+#taskModal,
+#reminderModal,
+#historyModal,
+#contactModal,
+#clientNotesModal,
+#allHistoryModal { z-index: 200; }
+
+/* Передача клиента другому менеджеру в карточке */
+.card-transfer { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.card-transfer select {
+  flex: 1; min-width: 220px; padding: 8px 10px; border: 1px solid #d0d5dd;
+  border-radius: 6px; font-size: 12.5px; background: #fff; color: #374151; outline: none;
+}
+.card-transfer input {
+  flex: 1; min-width: 200px; padding: 8px 10px; border: 1px solid #d0d5dd;
+  border-radius: 6px; font-size: 12.5px; outline: none;
+}
+.card-transfer select:focus, .card-transfer input:focus { border-color: #3b82f6; }

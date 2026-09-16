@@ -639,6 +639,22 @@ function renderClientCard(id) {
         </div>
       </div>
 
+      ${isAdmin() ? `
+      <div class="cc-block">
+        <div class="cc-block-head"><h3>Ответственный менеджер</h3></div>
+        <div class="cc-block-body">
+          <div class="card-transfer">
+            <select id="cardOwnerSelect" title="Менеджер, за которым закреплён клиент">${clientOwnerOptions(client.createdBy)}</select>
+            <input type="text" id="cardTransferComment" placeholder="Комментарий менеджеру (необязательно)">
+            <button type="button" class="btn btn-sm" onclick="applyClientTransfer()">Передать клиента</button>
+          </div>
+          <div class="field-hint">
+            Сейчас: <strong>${escapeHtml(managerName)}</strong>.
+            При смене менеджер получит уведомление «На вас перенесли клиента в кол-ве 1» с вашим комментарием.
+          </div>
+        </div>
+      </div>` : ''}
+
       <div class="cc-block">
         <div class="cc-block-head"><h3>Контакты</h3></div>
         <div class="cc-block-body">
@@ -1187,6 +1203,50 @@ function saveHistory(e) {
   refreshClientViews(clientId);
 }
 
+// Список менеджеров для передачи клиента. Показываем роли «Менеджер
+// по продажам», а если текущий ответственный — администратор,
+// добавляем его, чтобы значение в списке не терялось.
+function clientOwnerOptions(currentOwnerId) {
+  const managers = users.filter(u => isManagerRole(u));
+  const current = currentOwnerId ? findUserById(currentOwnerId) : null;
+  const list = managers.slice();
+  if (current && managers.indexOf(current) === -1) list.unshift(current);
+
+  return list.map(u =>
+    `<option value="${u.id}"${u.id === currentOwnerId ? ' selected' : ''}>` +
+    `${escapeHtml(u.name || u.login)} (${escapeHtml(userPositionLabel(u))})</option>`
+  ).join('');
+}
+
+// Передача клиента другому менеджеру прямо из карточки (только администратор).
+function applyClientTransfer() {
+  const id = cardClientId || selectedClientId;
+  const client = clients.find(c => c.id === id);
+  if (!client) return;
+  if (!isAdmin()) { alert('Передавать клиентов может только администратор.'); return; }
+
+  const select = document.getElementById('cardOwnerSelect');
+  const commentEl = document.getElementById('cardTransferComment');
+  const newOwnerId = select ? parseInt(select.value, 10) : null;
+  const comment = commentEl ? commentEl.value.trim() : '';
+
+  // Менеджер не изменился — просто обновляем карточку.
+  if (!newOwnerId || newOwnerId === client.createdBy) {
+    if (commentEl) commentEl.value = '';
+    renderClientCard(client.id);
+    return;
+  }
+
+  client.createdBy = newOwnerId;
+  saveClients(clients);
+  notifyClientTransfer(newOwnerId, 1, comment);
+
+  if (commentEl) commentEl.value = '';
+  renderClientsTable();
+  renderClientContacts(client.id);
+  renderClientCard(client.id);
+}
+
 // Перерисовать блоки клиента после изменения комментариев.
 function refreshClientViews(clientId) {
   renderClientContacts(clientId);
@@ -1209,7 +1269,43 @@ function openClientNotes(clientId) {
   document.getElementById('notesModalTitle').textContent = 'Особые отметки — ' + (client.orgName || '');
   resetNotesForm();
   renderClientNotes(clientId);
+  // Отметки есть — открываем список, отметок нет — сразу форму добавления.
+  setNotesMode(notesModeFor(client));
   document.getElementById('clientNotesModal').classList.add('active');
+}
+
+// Режим окна отметок: 'list' — список с кнопкой добавления,
+// 'add' — форма добавления/правки.
+function setNotesMode(mode) {
+  const isAdd = mode === 'add';
+  const form = document.getElementById('noteForm');
+  const addBtn = document.getElementById('noteAddBtn');
+  const list = document.getElementById('notesList');
+  const cancelBtn = document.getElementById('noteCancelBtn');
+  if (form) form.style.display = isAdd ? '' : 'none';
+  if (addBtn) addBtn.style.display = isAdd ? 'none' : '';
+  if (list) list.style.display = isAdd ? 'none' : '';
+  if (cancelBtn) cancelBtn.style.display = isAdd ? '' : 'none';
+}
+
+function notesModeFor(client) {
+  return (client && (client.history || []).length) ? 'list' : 'add';
+}
+
+// Кнопка «+ Добавить отметку» внутри списка.
+function showNotesAddForm() {
+  resetNotesForm();
+  setNotesMode('add');
+  const text = document.getElementById('noteText');
+  if (text && text.focus) text.focus();
+}
+
+// Отмена добавления/правки: возвращаемся к списку.
+function cancelNoteEdit() {
+  const clientId = parseInt(document.getElementById('notesClientId').value, 10);
+  const client = clients.find(c => c.id === clientId);
+  resetNotesForm();
+  setNotesMode(notesModeFor(client));
 }
 
 function resetNotesForm() {
@@ -1283,8 +1379,8 @@ function startEditNote(clientId, idx) {
 
   const saveBtn = document.getElementById('noteSaveBtn');
   if (saveBtn) saveBtn.textContent = 'Сохранить изменения';
-  const cancelBtn = document.getElementById('noteCancelBtn');
-  if (cancelBtn) cancelBtn.style.display = '';
+  // Показываем форму: из списка отметок она скрыта.
+  setNotesMode('add');
   const text = document.getElementById('noteText');
   if (text && text.focus) text.focus();
 }
@@ -1332,6 +1428,7 @@ function saveClientNote() {
   saveClients(clients);
   resetNotesForm();
   renderClientNotes(clientId);
+  setNotesMode(notesModeFor(client));
   renderClientContacts(clientId);
   if (document.getElementById('clientCardModal') &&
       document.getElementById('clientCardModal').classList.contains('active')) {
@@ -1348,9 +1445,9 @@ function deleteSelectedClient() {
   if (!selectedClientId) { alert('Сначала выберите клиента в таблице'); return; }
   const client = clients.find(c => c.id === selectedClientId);
   if (!client) return;
-  // Удалять может только владелец компании (или администратор).
-  if (!canEditClient(client)) {
-    alert('Удалять компанию может только пользователь, который её создал.');
+  // Удаление клиента — только администратор.
+  if (!isAdmin()) {
+    alert('Удалять клиентов может только администратор.');
     return;
   }
   if (!confirm(`Удалить компанию «${client.orgName}»?\nКонтактные лица и история также будут удалены.`)) return;
