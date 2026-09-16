@@ -717,3 +717,22 @@ select[multiple] option:checked { background: #3b82f6; color: #fff; }
   border-radius: 6px; font-size: 12.5px; outline: none;
 }
 .card-transfer select:focus, .card-transfer input:focus { border-color: #3b82f6; }
+
+/* ============================================================
+   Неактивные элементы управления
+   ============================================================ */
+/* Раньше стилей для disabled не было, и заблокированная кнопка выглядела
+   как обычная: клик по ней не срабатывал, а пояснения пользователь не видел. */
+.btn:disabled,
+.btn[disabled],
+button:disabled {
+  background: #e9ecf1; color: #9ca3af; border-color: #dfe3e9;
+  cursor: not-allowed; box-shadow: none; opacity: 1;
+}
+.btn:disabled:hover { background: #e9ecf1; color: #9ca3af; }
+.btn-secondary:disabled,
+.btn-secondary[disabled] { background: #f9fafb; color: #b3b8c2; border-color: #e5e7eb; }
+.btn-icon-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+/* Пояснение вместо недоступной кнопки */
+.panel-hint { font-size: 11.5px; color: #9ca3af; }

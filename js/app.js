@@ -664,7 +664,9 @@ function renderSection(section) {
               <button class="btn btn-sm btn-secondary" onclick="openClientNotes(selectedClientId)"
                       title="Все комментарии по клиенту: добавление, отметки, правка">Особые отметки <span class="count" id="notesCount"></span></button>
             </div>
-            <button class="btn btn-sm" id="contactsAddBtn" onclick="openContactModal(selectedClientId)">+ Добавить</button>
+            ${isAdmin()
+              ? `<button class="btn btn-sm" id="contactsAddBtn" onclick="openContactModal(selectedClientId)">+ Добавить</button>`
+              : `<span class="panel-hint" title="Добавлять и изменять контактные лица может администратор">Контактные лица ведёт администратор</span>`}
           </div>
           <div class="clients-bottom-content" id="contactPanel">
             <div class="placeholder"><h2>Выберите клиента</h2><p>Кликните на строку в таблице</p></div>

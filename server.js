@@ -272,7 +272,18 @@ function serveFile(filePath, res) {
       return;
     }
     const ext = path.extname(filePath).toLowerCase();
-    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+    const headers = { 'Content-Type': MIME[ext] || 'application/octet-stream' };
+
+    // Файлы приложения меняются часто. Без запрета кэширования браузер может
+    // показывать старую версию скриптов после обновления проекта — тогда
+    // исправления «не применяются» до ручного обновления с Ctrl+F5.
+    if (/\.(html?|js|css|json)$/i.test(filePath)) {
+      headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
+      headers['Pragma'] = 'no-cache';
+      headers['Expires'] = '0';
+    }
+
+    res.writeHead(200, headers);
     res.end(data);
   });
 }
