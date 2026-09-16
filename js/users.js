@@ -39,8 +39,14 @@ function findUserByLogin(login) {
   return users.find(u => u.login.toLowerCase() === String(login).toLowerCase());
 }
 
+// Роли системы: администратор и менеджер по продажам (role === 'user').
+// Отдельного значения role для менеджера нет — так модель остаётся прежней.
 function userRoleLabel(u) {
-  return u && u.role === 'admin' ? 'Администратор' : 'Пользователь';
+  return (u && u.role === 'admin') ? 'Администратор' : 'Менеджер по продажам';
+}
+
+function isManagerRole(u) {
+  return !!u && u.role !== 'admin';
 }
 
 // Должность пользователя. Если не заполнена — показываем роль,

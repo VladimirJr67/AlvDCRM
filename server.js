@@ -174,7 +174,9 @@ const DEFAULT_DB = {
   // Общие справочники: типы организаций и должности контактных лиц.
   // Заполняются менеджерами и доступны всем остальным.
   orgTypes: [],
-  contactPositions: []
+  contactPositions: [],
+  // Лента новостей и объявлений для команды.
+  news: []
 };
 
 // Типы взаимодействий по умолчанию — сидируются только при первом старте
@@ -196,6 +198,7 @@ function normalizeDb(db) {
   d.orders = d.orders || [];
   d.orgTypes = Array.isArray(d.orgTypes) ? d.orgTypes : [];
   d.contactPositions = Array.isArray(d.contactPositions) ? d.contactPositions : [];
+  d.news = Array.isArray(d.news) ? d.news : [];
   d.interactionTypes = Array.isArray(d.interactionTypes) ? d.interactionTypes : [];
   // Легаси/fresh-базы без коллекции — наполняем дефолтами.
   if (!(db && Array.isArray(db.interactionTypes)) && !d.interactionTypes.length) {

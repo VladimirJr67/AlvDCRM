@@ -133,10 +133,55 @@ function updateTasksMenuBadge() {
     `<span class="menu-badge-count menu-badge-overdue" title="Просрочено">${overdue}</span>`;
 }
 
+// Одиночный клик по стрелке — сдвиг на ширину колонки.
 function scrollTaskBoard(direction) {
   const board = document.querySelector('.task-board');
   if (!board) return;
   board.scrollBy({ left: direction * 300, behavior: 'smooth' });
+}
+
+/* ===== Прокрутка доски стрелками =====
+   Короткое нажатие сдвигает доску на колонку, удержание — плавно
+   прокручивает непрерывно (кадр за кадром, без рывков). */
+
+const ARROW_HOLD_DELAY = 260;   // через сколько мс после нажатия начинается «удержание»
+const ARROW_STEP_PX = 14;       // сдвиг за кадр при удержании
+
+let arrowHoldTimer = null;
+let arrowRafId = null;
+let arrowDirection = 0;
+
+function arrowScrollFrame() {
+  const board = document.querySelector('.task-board');
+  if (!board) { stopBoardArrowScroll(); return; }
+  board.scrollLeft += arrowDirection * ARROW_STEP_PX;
+  arrowRafId = requestAnimationFrame(arrowScrollFrame);
+}
+
+function startBoardArrowScroll(direction) {
+  stopBoardArrowScroll();
+  arrowDirection = direction;
+  // Плавная прокрутка мешает непрерывному движению — на время удержания
+  // она отключается.
+  const board = document.querySelector('.task-board');
+  if (board) board.style.scrollBehavior = 'auto';
+  arrowHoldTimer = setTimeout(() => {
+    arrowHoldTimer = null;
+    arrowRafId = requestAnimationFrame(arrowScrollFrame);
+  }, ARROW_HOLD_DELAY);
+}
+
+function stopBoardArrowScroll() {
+  if (arrowHoldTimer) {
+    clearTimeout(arrowHoldTimer);
+    arrowHoldTimer = null;
+  }
+  if (arrowRafId) {
+    cancelAnimationFrame(arrowRafId);
+    arrowRafId = null;
+  }
+  const board = document.querySelector('.task-board');
+  if (board) board.style.scrollBehavior = '';
 }
 
 function renderTasks() {
@@ -170,8 +215,14 @@ function renderTasks() {
           ` : ''}
         </div>
 
-        <button class="board-scroll-btn left" onclick="scrollTaskBoard(-1)" title="Прокрутить влево">‹</button>
-        <button class="board-scroll-btn right" onclick="scrollTaskBoard(1)" title="Прокрутить вправо">›</button>
+        <button class="board-scroll-btn left" type="button"
+                onmousedown="startBoardArrowScroll(-1)" onmouseup="stopBoardArrowScroll()"
+                onmouseleave="stopBoardArrowScroll()" onblur="stopBoardArrowScroll()"
+                onclick="scrollTaskBoard(-1)" title="Прокрутить влево (удерживайте для непрерывной прокрутки)">‹</button>
+        <button class="board-scroll-btn right" type="button"
+                onmousedown="startBoardArrowScroll(1)" onmouseup="stopBoardArrowScroll()"
+                onmouseleave="stopBoardArrowScroll()" onblur="stopBoardArrowScroll()"
+                onclick="scrollTaskBoard(1)" title="Прокрутить вправо (удерживайте для непрерывной прокрутки)">›</button>
       </div>
     </div>
   `;

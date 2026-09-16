@@ -50,6 +50,7 @@ function rehydrateAll(db) {
   orders = db.orders || [];
   orgTypes = db.orgTypes || [];
   contactPositions = db.contactPositions || [];
+  newsItems = db.news || [];
 }
 
 // Собрать полный снапшот из глобалов приложения.
@@ -66,7 +67,8 @@ function assembleDb() {
     interactionTypes: interactionTypes || [],
     orders: orders || [],
     orgTypes: orgTypes || [],
-    contactPositions: contactPositions || []
+    contactPositions: contactPositions || [],
+    news: newsItems || []
   };
 }
 

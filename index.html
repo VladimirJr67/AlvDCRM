@@ -12,8 +12,8 @@
   <div class="login-card">
     <img src="https://avatars.mds.yandex.net/i?id=59709a441721a5e380612fdd93e30472_l-5098586-images-thumbs&n=13" alt="Алвид">
     <h2>Алвид CRM</h2>
-    <input type="text" id="loginInput" placeholder="Логин" value="Admin">
-    <input type="password" id="passwordInput" placeholder="Пароль" value="Admin">
+    <input type="text" id="loginInput" placeholder="Логин" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <input type="password" id="passwordInput" placeholder="Пароль" autocomplete="new-password">
     <button onclick="doLogin()">Войти</button>
     <div class="login-error" id="loginError">Неверный логин или пароль</div>
   </div>
@@ -38,12 +38,8 @@
       </div>
     </div>
     <div class="quick-actions">
-      <button type="button" class="quick-btn" onclick="openTaskModal()" title="Создать задачу, не уходя с текущего раздела">
-        <span class="quick-btn-icon">⚡</span> Быстрая задача
-      </button>
-      <button type="button" class="quick-btn" onclick="openReminderModal()" title="Создать напоминание, не уходя с текущего раздела">
-        <span class="quick-btn-icon">🔔</span> Быстрое напоминание
-      </button>
+      <button type="button" class="quick-btn" onclick="openTaskModal()" title="Создать задачу, не уходя с текущего раздела">Быстрая задача</button>
+      <button type="button" class="quick-btn" onclick="openReminderModal()" title="Создать напоминание, не уходя с текущего раздела">Быстрое напоминание</button>
     </div>
     <div class="menu" id="sidebarMenu"></div>
     <div class="user-info">
@@ -73,6 +69,7 @@
 <script src="js/tasks.js"></script>
 <script src="js/orders.js"></script>
 <script src="js/news.js"></script>
+<script src="js/managerTools.js"></script>
 <script src="js/notifications.js"></script>
 <script src="js/admin.js"></script>
 <script src="js/app.js"></script>

@@ -51,8 +51,10 @@ function doLogout() {
   document.getElementById('app').style.display = 'none';
   document.getElementById('loginScreen').style.display = 'flex';
   document.getElementById('loginError').style.display = 'none';
+  // Форма входа всегда пустая: логин и пароль не подставляются.
   document.getElementById('passwordInput').value = '';
-  document.getElementById('loginInput').value = 'Admin';
+  document.getElementById('loginInput').value = '';
+  document.getElementById('loginInput').focus();
 }
 
 document.addEventListener('DOMContentLoaded', () => {
