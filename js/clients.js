@@ -58,8 +58,12 @@ function canEditClient(client) {
   return !!client && client.createdBy === currentUser.id;
 }
 
-// Контактные лица ведёт только администратор: у менеджеров кнопки
-// «Изменить»/«Удалить» скрыты (требование ТЗ по разделу «Контакты»).
+// Контактные лица: добавлять новое может любой пользователь, включая
+// менеджера. Правка и удаление уже существующих — только администратор.
+function canAddContact() {
+  return !!currentUser;
+}
+
 function canManageContacts() {
   return isAdmin();
 }
@@ -341,17 +345,19 @@ function renderClientContacts(id) {
   if (!client) return;
 
   const contacts = client.contacts || [];
-  // Контактные лица правит только администратор, комментарии — все.
-  const canContacts = canManageContacts();
+  // Добавлять контактные лица может любой менеджер, править и удалять —
+  // только администратор; комментарии доступны всем.
+  const canAdd = canAddContact();
+  const canManage = canManageContacts();
   const editable = canEditClient(client);
   // Индекс мог устареть, если контактное лицо удалили.
   if (selectedContactIdx !== null && !contacts[selectedContactIdx]) selectedContactIdx = null;
   if (countEl) countEl.textContent = contacts.length ? `(${contacts.length})` : '';
-  if (addBtn) addBtn.disabled = !canContacts;
+  if (addBtn) addBtn.disabled = !canAdd;
   updateClientNotesCount(client);
 
   if (contacts.length === 0) {
-    panel.innerHTML = `<div class="empty-state"><p>${canContacts ? 'Нет контактных лиц.<br>Нажмите «+ Добавить», чтобы создать первое' : 'Нет контактных лиц'}</p></div>
+    panel.innerHTML = `<div class="empty-state"><p>${canAdd ? 'Нет контактных лиц.<br>Нажмите «+ Добавить», чтобы создать первое' : 'Нет контактных лиц'}</p></div>
       ${renderHistoryBlock(client, editable)}`;
     return;
   }
@@ -362,7 +368,7 @@ function renderClientContacts(id) {
     <div class="contact-list table-body">
       <table>
         <thead><tr>
-          <th>ФИО</th><th>Должность</th><th>Рабочий тел.</th><th>Сотовый</th><th>Мессенджеры</th><th>Email</th>${canContacts ? '<th class="col-actions">Действия</th>' : ''}
+          <th>ФИО</th><th>Должность</th><th>Рабочий тел.</th><th>Сотовый</th><th>Мессенджеры</th><th>Email</th>${canManage ? '<th class="col-actions">Действия</th>' : ''}
         </tr></thead>
         <tbody>
           ${contacts.map((ct, idx) => `<tr class="contact-row${selectedContactIdx === idx ? ' selected' : ''}"
@@ -373,7 +379,7 @@ function renderClientContacts(id) {
             <td>${escapeHtml(ct.phoneMobile || '—')}</td>
             <td>${messengerChipsHtml(ct.messengers)}</td>
             <td>${escapeHtml(ct.email || '—')}</td>
-            ${canContacts ? `<td class="col-actions">
+            ${canManage ? `<td class="col-actions">
               <button class="btn-icon-btn" onclick="event.stopPropagation(); editClientContact(${id}, ${idx})" title="Редактировать">✏️</button>
               <button class="btn-icon-btn" onclick="event.stopPropagation(); deleteContact(${id}, ${idx})" title="Удалить">🗑️</button>
             </td>` : ''}
@@ -891,7 +897,7 @@ function returnToClientCard() {
 }
 
 function openContactModal(clientId) {
-  if (!canManageContacts()) { alert('Контактные лица ведёт администратор.'); return; }
+  if (!canAddContact()) { alert('Сначала войдите в систему'); return; }
   if (!clientId) { alert('Сначала выберите клиента'); return; }
   document.getElementById('contactClientId').value = clientId;
   document.getElementById('contactModalTitle').textContent = 'Добавить контактное лицо';
@@ -906,7 +912,10 @@ function openContactModal(clientId) {
 }
 
 function editClientContact(clientId, idx) {
-  if (!canManageContacts()) return;
+  if (!canManageContacts()) {
+    alert('Изменять контактные лица может администратор.');
+    return;
+  }
   const client = clients.find(c => c.id === clientId);
   if (!client || !client.contacts[idx]) return;
   const ct = client.contacts[idx];
@@ -928,10 +937,14 @@ function saveContact(e) {
   const editIdx = document.getElementById('editContactIdx').value;
   const client = clients.find(c => c.id === clientId);
   if (!client) return;
-  if (!canManageContacts()) {
-    alert('Контактные лица ведёт администратор.');
+
+  // Новое контактное лицо добавляет любой пользователь, а правку уже
+  // существующего разрешаем только администратору.
+  if (editIdx !== '' && !canManageContacts()) {
+    alert('Изменять существующие контактные лица может администратор.');
     return;
   }
+  if (!canAddContact()) { alert('Сначала войдите в систему'); return; }
   if (!client.contacts) client.contacts = [];
   
   const contactData = {
@@ -961,7 +974,7 @@ function deleteContact(clientId, idx) {
   if (!confirm('Удалить контактное лицо?')) return;
   const client = clients.find(c => c.id === clientId);
   if (!client || !canManageContacts()) {
-    alert('Контактные лица ведёт администратор.');
+    alert('Удалять контактные лица может администратор.');
     return;
   }
   client.contacts.splice(idx, 1);
