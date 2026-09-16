@@ -648,17 +648,29 @@ function openTaskModal(task = null, clientId = null, defaultColumn = null) {
 
   const clientLink = document.getElementById('taskClientLink');
   const cid = task?.clientId || clientId;
-  if (cid) {
-    const c = clients.find(cl => cl.id === cid);
-    if (c) {
-      clientLink.style.display = 'block';
-      clientLink.innerHTML = `🏢 <strong>${escapeHtml(c.orgName)}</strong> <button type="button" onclick="unlinkTaskFromClient()" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:12px;margin-left:6px;">✕ убрать</button>`;
-    }
-  } else {
-    clientLink.style.display = 'none';
-  }
+  const linkedClient = cid ? clients.find(cl => cl.id === cid) : null;
+
+  // Поле «Клиент (компания)» показываем только там, где клиента ещё нет:
+  // «Быстрая задача» или создание из раздела «Задачи». Если задача открыта
+  // из карточки клиента или правится существующая — поле скрыто.
+  setTaskClientFieldLocked(linkedClient);
+
+  // Привязанного клиента показываем подписью, а не строкой со ссылкой:
+  // ссылку «убрать» выводит выбор клиента в открытом поле.
+  clientLink.style.display = 'none';
 
   document.getElementById('taskModal').classList.add('active');
+}
+
+// Скрыть выбор клиента и показать его подписью (клиент уже известен).
+function setTaskClientFieldLocked(client) {
+  const group = document.getElementById('taskClientGroup');
+  const fixed = document.getElementById('taskClientFixed');
+  if (group) group.style.display = client ? 'none' : '';
+  if (fixed) {
+    fixed.style.display = client ? 'block' : 'none';
+    fixed.innerHTML = client ? `Клиент: <strong>${escapeHtml(client.orgName)}</strong>` : '';
+  }
 }
 
 function updateTaskContactSelect() {

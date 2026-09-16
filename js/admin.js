@@ -229,6 +229,7 @@ function deleteInteractionTypeFromAdmin(index) {
 /* ===================== Анализ ===================== */
 
 let adminAnalysisTab = 'stats';   // 'stats' | 'comments'
+let adminCommentTagFilter = 'all'; // 'all' | 'self' | 'report' — фильтр по отметке
 let adminAnalysisDateFrom = null; // начало периода фильтра по датам
 let adminAnalysisDateTo = null;   // конец периода фильтра по датам
 
@@ -272,6 +273,13 @@ function renderAdminAnalysis() {
              style="padding:6px 9px;border:1px solid #d0d5dd;border-radius:5px;font-size:12px;outline:none;">
       <button class="btn btn-sm btn-secondary" onclick="setAdminAnalysisDateRange('${today}','${today}')">Сегодня</button>
       ${(from || to) ? `<button class="btn btn-sm btn-secondary" onclick="setAdminAnalysisDateRange('','')">Сбросить</button>` : ''}
+      ${adminAnalysisTab === 'comments' ? `
+        <span style="font-size:13px;color:#4b5563;font-weight:500;margin-left:8px;">Отметка:</span>
+        <select onchange="setAdminCommentTagFilter(this.value)" style="padding:6px 9px;border:1px solid #d0d5dd;border-radius:5px;font-size:12px;outline:none;">
+          <option value="all"${adminCommentTagFilter === 'all' ? ' selected' : ''}>Все комментарии</option>
+          <option value="self"${adminCommentTagFilter === 'self' ? ' selected' : ''}>Для себя</option>
+          <option value="report"${adminCommentTagFilter === 'report' ? ' selected' : ''}>Для отчёта</option>
+        </select>` : ''}
       ${(from || to) ? `<span style="font-size:12px;color:#9ca3af;">Показаны данные за период</span>` : ''}
     </div>`;
 
@@ -356,22 +364,31 @@ function renderAdminStats() {
 }
 
 // Лента комментариев: комментарии за выбранный период (по умолчанию — сегодня).
+// Фильтр по отметке: «Для себя» / «Для отчёта» / все.
 function commentsForRange() {
   const result = [];
   clients.forEach(c => {
     (c.history || []).forEach(h => {
       if (!inAnalysisRange(h.date)) return;
+      const tags = Array.isArray(h.tags) ? h.tags : [];
+      if (adminCommentTagFilter !== 'all' && tags.indexOf(adminCommentTagFilter) === -1) return;
       result.push({
         manager: h.manager || '',
         type: h.type || '',
         company: c.orgName || '',
         comment: h.comment || '',
         date: h.date || '',
+        tags: tags,
         order: h.order || null
       });
     });
   });
   return result.sort((a, b) => new Date(b.date) - new Date(a.date));
+}
+
+function setAdminCommentTagFilter(value) {
+  adminCommentTagFilter = value || 'all';
+  renderAdminAnalysis();
 }
 
 function renderAdminCommentsFeed() {
@@ -389,7 +406,7 @@ function renderAdminCommentsFeed() {
         <div class="table-body" style="max-height:60vh;">
           <table class="admin-table">
             <thead><tr>
-              <th>Менеджер</th><th>Тип взаимодействия</th><th>Компания</th><th>Комментарий</th><th>Дата/Время</th>
+              <th>Менеджер</th><th>Тип взаимодействия</th><th>Компания</th><th>Комментарий</th><th>Отметки</th><th>Дата/Время</th>
             </tr></thead>
             <tbody>
               ${comments.map(h => `
@@ -398,6 +415,7 @@ function renderAdminCommentsFeed() {
                   <td><span class="badge">${escapeHtml(h.type || '—')}</span></td>
                   <td>${escapeHtml(h.company)}</td>
                   <td><div class="history-comment">${escapeHtml(h.comment || '—')}</div></td>
+                  <td>${commentTagsHtml(h.tags) || '<span style="color:#9ca3af;">—</span>'}</td>
                   <td>${formatDateAdmin(h.date)}</td>
                 </tr>
               `).join('')}
@@ -422,6 +440,7 @@ function exportCommentsExcel() {
     'Тип взаимодействия': h.type || '—',
     'Компания': h.company || '—',
     'Комментарий': (h.comment || '').replace(/\s+/g, ' ').trim(),
+    'Отметки': commentTagLabels(h.tags) || '—',
     'Кол-во кг': h.order && h.order.kg !== null && h.order.kg !== undefined ? h.order.kg : '—',
     'Состояние': h.order && h.order.condition ? h.order.condition : '—',
     'Стоимость за кг': h.order && h.order.avgPrice !== null && h.order.avgPrice !== undefined ? h.order.avgPrice : '—',

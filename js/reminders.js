@@ -338,22 +338,33 @@ function getSelectedReminderScope() {
   return checked ? checked.value : 'self';
 }
 
-// Клиентское напоминание требует клиента, личное — нет,
-// поэтому поле клиента показываем только для «Для клиента».
+// Клиентское напоминание требует клиента, личное — нет, поэтому поле выбора
+// клиента показываем только для «Для клиента» и только если клиента ещё нет:
+// из карточки клиента он приходит уже выбранным.
 function onReminderScopeChange() {
   const scope = getSelectedReminderScope();
   const row = document.getElementById('reminderClientRow');
   const search = document.getElementById('reminderClientSearch');
   const link = document.getElementById('reminderClientLink');
+  const fixed = document.getElementById('reminderClientFixed');
+  const clientIdEl = document.getElementById('reminderClientId');
 
-  if (row) row.style.display = scope === 'client' ? '' : 'none';
+  const linkedId = (clientIdEl && clientIdEl.value) ? parseInt(clientIdEl.value, 10) : null;
+  const linked = linkedId ? clients.find(c => c.id === linkedId) : null;
+
+  if (row) row.style.display = (scope === 'client' && !linked) ? '' : 'none';
+  if (fixed) {
+    fixed.style.display = linked ? 'block' : 'none';
+    fixed.innerHTML = linked ? `Клиент: <strong>${escapeHtml(linked.orgName)}</strong>` : '';
+  }
 
   if (scope === 'self') {
-    document.getElementById('reminderClientId').value = '';
+    if (clientIdEl) clientIdEl.value = '';
     if (search) search.value = '';
     selectedReminderClientId = null;
     if (link) { link.style.display = 'none'; link.innerHTML = ''; }
-  } else {
+    if (fixed) { fixed.style.display = 'none'; fixed.innerHTML = ''; }
+  } else if (!linked) {
     updateReminderClientLink();
   }
 }
@@ -445,7 +456,10 @@ function toggleReminderComplete(id) {
   r.completed = !r.completed;
   r.completedAt = r.completed ? new Date().toISOString() : null;
   saveReminders();
-  renderReminders();
+  // Перерисовываем список только если открыт раздел напоминаний: иначе
+  // отметка «Выполнено» из всплывающего окна уводила бы пользователя
+  // из того раздела, где он работает.
+  if (currentSection === 'reminders') renderReminders();
 }
 
 /* ===== Навигация ===== */

@@ -50,12 +50,25 @@ function normalizeSite(s) {
   return /^https?:\/\//i.test(s) ? s : 'https://' + s;
 }
 
-// Права на редактирование компании и её контента (контакты, комментарии):
-// владелец (создатель) + администратор. Остальные — только чтение.
+// Права на редактирование самой карточки компании: владелец (создатель)
+// плюс администратор. Остальные — только чтение.
 function canEditClient(client) {
   if (!currentUser) return false;
   if (isAdmin()) return true;
   return !!client && client.createdBy === currentUser.id;
+}
+
+// Контактные лица ведёт только администратор: у менеджеров кнопки
+// «Изменить»/«Удалить» скрыты (требование ТЗ по разделу «Контакты»).
+function canManageContacts() {
+  return isAdmin();
+}
+
+// Комментарий может править его автор или администратор.
+function canEditComment(entry) {
+  if (!currentUser || !entry) return false;
+  if (isAdmin()) return true;
+  return entry.authorId ? entry.authorId === currentUser.id : entry.manager === currentUser.login;
 }
 
 // Набор видимых компаний в зависимости от выбранного фильтра.
@@ -76,15 +89,16 @@ function visibleClientsForFilter() {
   return clients.filter(c => c.createdBy === uid);
 }
 
-// Поиск по всем полям карточки клиента: название, сайт, email, телефон,
-// адрес, город, направление, ИНН/ОГРН, основной контакт.
+// Поиск по всем полям карточки клиента, включая ID старой базы:
+// по нему клиента находят в первую очередь при переходе с прежней системы.
 function searchClient(c, q) {
   if (!q) return true;
   const fields = [
     c.orgName, c.orgCity, c.orgDirection, c.orgAddress,
-    c.orgPhones, c.orgEmails, c.orgWebsite, c.orgInn, c.orgOgrn
+    c.orgPhones, c.orgEmails, c.orgWebsite, c.orgInn, c.orgOgrn,
+    c.oldBaseId
   ];
-  return fields.some(f => (f || '').toLowerCase().includes(q));
+  return fields.some(f => String(f == null ? '' : f).toLowerCase().includes(q));
 }
 
 // Debounce поиска в реальном времени (350 мс).
@@ -327,14 +341,17 @@ function renderClientContacts(id) {
   if (!client) return;
 
   const contacts = client.contacts || [];
+  // Контактные лица правит только администратор, комментарии — все.
+  const canContacts = canManageContacts();
   const editable = canEditClient(client);
   // Индекс мог устареть, если контактное лицо удалили.
   if (selectedContactIdx !== null && !contacts[selectedContactIdx]) selectedContactIdx = null;
   if (countEl) countEl.textContent = contacts.length ? `(${contacts.length})` : '';
-  if (addBtn) addBtn.disabled = !editable;
+  if (addBtn) addBtn.disabled = !canContacts;
+  updateClientNotesCount(client);
 
   if (contacts.length === 0) {
-    panel.innerHTML = `<div class="empty-state"><p>${editable ? 'Нет контактных лиц.<br>Нажмите «+ Добавить», чтобы создать первое' : 'Нет контактных лиц'}</p></div>
+    panel.innerHTML = `<div class="empty-state"><p>${canContacts ? 'Нет контактных лиц.<br>Нажмите «+ Добавить», чтобы создать первое' : 'Нет контактных лиц'}</p></div>
       ${renderHistoryBlock(client, editable)}`;
     return;
   }
@@ -345,7 +362,7 @@ function renderClientContacts(id) {
     <div class="contact-list table-body">
       <table>
         <thead><tr>
-          <th>ФИО</th><th>Должность</th><th>Рабочий тел.</th><th>Сотовый</th><th>Мессенджеры</th><th>Email</th>${editable ? '<th class="col-actions">Действия</th>' : ''}
+          <th>ФИО</th><th>Должность</th><th>Рабочий тел.</th><th>Сотовый</th><th>Мессенджеры</th><th>Email</th>${canContacts ? '<th class="col-actions">Действия</th>' : ''}
         </tr></thead>
         <tbody>
           ${contacts.map((ct, idx) => `<tr class="contact-row${selectedContactIdx === idx ? ' selected' : ''}"
@@ -356,7 +373,7 @@ function renderClientContacts(id) {
             <td>${escapeHtml(ct.phoneMobile || '—')}</td>
             <td>${messengerChipsHtml(ct.messengers)}</td>
             <td>${escapeHtml(ct.email || '—')}</td>
-            ${editable ? `<td class="col-actions">
+            ${canContacts ? `<td class="col-actions">
               <button class="btn-icon-btn" onclick="event.stopPropagation(); editClientContact(${id}, ${idx})" title="Редактировать">✏️</button>
               <button class="btn-icon-btn" onclick="event.stopPropagation(); deleteContact(${id}, ${idx})" title="Удалить">🗑️</button>
             </td>` : ''}
@@ -365,6 +382,14 @@ function renderClientContacts(id) {
       </table>
     </div>
     ${renderHistoryBlock(client, editable)}`;
+}
+
+// Счётчик комментариев на кнопке «Особые отметки».
+function updateClientNotesCount(client) {
+  const el = document.getElementById('notesCount');
+  if (!el) return;
+  const count = client ? (client.history || []).length : 0;
+  el.textContent = count ? `(${count})` : '';
 }
 
 /* ===== Мессенджеры контактного лица ===== */
@@ -419,24 +444,53 @@ function clearContactHistoryFilter() {
   renderClientContacts(selectedClientId);
 }
 
-// Одна запись истории — используется и в блоке контактов, и в окне всей истории.
+// Метки комментария. «Для себя» — личная пометка, «Для отчёта» — попадает
+// в отчётность администратора.
+const COMMENT_TAGS = [
+  { key: 'self', label: 'Для себя', color: '#6b7280' },
+  { key: 'report', label: 'Для отчёта', color: '#1d4ed8' }
+];
+
+function commentTagsHtml(tags) {
+  const list = Array.isArray(tags) ? tags : [];
+  if (!list.length) return '';
+  return list.map(key => {
+    const t = COMMENT_TAGS.find(x => x.key === key);
+    if (!t) return '';
+    return `<span class="comment-tag" style="background:${t.color}1f;color:${t.color};">${escapeHtml(t.label)}</span>`;
+  }).join(' ');
+}
+
+function commentTagLabels(tags) {
+  const list = Array.isArray(tags) ? tags : [];
+  return list.map(key => {
+    const t = COMMENT_TAGS.find(x => x.key === key);
+    return t ? t.label : key;
+  }).join(', ');
+}
+
+// Одна запись истории — используется в блоке контактов, окне всей истории
+// и в «Особых отметках».
 function historyEntryHtml(h) {
   return `
     <div class="history-entry">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-        <span style="font-size:11px;color:#9ca3af;">${formatDate(h.date)}</span>
+        <span style="font-size:11px;color:#9ca3af;">${formatDate(h.date)}${h.editedAt ? ' · изменено' : ''}</span>
         <span class="badge">${escapeHtml(h.type)}</span>
       </div>
       <div class="history-comment">${escapeHtml(h.comment)}</div>
       <div style="font-size:11px;color:#6b7280;margin-top:4px;">
         ${escapeHtml(h.manager || '')}${h.contactPerson ? ' · ' + escapeHtml(h.contactPerson) : ''}
       </div>
+      ${h.tags && h.tags.length ? `<div class="comment-tags">${commentTagsHtml(h.tags)}</div>` : ''}
     </div>
   `;
 }
 
 // Блок «История взаимодействий» под списком контактных лиц.
 // Если контактное лицо выбрано — показываем только его комментарии.
+// Комментарии может добавлять любой пользователь, поэтому кнопка «+ Добавить»
+// показывается всем, у кого есть доступ к карточке.
 function renderHistoryBlock(client, editable) {
   const all = [...(client.history || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
   const person = selectedContactName(client);
@@ -453,7 +507,7 @@ function renderHistoryBlock(client, editable) {
         <h3>История взаимодействий (${history.length}${person ? ' из ' + all.length : ''})</h3>
         <div class="history-actions">
           <button class="btn btn-sm btn-secondary" onclick="openAllHistoryModal(${client.id})">Вся история взаимодействий</button>
-          ${editable !== false ? `<button class="btn btn-sm" onclick="openHistoryModal(${client.id})">+ Добавить</button>` : ''}
+          <button class="btn btn-sm" onclick="openHistoryModal(${client.id})">+ Добавить</button>
         </div>
       </div>
       ${filterHint}
@@ -559,8 +613,9 @@ function renderClientCard(id) {
             </div>
           </div>
           <div class="cc-actions">
-            <button class="btn btn-sm btn-secondary" onclick="openTaskModalWithClient(${client.id})">+ Задача</button>
-            <button class="btn btn-sm btn-secondary" onclick="openReminderModal(null, ${client.id})">+ Напоминание</button>
+            <button class="btn btn-sm btn-secondary" onclick="openCardTaskModal(${client.id})">+ Задача</button>
+            <button class="btn btn-sm btn-secondary" onclick="openCardReminderModal(${client.id})">+ Напоминание</button>
+            <button class="btn btn-sm btn-secondary" onclick="openClientNotes(${client.id})">Особые отметки</button>
           </div>
         </div>
       </div>
@@ -578,6 +633,7 @@ function renderClientCard(id) {
             ${field('Адрес', escapeHtml(client.orgAddress || ''))}
             ${field('ИНН', escapeHtml(client.orgInn || ''), true)}
             ${field('ОГРН', escapeHtml(client.orgOgrn || ''), true)}
+            ${client.oldBaseId ? field('ID старой базы', escapeHtml(client.oldBaseId), true) : ''}
             ${field('Сайт', site ? `<a href="${site}" target="_blank" rel="noopener">${escapeHtml(client.orgWebsite)}</a>` : '')}
           </div>
         </div>
@@ -669,9 +725,51 @@ function openClientModal(client = null) {
   document.getElementById('orgInn').value = client?.orgInn || '';
   document.getElementById('orgOgrn').value = client?.orgOgrn || '';
 
+  // Клиент из старой базы: чекбокс раскрывает поле с прежним ID.
+  const oldBaseCb = document.getElementById('orgOldBase');
+  const oldBaseIdEl = document.getElementById('oldBaseId');
+  const oldBaseId = client?.oldBaseId || '';
+  if (oldBaseCb) oldBaseCb.checked = !!oldBaseId;
+  if (oldBaseIdEl) oldBaseIdEl.value = oldBaseId;
+  toggleOldBaseField();
+
+  // Ответственный менеджер: заполняет только администратор (перенос клиента).
+  const ownerSelect = document.getElementById('clientOwner');
+  if (ownerSelect) {
+    ownerSelect.innerHTML = users.map(u =>
+      `<option value="${u.id}">${escapeHtml(u.name || u.login)} (${escapeHtml(userPositionLabel(u))})</option>`
+    ).join('');
+    const ownerId = client ? client.createdBy : (currentUser ? currentUser.id : null);
+    ownerSelect.value = ownerId || '';
+  }
+  const transferComment = document.getElementById('clientTransferComment');
+  if (transferComment) transferComment.value = '';
+  toggleClientOwnerRow();
+
   hideCitySuggestions();
   setInnStatus('');
   document.getElementById('clientModal').classList.add('active');
+}
+
+// Поле «ID старой базы» показывается только при отмеченном чекбоксе.
+function toggleOldBaseField() {
+  const cb = document.getElementById('orgOldBase');
+  const row = document.getElementById('oldBaseRow');
+  if (!cb || !row) return;
+  row.style.display = cb.checked ? '' : 'none';
+  if (!cb.checked) {
+    const el = document.getElementById('oldBaseId');
+    if (el) el.value = '';
+  }
+}
+
+// Блок переноса клиента другому менеджеру — только для администратора.
+function toggleClientOwnerRow() {
+  const row = document.getElementById('clientOwnerRow');
+  const commentRow = document.getElementById('clientTransferCommentRow');
+  const visible = isAdmin();
+  if (row) row.style.display = visible ? '' : 'none';
+  if (commentRow) commentRow.style.display = visible ? '' : 'none';
 }
 
 function saveClient(e) {
@@ -693,6 +791,21 @@ function saveClient(e) {
     orgOgrn: document.getElementById('orgOgrn').value.trim()
   };
 
+  // ID старой базы — только если отмечен чекбокс «Клиент из старой базы».
+  const oldBaseCb = document.getElementById('orgOldBase');
+  const oldBaseIdEl = document.getElementById('oldBaseId');
+  data.oldBaseId = (oldBaseCb && oldBaseCb.checked && oldBaseIdEl)
+    ? oldBaseIdEl.value.trim()
+    : '';
+
+  // Администратор может сразу закрепить клиента за менеджером (перенос).
+  const ownerSelect = document.getElementById('clientOwner');
+  const transferCommentEl = document.getElementById('clientTransferComment');
+  const transferComment = transferCommentEl ? transferCommentEl.value.trim() : '';
+  const ownerId = (isAdmin() && ownerSelect && ownerSelect.value)
+    ? parseInt(ownerSelect.value, 10)
+    : null;
+
   if (id) {
     const idx = clients.findIndex(c => c.id === parseInt(id));
     if (idx !== -1) {
@@ -700,20 +813,36 @@ function saveClient(e) {
         alert('Редактировать компанию может только пользователь, который её создал.');
         return;
       }
+      const previousOwner = clients[idx].createdBy;
       data.id = clients[idx].id;
       data.contacts = clients[idx].contacts || [];
       data.history = clients[idx].history || [];
-      data.createdBy = clients[idx].createdBy; // владелец не меняется
+      data.createdBy = ownerId || previousOwner;
       clients[idx] = data;
+
+      // Перенос другому менеджеру — уведомляем нового ответственного.
+      if (ownerId && ownerId !== previousOwner) {
+        notifyClientTransfer(ownerId, 1, transferComment);
+      }
     }
   } else {
     const maxId = clients.reduce((m, c) => Math.max(m, c.id || 0), 0);
     data.id = maxId + 1;
     data.contacts = [];
     data.history = [];
-    data.createdBy = currentUser ? currentUser.id : null; // компанию создаёт текущий пользователь
+    data.createdBy = ownerId || (currentUser ? currentUser.id : null);
     clients.push(data);
+
+    if (isAdmin() && ownerId && currentUser && ownerId !== currentUser.id) {
+      // Администратор закрепил нового клиента за менеджером.
+      notifyClientTransfer(ownerId, 1, transferComment);
+    } else if (currentUser && !isAdmin()) {
+      // Менеджер создал клиента сам — подтверждаем ему создание.
+      notifyUser(currentUser.id, 'Клиент добавлен',
+        'Вы добавили клиента «' + data.orgName + '» в свою базу.', null);
+    }
   }
+
   saveClients(clients);
   hideCitySuggestions();
   closeModal('clientModal');
@@ -721,6 +850,14 @@ function saveClient(e) {
   if (selectedClientId) renderClientContacts(selectedClientId);
   // Форму открывали из карточки — возвращаем пользователя в неё с новыми данными.
   returnToClientCard();
+}
+
+// Уведомление менеджеру о закреплении клиентов (импорт или перенос).
+function notifyClientTransfer(userId, count, comment) {
+  if (!userId) return;
+  let text = 'На вас перенесли клиента в кол-ве ' + count;
+  if (comment) text += '. ' + comment;
+  notifyUser(userId, 'Клиенты закреплены за вами', text, null);
 }
 
 // Отмена редактирования: закрываем форму и возвращаемся в карточку просмотра.
@@ -738,6 +875,7 @@ function returnToClientCard() {
 }
 
 function openContactModal(clientId) {
+  if (!canManageContacts()) { alert('Контактные лица ведёт администратор.'); return; }
   if (!clientId) { alert('Сначала выберите клиента'); return; }
   document.getElementById('contactClientId').value = clientId;
   document.getElementById('contactModalTitle').textContent = 'Добавить контактное лицо';
@@ -752,6 +890,7 @@ function openContactModal(clientId) {
 }
 
 function editClientContact(clientId, idx) {
+  if (!canManageContacts()) return;
   const client = clients.find(c => c.id === clientId);
   if (!client || !client.contacts[idx]) return;
   const ct = client.contacts[idx];
@@ -773,8 +912,8 @@ function saveContact(e) {
   const editIdx = document.getElementById('editContactIdx').value;
   const client = clients.find(c => c.id === clientId);
   if (!client) return;
-  if (!canEditClient(client)) {
-    alert('Добавлять и изменять контактные лица может только владелец компании.');
+  if (!canManageContacts()) {
+    alert('Контактные лица ведёт администратор.');
     return;
   }
   if (!client.contacts) client.contacts = [];
@@ -805,8 +944,8 @@ function saveContact(e) {
 function deleteContact(clientId, idx) {
   if (!confirm('Удалить контактное лицо?')) return;
   const client = clients.find(c => c.id === clientId);
-  if (!client || !canEditClient(client)) {
-    alert('Удалять контактные лица может только владелец компании.');
+  if (!client || !canManageContacts()) {
+    alert('Контактные лица ведёт администратор.');
     return;
   }
   client.contacts.splice(idx, 1);
@@ -814,7 +953,27 @@ function deleteContact(clientId, idx) {
   renderClientContacts(clientId);
 }
 
-function openHistoryModal(clientId) {
+// Теги, отмеченные в форме комментария.
+function readCommentTags(selfId, reportId) {
+  const tags = [];
+  const selfEl = document.getElementById(selfId);
+  const reportEl = document.getElementById(reportId);
+  if (selfEl && selfEl.checked) tags.push('self');
+  if (reportEl && reportEl.checked) tags.push('report');
+  return tags;
+}
+
+function setCommentTagInputs(selfId, reportId, tags) {
+  const list = Array.isArray(tags) ? tags : [];
+  const selfEl = document.getElementById(selfId);
+  const reportEl = document.getElementById(reportId);
+  if (selfEl) selfEl.checked = list.indexOf('self') > -1;
+  if (reportEl) reportEl.checked = list.indexOf('report') > -1;
+}
+
+// Открытие формы комментария. editIdx != null — правим существующую запись
+// (доступно автору и администратору).
+function openHistoryModal(clientId, editIdx) {
   document.getElementById('historyClientId').value = clientId;
   const client = clients.find(c => c.id === clientId);
   const select = document.getElementById('historyContactPerson');
@@ -832,6 +991,38 @@ function openHistoryModal(clientId) {
   typeSelect.innerHTML = types.map(t => `<option>${escapeHtml(t)}</option>`).join('');
   // Сбрасываем состояние формы заказа («Размещение заказа»).
   resetOrderForm();
+
+  const editing = (editIdx !== undefined && editIdx !== null && editIdx !== '');
+  const title = document.querySelector('#historyModal h2');
+  const editIdxEl = document.getElementById('historyEditIdx');
+  const commentEl = document.getElementById('historyComment');
+  const submitBtn = document.querySelector('#historyModal button[type="submit"]');
+
+  if (editing) {
+    const entry = client ? (client.history || [])[parseInt(editIdx, 10)] : null;
+    if (entry) {
+      if (editIdxEl) editIdxEl.value = editIdx;
+      if (typeSelect) typeSelect.value = entry.type || typeSelect.value;
+      if (commentEl) commentEl.value = entry.comment || '';
+      const personSel = document.getElementById('historyContactPerson');
+      if (personSel) personSel.value = entry.contactPerson || '';
+      setCommentTagInputs('historyTagSelf', 'historyTagReport', entry.tags);
+      if (entry.order) {
+        document.getElementById('orderKg').value = entry.order.kg === null || entry.order.kg === undefined ? '' : entry.order.kg;
+        document.getElementById('orderCost').value = entry.order.cost === null || entry.order.cost === undefined ? '' : entry.order.cost;
+        renderOrderConditions(entry.order.condition);
+      }
+      if (title) title.textContent = 'Редактирование комментария';
+      if (submitBtn) submitBtn.textContent = 'Сохранить';
+    }
+  } else {
+    if (editIdxEl) editIdxEl.value = '';
+    if (commentEl) commentEl.value = '';
+    setCommentTagInputs('historyTagSelf', 'historyTagReport', []);
+    if (title) title.textContent = 'Добавить взаимодействие';
+    if (submitBtn) submitBtn.textContent = 'Добавить';
+  }
+
   onHistoryTypeChange();
   // Менеджер — всегда тот, кто оставил комментарий (текущий пользователь),
   // поэтому поле в модалке не показываем и проставляем автоматически при сохранении.
@@ -904,10 +1095,9 @@ function saveHistory(e) {
   const clientId = parseInt(document.getElementById('historyClientId').value);
   const client = clients.find(c => c.id === clientId);
   if (!client) return;
-  if (!canEditClient(client)) {
-    alert('Добавлять комментарии может только владелец компании.');
-    return;
-  }
+  // Комментарии может добавлять любой пользователь; правку существующей
+  // записи разрешаем автору и администратору (проверяется ниже).
+  if (!client.history) client.history = [];
 
   const type = document.getElementById('historyType').value;
   let comment = document.getElementById('historyComment').value.trim();
@@ -938,14 +1128,41 @@ function saveHistory(e) {
   }
 
   if (!comment) { alert('Заполните комментарий'); return; }
-  if (!client.history) client.history = [];
+
+  const tags = readCommentTags('historyTagSelf', 'historyTagReport');
+  const editIdxEl = document.getElementById('historyEditIdx');
+  const editIdx = editIdxEl ? editIdxEl.value : '';
+
+  // Правка ранее оставленного комментария.
+  if (editIdx !== '') {
+    const entry = client.history[parseInt(editIdx, 10)];
+    if (!entry) return;
+    if (!canEditComment(entry)) {
+      alert('Править комментарий может его автор или администратор.');
+      return;
+    }
+    entry.type = type;
+    entry.comment = comment;
+    entry.tags = tags;
+    entry.editedAt = new Date().toISOString();
+    if (orderData) entry.order = orderData;
+
+    saveClients(clients);
+    closeModal('historyModal');
+    if (e.target && e.target.reset) e.target.reset();
+    resetOrderForm();
+    refreshClientViews(clientId);
+    return;
+  }
 
   client.history.push({
     date: new Date().toISOString(),
     type: type,
     contactPerson: document.getElementById('historyContactPerson').value,
     manager: currentUser ? currentUser.login : '',
+    authorId: currentUser ? currentUser.id : null,
     comment: comment,
+    tags: tags,
     order: orderData
   });
   saveClients(clients);
@@ -965,13 +1182,159 @@ function saveHistory(e) {
   }
 
   closeModal('historyModal');
-  e.target.reset();
+  if (e.target && e.target.reset) e.target.reset();
   resetOrderForm();
-  // Реактивное обновление без перезагрузки страницы: перерисовываем
-  // и нижнюю панель контактов (блок «История взаимодействий»), и карточку,
-  // если она открыта.
+  refreshClientViews(clientId);
+}
+
+// Перерисовать блоки клиента после изменения комментариев.
+function refreshClientViews(clientId) {
   renderClientContacts(clientId);
-  if (document.getElementById('clientCardModal')?.classList.contains('active')) {
+  renderClientNotes(clientId);
+  if (document.getElementById('clientCardModal') &&
+      document.getElementById('clientCardModal').classList.contains('active')) {
+    renderClientCard(cardClientId || clientId);
+  }
+}
+
+/* ===== Особые отметки =====
+   Комментарии по клиенту целиком, без привязки к конкретному контактному
+   лицу: список с автором и датой, добавление доступно всем, отметки-теги
+   «Для себя» / «Для отчёта», правка — автору и администратору. */
+
+function openClientNotes(clientId) {
+  const client = clients.find(c => c.id === clientId);
+  if (!client) { alert('Сначала выберите клиента'); return; }
+  document.getElementById('notesClientId').value = clientId;
+  document.getElementById('notesModalTitle').textContent = 'Особые отметки — ' + (client.orgName || '');
+  resetNotesForm();
+  renderClientNotes(clientId);
+  document.getElementById('clientNotesModal').classList.add('active');
+}
+
+function resetNotesForm() {
+  const text = document.getElementById('noteText');
+  if (text) text.value = '';
+  const editIdx = document.getElementById('noteEditIdx');
+  if (editIdx) editIdx.value = '';
+
+  const typeSel = document.getElementById('noteType');
+  if (typeSel) {
+    const types = (interactionTypes && interactionTypes.length) ? interactionTypes : ['Информация'];
+    const current = typeSel.value;
+    typeSel.innerHTML = types.map(t => `<option>${escapeHtml(t)}</option>`).join('');
+    typeSel.value = types.indexOf(current) > -1 ? current : types[0];
+  }
+
+  setCommentTagInputs('noteTagSelf', 'noteTagReport', []);
+  const saveBtn = document.getElementById('noteSaveBtn');
+  if (saveBtn) saveBtn.textContent = 'Добавить отметку';
+  const cancelBtn = document.getElementById('noteCancelBtn');
+  if (cancelBtn) cancelBtn.style.display = 'none';
+}
+
+function renderClientNotes(clientId) {
+  const client = clients.find(c => c.id === clientId);
+  const list = document.getElementById('notesList');
+  if (!client || !list) return;
+
+  const notes = [...(client.history || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
+  const modalCount = document.getElementById('notesModalCount');
+  if (modalCount) modalCount.textContent = notes.length ? `(${notes.length})` : '';
+  updateClientNotesCount(client);
+
+  if (!notes.length) {
+    list.innerHTML = '<div class="empty-state" style="padding:30px 16px;"><p>Отметок пока нет</p></div>';
+    return;
+  }
+
+  list.innerHTML = notes.map(entry => {
+    const idx = (client.history || []).indexOf(entry);
+    return `
+      <div class="note-item">
+        <div class="note-item-head">
+          <span class="note-author">${escapeHtml(entry.manager || '—')}</span>
+          <span class="note-date">${formatDate(entry.date)}${entry.editedAt ? ' · изменено' : ''}</span>
+          <span class="badge">${escapeHtml(entry.type || '')}</span>
+          ${canEditComment(entry)
+            ? `<button class="btn-icon-btn" onclick="startEditNote(${clientId}, ${idx})" title="Редактировать отметку">✏️</button>`
+            : ''}
+        </div>
+        <div class="note-text">${escapeHtml(entry.comment || '')}</div>
+        ${entry.tags && entry.tags.length ? `<div class="comment-tags">${commentTagsHtml(entry.tags)}</div>` : ''}
+      </div>`;
+  }).join('');
+}
+
+function startEditNote(clientId, idx) {
+  const client = clients.find(c => c.id === clientId);
+  if (!client || !client.history || !client.history[idx]) return;
+  const entry = client.history[idx];
+  if (!canEditComment(entry)) {
+    alert('Править отметку может её автор или администратор.');
+    return;
+  }
+
+  document.getElementById('noteEditIdx').value = idx;
+  document.getElementById('noteText').value = entry.comment || '';
+  const typeSel = document.getElementById('noteType');
+  if (typeSel && entry.type) typeSel.value = entry.type;
+  setCommentTagInputs('noteTagSelf', 'noteTagReport', entry.tags);
+
+  const saveBtn = document.getElementById('noteSaveBtn');
+  if (saveBtn) saveBtn.textContent = 'Сохранить изменения';
+  const cancelBtn = document.getElementById('noteCancelBtn');
+  if (cancelBtn) cancelBtn.style.display = '';
+  const text = document.getElementById('noteText');
+  if (text && text.focus) text.focus();
+}
+
+function saveClientNote() {
+  const clientId = parseInt(document.getElementById('notesClientId').value, 10);
+  const client = clients.find(c => c.id === clientId);
+  if (!client) return;
+  if (!client.history) client.history = [];
+
+  const textEl = document.getElementById('noteText');
+  const text = textEl ? textEl.value.trim() : '';
+  if (!text) { alert('Введите текст отметки'); return; }
+
+  const typeSel = document.getElementById('noteType');
+  const type = (typeSel && typeSel.value) ? typeSel.value : 'Информация';
+  const tags = readCommentTags('noteTagSelf', 'noteTagReport');
+  const editIdxEl = document.getElementById('noteEditIdx');
+  const editIdx = editIdxEl ? editIdxEl.value : '';
+
+  if (editIdx !== '') {
+    const entry = client.history[parseInt(editIdx, 10)];
+    if (!entry) return;
+    if (!canEditComment(entry)) {
+      alert('Править отметку может её автор или администратор.');
+      return;
+    }
+    entry.comment = text;
+    entry.type = type;
+    entry.tags = tags;
+    entry.editedAt = new Date().toISOString();
+  } else {
+    client.history.push({
+      date: new Date().toISOString(),
+      type: type,
+      contactPerson: '',
+      manager: currentUser ? currentUser.login : '',
+      authorId: currentUser ? currentUser.id : null,
+      comment: text,
+      tags: tags,
+      order: null
+    });
+  }
+
+  saveClients(clients);
+  resetNotesForm();
+  renderClientNotes(clientId);
+  renderClientContacts(clientId);
+  if (document.getElementById('clientCardModal') &&
+      document.getElementById('clientCardModal').classList.contains('active')) {
     renderClientCard(cardClientId || clientId);
   }
 }
@@ -1011,51 +1374,16 @@ function escapeHtml(s) {
   return s.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 }
 
+// Задача из карточки клиента: модалка открывается ПОВЕРХ карточки,
+// а поле «Клиент (компания)» внутри скрыто — клиент уже известен.
 function openTaskModalWithClient(clientId) {
-  document.getElementById('taskModalTitle').textContent = 'Новая задача';
-  document.getElementById('taskId').value = '';
-  document.getElementById('taskTitle').value = '';
-  document.getElementById('taskDescription').value = '';
-  document.getElementById('taskDeadline').value = '';
-  document.getElementById('taskClientId').value = clientId;
-  initTaskClientSearch();
+  openTaskModal(null, clientId);
+}
 
-  const prioritySelect = document.getElementById('taskPriority');
-  prioritySelect.innerHTML = TASK_PRIORITIES.map(p => 
-    `<option value="${p.value}">${p.name}</option>`
-  ).join('');
-  
-  const columnSelect = document.getElementById('taskColumn');
-  const sortedCols = [...taskColumns].sort((a, b) => a.order - b.order);
-  columnSelect.innerHTML = sortedCols.map(c => 
-    `<option value="${c.id}">${escapeHtml(c.name)}</option>`
-  ).join('');
-  
-  // Форма открыта для конкретного клиента: помощники ещё не выбраны.
-  taskCoAssignees = [];
-  const coAssigneeInput = document.getElementById('coAssigneeSearch');
-  if (coAssigneeInput) coAssigneeInput.value = '';
-  hideCoAssigneeDropdown();
-  renderCoAssigneeChips();
-  
-  const client = clients.find(c => c.id === clientId);
-  const clientLink = document.getElementById('taskClientLink');
-  if (client) {
-    clientLink.style.display = 'block';
-    clientLink.innerHTML = `🏢 <strong>${escapeHtml(client.orgName)}</strong> <button type="button" onclick="unlinkTaskFromClient()" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:12px;margin-left:6px;"> убрать</button>`;
-  }
-  
-  const contactRow = document.getElementById('taskContactRow');
-  const contactSelect = document.getElementById('taskContactSelect');
-  if (client && client.contacts && client.contacts.length > 0) {
-    contactRow.style.display = 'block';
-    contactSelect.innerHTML = '<option value="">— Не выбрано —</option>' + 
-      client.contacts.map(ct => `<option value="${ct.id}">${escapeHtml(ct.name)}${ct.position ? ' (' + escapeHtml(ct.position) + ')' : ''}</option>`).join('');
-  } else {
-    contactRow.style.display = 'none';
-  }
-  
-  document.getElementById('taskModal').classList.add('active');
+// Напоминание из карточки клиента: тип сразу «Для клиента»,
+// поле выбора клиента скрыто.
+function openCardReminderModal(clientId) {
+  openReminderModal(null, clientId);
 }
 
 /* ===== Умный ввод города =====
@@ -1196,6 +1524,7 @@ async function fillClientByInn() {
 const CLIENT_IMPORT_COLUMNS = [
   'Организация', 'Страна', 'Город', 'Тип организации', 'Статус', 'Адрес',
   'Телефоны', 'Email', 'Сайт', 'ИНН', 'ОГРН',
+  'Логин менеджера', 'ID старой базы',
   'Контактное лицо', 'Должность', 'Телефон контакта', 'Email контакта'
 ];
 
@@ -1212,6 +1541,8 @@ const CLIENT_IMPORT_ALIASES = {
   'Сайт': ['сайт', 'сайт организации', 'website'],
   'ИНН': ['инн'],
   'ОГРН': ['огрн'],
+  'Логин менеджера': ['логин менеджера', 'менеджер', 'ответственный', 'логин ответственного', 'manager'],
+  'ID старой базы': ['id старой базы', 'id', 'ид', 'номер в старой базе', 'id в старой базе', 'старый id'],
   'Контактное лицо': ['контактное лицо', 'фио', 'контакт', 'основной контакт'],
   'Должность': ['должность'],
   'Телефон контакта': ['телефон контакта', 'сотовый', 'мобильный', 'телефон контактного лица'],
@@ -1230,9 +1561,10 @@ function normalizeImportHeader(value) {
 
 function parseClientStatus(value) {
   const v = String(value || '').trim().toLowerCase();
-  if (!v) return 'cooperation';
+  // По ТЗ статус по умолчанию при импорте — «В работе».
+  if (!v) return 'in_progress';
   const found = Object.keys(CLIENT_STATUS_ALIASES).find(k => CLIENT_STATUS_ALIASES[k].indexOf(v) > -1);
-  return found || 'cooperation';
+  return found || 'in_progress';
 }
 
 function resolveCountryCode(value) {
@@ -1256,7 +1588,7 @@ function resolveClientImportColumns(headerRow) {
 }
 
 function buildClientsFromRows(rows) {
-  if (!rows.length) return { list: [], skipped: 0 };
+  if (!rows.length) return { list: [], skipped: 0, duplicates: 0, unknownManagers: 0, owners: {} };
 
   const map = resolveClientImportColumns(rows[0]);
   if (map['Организация'] === undefined) {
@@ -1266,6 +1598,16 @@ function buildClientsFromRows(rows) {
   const list = [];
   let maxId = clients.reduce((m, c) => Math.max(m, c.id || 0), 0);
   let skipped = 0;
+  let duplicates = 0;
+  let unknownManagers = 0;
+  // Сколько клиентов уходит каждому менеджеру — для уведомления «в кол-ве N».
+  const owners = {};
+
+  // Уже заведённые ID старой базы — по ним повторный импорт не создаёт дубли.
+  const knownOldIds = {};
+  clients.forEach(c => {
+    if (c.oldBaseId) knownOldIds[String(c.oldBaseId).trim().toLowerCase()] = true;
+  });
 
   for (let i = 1; i < rows.length; i++) {
     const row = rows[i];
@@ -1279,6 +1621,19 @@ function buildClientsFromRows(rows) {
     const orgName = cell('Организация');
     if (!orgName) { skipped++; continue; }
 
+    const oldBaseId = cell('ID старой базы');
+    if (oldBaseId && knownOldIds[oldBaseId.toLowerCase()]) { duplicates++; continue; }
+    if (oldBaseId) knownOldIds[oldBaseId.toLowerCase()] = true;
+
+    // Логин менеджера: клиент сразу закрепляется за ним.
+    const managerLogin = cell('Логин менеджера');
+    let ownerId = currentUser ? currentUser.id : null;
+    if (managerLogin) {
+      const manager = findUserByLogin(managerLogin);
+      if (manager) ownerId = manager.id;
+      else unknownManagers++; // клиент останется без ответственного, админ назначит вручную
+    }
+
     const contactName = cell('Контактное лицо');
     const contacts = contactName ? [{
       name: contactName,
@@ -1288,6 +1643,8 @@ function buildClientsFromRows(rows) {
       email: cell('Email контакта'),
       messengers: []
     }] : [];
+
+    if (managerLogin && ownerId) owners[ownerId] = (owners[ownerId] || 0) + 1;
 
     list.push({
       id: ++maxId,
@@ -1302,13 +1659,20 @@ function buildClientsFromRows(rows) {
       orgWebsite: cell('Сайт'),
       orgInn: cell('ИНН'),
       orgOgrn: cell('ОГРН'),
+      oldBaseId: oldBaseId,
       contacts: contacts,
       history: [],
-      createdBy: currentUser ? currentUser.id : null
+      createdBy: ownerId
     });
   }
 
-  return { list: list, skipped: skipped };
+  return {
+    list: list,
+    skipped: skipped,
+    duplicates: duplicates,
+    unknownManagers: unknownManagers,
+    owners: owners
+  };
 }
 
 async function importClientsFromExcel(event) {
@@ -1316,12 +1680,14 @@ async function importClientsFromExcel(event) {
   event.target.value = '';
   if (!file) return;
 
+  if (!isAdmin()) { alert('Импорт клиентов доступен администратору.'); return; }
+
   try {
     const rows = await parseSpreadsheetFile(file);
     const result = buildClientsFromRows(rows);
 
     if (!result.list.length) {
-      showClientsImportResult('В файле нет ни одной строки с названием организации. Проверьте шаблон.', true);
+      showClientsImportResult('В файле нет ни одной новой строки с названием организации. Проверьте шаблон.', true);
       return;
     }
 
@@ -1335,11 +1701,23 @@ async function importClientsFromExcel(event) {
     saveClients(clients);
     renderClientsTable();
 
-    showClientsImportResult(
-      'Импортировано клиентов: ' + result.list.length +
-      (result.skipped ? '. Пропущено строк без названия: ' + result.skipped : ''),
-      false
-    );
+    // Каждому менеджеру — одно уведомление с количеством закреплённых клиентов
+    // и комментарием администратора.
+    const commentEl = document.getElementById('importManagerComment');
+    const comment = commentEl ? commentEl.value.trim() : '';
+    const meId = currentUser ? currentUser.id : null;
+    Object.keys(result.owners).forEach(uid => {
+      const ownerId = parseInt(uid, 10);
+      if (ownerId === meId) return;
+      notifyClientTransfer(ownerId, result.owners[uid], comment);
+    });
+    if (commentEl) commentEl.value = '';
+
+    const parts = ['Импортировано клиентов: ' + result.list.length];
+    if (result.duplicates) parts.push('уже были в базе (по ID старой базы): ' + result.duplicates);
+    if (result.skipped) parts.push('пропущено строк без названия: ' + result.skipped);
+    if (result.unknownManagers) parts.push('строк с неизвестным логином менеджера: ' + result.unknownManagers + ' — клиенты добавлены без ответственного');
+    showClientsImportResult(parts.join('. '), false);
   } catch (err) {
     showClientsImportResult('Ошибка при импорте: ' + err.message, true);
   }
@@ -1363,6 +1741,8 @@ function downloadClientsTemplate() {
     'Сайт': 'example.ru',
     'ИНН': '7707083893',
     'ОГРН': '1027700132195',
+    'Логин менеджера': 'manager',
+    'ID старой базы': '10457',
     'Контактное лицо': 'Иванов Иван Иванович',
     'Должность': 'Директор',
     'Телефон контакта': '+7 916 000-00-00',

@@ -259,6 +259,31 @@ function injectModals() {
             </div>
             <div id="clientInnStatus" class="integration-msg"></div>
             <div class="form-row"><div class="form-group"><label>Сайт</label><input type="text" id="orgWebsite" placeholder="example.ru"></div></div>
+
+            <div class="form-row">
+              <div class="form-group" style="display:flex;align-items:center;gap:8px;">
+                <input type="checkbox" id="orgOldBase" onchange="toggleOldBaseField()" style="width:16px;height:16px;">
+                <label for="orgOldBase" style="margin:0;font-size:12px;cursor:pointer;">Клиент из старой базы</label>
+              </div>
+            </div>
+            <div class="form-row" id="oldBaseRow" style="display:none;">
+              <div class="form-group">
+                <label>ID старой базы</label>
+                <input type="text" id="oldBaseId" placeholder="Например, 10457">
+                <div class="field-hint">По этому ID клиента можно найти поиском в списке.</div>
+              </div>
+            </div>
+
+            <div class="form-row" id="clientOwnerRow" style="display:none;">
+              <div class="form-group">
+                <label>Ответственный менеджер</label>
+                <select id="clientOwner"></select>
+                <div class="field-hint">Смена менеджера переносит клиента: он получит уведомление.</div>
+              </div>
+            </div>
+            <div class="form-row" id="clientTransferCommentRow" style="display:none;">
+              <div class="form-group"><label>Комментарий менеджеру</label><input type="text" id="clientTransferComment" placeholder="Необязательно"></div>
+            </div>
           </div>
           <div class="modal-actions">
             <button type="button" class="btn btn-secondary" onclick="cancelClientEdit()">Отмена</button>
@@ -310,6 +335,7 @@ function injectModals() {
         <h2>Добавить взаимодействие</h2>
         <form onsubmit="saveHistory(event)">
           <input type="hidden" id="historyClientId">
+          <input type="hidden" id="historyEditIdx" value="">
           <div class="form-section">
             <div class="form-row">
               <div class="form-group"><label>Тип</label>
@@ -318,6 +344,15 @@ function injectModals() {
               <div class="form-group"><label>Контактное лицо</label><select id="historyContactPerson"></select></div>
             </div>
             <div class="form-row"><div class="form-group"><label>Комментарий *</label><textarea id="historyComment" rows="4" required></textarea></div></div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Отметки</label>
+                <div class="tag-picker">
+                  <label class="tag-option"><input type="checkbox" id="historyTagSelf"> <span>Для себя</span></label>
+                  <label class="tag-option"><input type="checkbox" id="historyTagReport"> <span>Для отчёта</span></label>
+                </div>
+              </div>
+            </div>
             <div id="orderFormSection" style="display:none;">
               <div class="form-section" style="margin-top:10px;padding-top:12px;border-top:1px dashed #e5e7eb;">
                 <h3>Параметры заказа</h3>
@@ -413,6 +448,7 @@ function injectModals() {
               </div>
             </div>
             <div id="reminderClientLink" style="display:none;font-size:13px;color:#6b7280;padding:8px;background:#f9fafb;border-radius:6px;margin-top:8px;"></div>
+            <div class="linked-client-line" id="reminderClientFixed" style="display:none;"></div>
           </div>
           <div class="modal-actions">
             <button type="button" class="btn btn-secondary" onclick="closeModal('reminderModal')">Отмена</button>
@@ -438,8 +474,9 @@ function injectModals() {
             <div class="form-row">
               <div class="form-group"><label>Тип задачи (колонка)</label><select id="taskColumn"></select></div>
             </div>
+            <div class="linked-client-line" id="taskClientFixed" style="display:none;"></div>
             <div class="form-row">
-              <div class="form-group client-typeahead-group">
+              <div class="form-group client-typeahead-group" id="taskClientGroup">
                 <label>Клиент (компания)</label>
                 <input type="text" id="taskClientSearch" placeholder="Начните вводить название компании..." autocomplete="off"
                        oninput="onTaskClientSearch()" onfocus="onTaskClientSearch()"
@@ -544,6 +581,33 @@ function injectModals() {
         </div>
       </div>
     </div>
+
+    <div class="modal-overlay" id="clientNotesModal" onclick="if(event.target===this)closeModal('clientNotesModal')">
+      <div class="modal" style="width:760px;max-width:94vw;">
+        <div class="modal-head">
+          <h2 id="notesModalTitle">Особые отметки</h2>
+          <button type="button" class="modal-close-icon" onclick="closeModal('clientNotesModal')" title="Закрыть" aria-label="Закрыть">✕</button>
+        </div>
+        <input type="hidden" id="notesClientId">
+        <input type="hidden" id="noteEditIdx" value="">
+
+        <div class="note-form">
+          <textarea id="noteText" rows="3" placeholder="Текст отметки по клиенту…"></textarea>
+          <div class="note-form-row">
+            <select id="noteType" title="Тип взаимодействия"></select>
+            <div class="tag-picker">
+              <label class="tag-option"><input type="checkbox" id="noteTagSelf"> <span>Для себя</span></label>
+              <label class="tag-option"><input type="checkbox" id="noteTagReport"> <span>Для отчёта</span></label>
+            </div>
+            <button type="button" class="btn" id="noteSaveBtn" onclick="saveClientNote()">Добавить отметку</button>
+            <button type="button" class="btn btn-secondary" id="noteCancelBtn" style="display:none;" onclick="resetNotesForm()">Отмена</button>
+          </div>
+        </div>
+
+        <div class="notes-head">Отметки <span class="cc-count" id="notesModalCount"></span></div>
+        <div class="notes-list" id="notesList"></div>
+      </div>
+    </div>
   `;
   document.body.insertAdjacentHTML('beforeend', modalsHTML);
 }
@@ -563,18 +627,25 @@ function renderSection(section) {
             <div class="main-header">
               <h1>Клиенты</h1>
               <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                <input type="file" id="clientsFileInput" accept=".xlsx,.xls,.csv" style="display:none" onchange="importClientsFromExcel(event)">
-                <button class="btn btn-sm btn-secondary" onclick="document.getElementById('clientsFileInput').click()" title="Импортировать клиентов из Excel или CSV по шаблону">Импорт</button>
-                <button class="btn btn-sm btn-secondary" onclick="downloadClientsTemplate()" title="Скачать шаблон импорта с примером заполнения">Шаблон</button>
-                <button class="btn btn-sm btn-secondary" onclick="exportClientsExcel()" title="Выгрузить текущий список клиентов в Excel">Экспорт</button>
-                <button class="btn btn-sm btn-danger" onclick="deleteSelectedClient()">Удалить</button>
+                ${isAdmin() ? `
+                  <input type="file" id="clientsFileInput" accept=".xlsx,.xls,.csv" style="display:none" onchange="importClientsFromExcel(event)">
+                  <button class="btn btn-sm btn-secondary" onclick="document.getElementById('clientsFileInput').click()" title="Импортировать клиентов из Excel или CSV по шаблону">Импорт</button>
+                  <button class="btn btn-sm btn-secondary" onclick="downloadClientsTemplate()" title="Скачать шаблон импорта с примером заполнения">Шаблон</button>
+                  <button class="btn btn-sm btn-secondary" onclick="exportClientsExcel()" title="Выгрузить текущий список клиентов в Excel">Экспорт</button>
+                  <button class="btn btn-sm btn-danger" onclick="deleteSelectedClient()">Удалить</button>
+                ` : ''}
                 <button class="btn" onclick="openClientModal()">+ Добавить</button>
               </div>
             </div>
             <div class="clients-filter-row">
               ${managerPickerHtml()}
-              <input type="text" class="search-bar" id="searchInput" placeholder="Поиск по названию, сайту, почте, телефону, адресу, ИНН/ОГРН..." oninput="scheduleClientsSearch()" style="margin-bottom:0;flex:1;">
+              <input type="text" class="search-bar" id="searchInput" placeholder="Поиск по названию, сайту, почте, телефону, адресу, ИНН/ОГРН, ID старой базы..." oninput="scheduleClientsSearch()" style="margin-bottom:0;flex:1;">
             </div>
+            ${isAdmin() ? `
+              <div class="import-comment-row">
+                <input type="text" id="importManagerComment" placeholder="Комментарий менеджеру при импорте (необязательно)">
+                <span class="field-hint">Уйдёт в уведомление вместе с количеством закреплённых клиентов.</span>
+              </div>` : ''}
             <div id="clientsImportResult" class="import-result" style="display:none;"></div>
           </div>
           <div class="clients-top-content" id="tableWrap"></div>
@@ -582,9 +653,13 @@ function renderSection(section) {
         <div class="clients-resizer" id="clientsResizer"></div>
         <div class="clients-bottom" id="clientsBottom">
           <div class="clients-bottom-header">
-            <div style="display:flex;align-items:center;">
-              <h2>Контактные лица</h2>
-              <span class="count" id="contactsCount"></span>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+              <div style="display:flex;align-items:center;">
+                <h2>Контактные лица</h2>
+                <span class="count" id="contactsCount"></span>
+              </div>
+              <button class="btn btn-sm btn-secondary" onclick="openClientNotes(selectedClientId)"
+                      title="Все комментарии по клиенту: добавление, отметки, правка">Особые отметки <span class="count" id="notesCount"></span></button>
             </div>
             <button class="btn btn-sm" id="contactsAddBtn" onclick="openContactModal(selectedClientId)">+ Добавить</button>
           </div>
