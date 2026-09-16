@@ -678,14 +678,6 @@ function updateTaskContactSelect() {
   const contactSelect = document.getElementById('taskContactSelect');
   const contactRow = document.getElementById('taskContactRow');
 
-  // Задачу на контактное лицо ставит только администратор: у менеджера
-  // задача привязывается к клиенту, поле контакта скрыто.
-  if (!isAdmin()) {
-    contactRow.style.display = 'none';
-    contactSelect.innerHTML = '';
-    return;
-  }
-
   if (!clientId) {
     contactRow.style.display = 'none';
     contactSelect.innerHTML = '';
@@ -789,14 +781,6 @@ function saveTask(e) {
   const clientIdVal = document.getElementById('taskClientId').value;
   const contactIdVal = document.getElementById('taskContactSelect').value;
 
-  // Привязку к контактному лицу меняет только администратор. Менеджер
-  // сохраняет уже существующую привязку, но новую не ставит.
-  const admin = isAdmin();
-  const existing = id ? tasks.find(t => t.id === parseInt(id, 10)) : null;
-  const contactId = admin
-    ? (contactIdVal ? parseInt(contactIdVal, 10) : null)
-    : ((existing && existing.contactId) ? existing.contactId : null);
-
   const data = {
     title: document.getElementById('taskTitle').value.trim(),
     description: document.getElementById('taskDescription').value.trim(),
@@ -805,7 +789,7 @@ function saveTask(e) {
     status: document.getElementById('taskColumn').value,
     coAssignees: taskCoAssignees.slice(),
     clientId: clientIdVal ? parseInt(clientIdVal) : null,
-    contactId: contactId
+    contactId: contactIdVal ? parseInt(contactIdVal) : null
   };
 
   let task = null;

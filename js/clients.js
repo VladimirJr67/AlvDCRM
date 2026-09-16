@@ -58,14 +58,15 @@ function canEditClient(client) {
   return !!client && client.createdBy === currentUser.id;
 }
 
-// Контактные лица: добавлять новое может любой пользователь, включая
-// менеджера. Правка и удаление уже существующих — только администратор.
-function canAddContact() {
+// Контактные лица — полная зона менеджера: добавление, правка и удаление
+// доступны любому пользователю. Ограничения менеджера касаются только
+// удаления самого клиента и импорта/шаблона/экспорта.
+function canManageContacts() {
   return !!currentUser;
 }
 
-function canManageContacts() {
-  return isAdmin();
+function canAddContact() {
+  return canManageContacts();
 }
 
 // Комментарий может править его автор или администратор.
@@ -913,7 +914,7 @@ function openContactModal(clientId) {
 
 function editClientContact(clientId, idx) {
   if (!canManageContacts()) {
-    alert('Изменять контактные лица может администратор.');
+    alert('Сначала войдите в систему.');
     return;
   }
   const client = clients.find(c => c.id === clientId);
@@ -938,13 +939,8 @@ function saveContact(e) {
   const client = clients.find(c => c.id === clientId);
   if (!client) return;
 
-  // Новое контактное лицо добавляет любой пользователь, а правку уже
-  // существующего разрешаем только администратору.
-  if (editIdx !== '' && !canManageContacts()) {
-    alert('Изменять существующие контактные лица может администратор.');
-    return;
-  }
-  if (!canAddContact()) { alert('Сначала войдите в систему'); return; }
+  // Контактные лица доступны всем: и добавление, и правка, и удаление.
+  if (!canManageContacts()) { alert('Сначала войдите в систему.'); return; }
   if (!client.contacts) client.contacts = [];
   
   const contactData = {
@@ -974,7 +970,7 @@ function deleteContact(clientId, idx) {
   if (!confirm('Удалить контактное лицо?')) return;
   const client = clients.find(c => c.id === clientId);
   if (!client || !canManageContacts()) {
-    alert('Удалять контактные лица может администратор.');
+    alert('Сначала войдите в систему.');
     return;
   }
   client.contacts.splice(idx, 1);

@@ -733,6 +733,3 @@ button:disabled {
 .btn-secondary:disabled,
 .btn-secondary[disabled] { background: #f9fafb; color: #b3b8c2; border-color: #e5e7eb; }
 .btn-icon-btn:disabled { opacity: .4; cursor: not-allowed; }
-
-/* Пояснение вместо недоступной кнопки */
-.panel-hint { font-size: 11.5px; color: #9ca3af; }
