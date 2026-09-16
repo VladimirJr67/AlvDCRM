@@ -477,13 +477,19 @@ function commentTagLabels(tags) {
 }
 
 // Одна запись истории — используется в блоке контактов, окне всей истории
-// и в «Особых отметках».
-function historyEntryHtml(h) {
+// и в «Особых отметках». opts: { clientId, idx, canEdit } — чтобы автор
+// или администратор могли поправить комментарий прямо здесь.
+function historyEntryHtml(h, opts) {
+  const o = opts || {};
+  const editBtn = o.canEdit
+    ? `<button type="button" class="btn-icon-btn" onclick="openHistoryModal(${o.clientId}, ${o.idx})" title="Редактировать комментарий">✏️</button>`
+    : '';
   return `
     <div class="history-entry">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
         <span style="font-size:11px;color:#9ca3af;">${formatDate(h.date)}${h.editedAt ? ' · изменено' : ''}</span>
         <span class="badge">${escapeHtml(h.type)}</span>
+        ${editBtn}
       </div>
       <div class="history-comment">${escapeHtml(h.comment)}</div>
       <div style="font-size:11px;color:#6b7280;margin-top:4px;">
@@ -520,7 +526,11 @@ function renderHistoryBlock(client, editable) {
       ${filterHint}
       ${history.length === 0
         ? `<p style="color:#9ca3af;font-size:12px;padding:10px 0">${person ? 'У этого контактного лица нет комментариев' : 'Нет записей'}</p>`
-        : `<div class="history-scroll">${history.map(historyEntryHtml).join('')}</div>`}
+        : `<div class="history-scroll">${history.map(h => historyEntryHtml(h, {
+            clientId: client.id,
+            idx: (client.history || []).indexOf(h),
+            canEdit: canEditComment(h)
+          })).join('')}</div>`}
     </div>
   `;
 }
@@ -546,16 +556,24 @@ function openAllHistoryModal(clientId) {
           <table>
             <thead><tr>
               <th style="width:120px">Дата</th><th style="width:140px">Тип взаимодействия</th>
-              <th style="width:160px">Контактное лицо</th><th style="width:110px">Менеджер</th><th>Комментарий</th>
+              <th style="width:160px">Контактное лицо</th><th style="width:110px">Менеджер</th><th>Комментарий</th><th style="width:50px;text-align:right;">Правка</th>
             </tr></thead>
             <tbody>
-              ${all.map(h => `<tr style="cursor:default;">
-                <td>${formatDate(h.date)}</td>
-                <td><span class="badge">${escapeHtml(h.type)}</span></td>
-                <td>${escapeHtml(h.contactPerson || '—')}</td>
-                <td>${escapeHtml(h.manager || '—')}</td>
-                <td><div class="history-comment">${escapeHtml(h.comment)}</div></td>
-              </tr>`).join('')}
+              ${all.map(h => {
+                const idx = (client.history || []).indexOf(h);
+                return `<tr style="cursor:default;">
+                  <td>${formatDate(h.date)}${h.editedAt ? ' · изменено' : ''}</td>
+                  <td><span class="badge">${escapeHtml(h.type)}</span></td>
+                  <td>${escapeHtml(h.contactPerson || '—')}</td>
+                  <td>${escapeHtml(h.manager || '—')}</td>
+                  <td><div class="history-comment">${escapeHtml(h.comment)}</div></td>
+                  <td style="text-align:right;">
+                    ${canEditComment(h)
+                      ? `<button class="btn-icon-btn" onclick="editCommentFromHistory(${client.id}, ${idx})" title="Редактировать комментарий">✏️</button>`
+                      : ''}
+                  </td>
+                </tr>`;
+              }).join('')}
             </tbody>
           </table>
         </div>
@@ -563,6 +581,13 @@ function openAllHistoryModal(clientId) {
   `;
   const modal = document.getElementById('allHistoryModal');
   if (modal) modal.classList.add('active');
+}
+
+// Правка комментария из окна «Вся история»: закрываем список и открываем
+// форму редактирования — иначе она оказалась бы под этим окном.
+function editCommentFromHistory(clientId, idx) {
+  closeModal('allHistoryModal');
+  openHistoryModal(clientId, idx);
 }
 
 function openClientCard(id) {
@@ -1025,6 +1050,11 @@ function openHistoryModal(clientId, editIdx) {
 
   if (editing) {
     const entry = client ? (client.history || [])[parseInt(editIdx, 10)] : null;
+    // Править можно только свой комментарий (или любой — администратору).
+    if (entry && !canEditComment(entry)) {
+      alert('Править комментарий может его автор или администратор.');
+      return;
+    }
     if (entry) {
       if (editIdxEl) editIdxEl.value = editIdx;
       if (typeSelect) typeSelect.value = entry.type || typeSelect.value;

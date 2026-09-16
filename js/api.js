@@ -52,6 +52,7 @@ function rehydrateAll(db) {
   contactPositions = db.contactPositions || [];
   newsItems = db.news || [];
   minPrices = (db.minPrices && typeof db.minPrices === 'object' && !Array.isArray(db.minPrices)) ? db.minPrices : {};
+  minPriceHistory = Array.isArray(db.minPriceHistory) ? db.minPriceHistory : [];
 }
 
 // Собрать полный снапшот из глобалов приложения.
@@ -70,7 +71,8 @@ function assembleDb() {
     orgTypes: orgTypes || [],
     contactPositions: contactPositions || [],
     news: newsItems || [],
-    minPrices: minPrices || {}
+    minPrices: minPrices || {},
+    minPriceHistory: minPriceHistory || []
   };
 }
 

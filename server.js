@@ -178,7 +178,9 @@ const DEFAULT_DB = {
   // Лента новостей и объявлений для команды.
   news: [],
   // Минимальные цены за кг по покрытиям: { 'Анод': { value, updatedAt } }.
-  minPrices: {}
+  minPrices: {},
+  // История изменений минимальных цен: кто, когда и на сколько изменил.
+  minPriceHistory: []
 };
 
 // Типы взаимодействий по умолчанию — сидируются только при первом старте
@@ -202,6 +204,7 @@ function normalizeDb(db) {
   d.contactPositions = Array.isArray(d.contactPositions) ? d.contactPositions : [];
   d.news = Array.isArray(d.news) ? d.news : [];
   d.minPrices = (d.minPrices && typeof d.minPrices === 'object' && !Array.isArray(d.minPrices)) ? d.minPrices : {};
+  d.minPriceHistory = Array.isArray(d.minPriceHistory) ? d.minPriceHistory : [];
   d.interactionTypes = Array.isArray(d.interactionTypes) ? d.interactionTypes : [];
   // Легаси/fresh-базы без коллекции — наполняем дефолтами.
   if (!(db && Array.isArray(db.interactionTypes)) && !d.interactionTypes.length) {

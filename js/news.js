@@ -154,18 +154,17 @@ function renderNews() {
 
   main.innerHTML = `
     <div class="news-page">
-      <div class="news-head">
-        <h1>Новости</h1>
-        ${admin ? '<button class="btn" onclick="openNewsEditor()">+ Новость</button>' : ''}
-      </div>
+      <div class="news-inner">
+        ${admin ? '<div class="news-head"><button class="btn" onclick="openNewsEditor()">+ Новость</button></div>' : ''}
 
-      ${sorted.length === 0 ? `
-        <div class="news-empty">
-          <h2>Пока новостей нет</h2>
-          <p>${admin
-            ? 'Нажмите «+ Новость», чтобы опубликовать объявление для команды.'
-            : 'Здесь появятся объявления и новости от администратора.'}</p>
-        </div>` : `<div class="news-list">${itemsHtml}</div>`}
+        ${sorted.length === 0 ? `
+          <div class="news-empty">
+            <h2>Пока новостей нет</h2>
+            <p>${admin
+              ? 'Нажмите «+ Новость», чтобы опубликовать объявление для команды.'
+              : 'Здесь появятся объявления и новости от администратора.'}</p>
+          </div>` : `<div class="news-list">${itemsHtml}</div>`}
+      </div>
     </div>
   `;
 

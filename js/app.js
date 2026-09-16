@@ -99,10 +99,17 @@ function attachMenuHandler() {
     const submenuId = item.dataset.submenu;
 
     if (submenuId) {
+      const sm = document.getElementById(submenuId);
+      // Повторный клик по открытому пункту сворачивает подменю.
+      if (sm && sm.classList.contains('show')) {
+        sm.classList.remove('show');
+        return;
+      }
       // Клик по пункту с подменю — открыть подменю и перейти в
       // его первый (или последний выбранный) подраздел.
-      setActiveMenuState(defaultSubsection(section));
-      renderSection(defaultSubsection(section));
+      const target = defaultSubsection(section);
+      setActiveMenuState(target);
+      renderSection(target);
       return;
     }
 
@@ -688,11 +695,22 @@ function injectModals() {
           <button type="button" class="modal-close-icon" onclick="closeModal('minPricesModal')" title="Закрыть" aria-label="Закрыть">✕</button>
         </div>
         <div class="form-section" id="minPricesForm"></div>
-        <div class="field-hint">Пустое поле убирает цену. Дата изменения запоминается автоматически и видна в подсказке блока.</div>
+        <div class="field-hint">Пустое поле убирает цену. Дата и автор изменения запоминаются автоматически.</div>
         <div class="modal-actions">
+          <button type="button" class="btn btn-sm btn-secondary" style="margin-right:auto;" onclick="closeModal('minPricesModal'); openMinPricesHistory();">История изменения цен</button>
           <button type="button" class="btn btn-secondary" onclick="closeModal('minPricesModal')">Отмена</button>
           <button type="button" class="btn" onclick="saveMinPrices()">Сохранить</button>
         </div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="minPricesHistoryModal" onclick="if(event.target===this)closeModal('minPricesHistoryModal')">
+      <div class="modal" style="width:720px;max-width:94vw;">
+        <div class="modal-head">
+          <h2>История изменения цен</h2>
+          <button type="button" class="modal-close-icon" onclick="closeModal('minPricesHistoryModal')" title="Закрыть" aria-label="Закрыть">✕</button>
+        </div>
+        <div id="minPricesHistoryContent"></div>
       </div>
     </div>
   `;

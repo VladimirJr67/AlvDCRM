@@ -31,7 +31,20 @@ body { background: #f5f6f8; color: #222; font-size: 13px; overflow: hidden; }
 .rate-chg.up { color: #059669; }
 .rate-chg.down { color: #dc2626; }
 .rate-chg.flat { color: #9ca3af; }
-.menu { padding: 15px 0; flex: 1; }
+/* ============================================================
+   Прокрутка в боковом меню: разделов может быть больше, чем
+   помещается на экране, поэтому список скроллится тонким ползунком.
+   ============================================================ */
+.sidebar { overflow: hidden; }
+.menu {
+  padding: 15px 0; flex: 1 1 auto; min-height: 0;
+  overflow-y: auto; overflow-x: hidden;
+  scrollbar-width: thin; scrollbar-color: #d7dce4 transparent;
+}
+.menu::-webkit-scrollbar { width: 6px; }
+.menu::-webkit-scrollbar-track { background: transparent; }
+.menu::-webkit-scrollbar-thumb { background: #d7dce4; border-radius: 3px; }
+.menu::-webkit-scrollbar-thumb:hover { background: #c3cad6; }
 .menu-item { display: flex; align-items: center; gap: 12px; padding: 12px 20px; cursor: pointer; color: #4b5563; border-left: 3px solid transparent; }
 .menu-item:hover { background: #f3f4f6; }
 .menu-item.active { background: #eff6ff; color: #1a3a5c; border-left-color: #3b82f6; font-weight: 500; }
@@ -434,17 +447,6 @@ select[multiple] option:checked { background: #3b82f6; color: #fff; }
 .integration-msg.err { display: block; background: #fee2e2; color: #991b1b; }
 
 /* ============================================================
-   Быстрые действия в боковом меню
-   ============================================================ */
-.quick-actions { display: flex; flex-direction: column; gap: 8px; padding: 0 16px 14px; border-bottom: 1px solid #e5e7eb; }
-.quick-btn {
-  display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 12px;
-  border: 1px solid #d0d5dd; border-radius: 8px; background: #fff; color: #1a3a5c;
-  font-size: 12.5px; font-weight: 500; cursor: pointer; text-align: left; transition: all .15s;
-}
-.quick-btn:hover { border-color: #3b82f6; background: #eff6ff; }
-
-/* ============================================================
    Напоминания: адаптивная раскладка без центральной колонки
    ============================================================ */
 .reminders-page { padding: 22px 24px 30px; width: 100%; box-sizing: border-box; }
@@ -582,14 +584,16 @@ select[multiple] option:checked { background: #3b82f6; color: #fff; }
    Раздел «Новости»
    ============================================================ */
 .news-page { padding: 22px 24px 30px; width: 100%; box-sizing: border-box; }
-.news-head { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+/* Лента и всё содержимое раздела — по центру рабочей зоны */
+.news-inner { max-width: 900px; margin: 0 auto; }
+.news-head { display: flex; justify-content: flex-end; align-items: center; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; }
 .news-head h1 { font-size: 22px; font-weight: 600; color: #1a3a5c; }
 .news-badge { font-size: 11px; font-weight: 600; color: #92400e; background: #fef3c7; border: 1px solid #fde68a; border-radius: 12px; padding: 2px 10px; }
-.news-empty { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; box-shadow: 0 1px 3px rgba(16,24,40,.06); padding: 50px 24px; text-align: center; max-width: 720px; }
+.news-empty { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; box-shadow: 0 1px 3px rgba(16,24,40,.06); padding: 50px 24px; text-align: center; max-width: 720px; margin: 0 auto; }
 .news-empty-icon { font-size: 34px; margin-bottom: 10px; }
 .news-empty h2 { font-size: 16px; color: #374151; margin-bottom: 8px; }
 .news-empty p { font-size: 12.5px; color: #6b7280; line-height: 1.6; }
-.news-list { display: grid; gap: 12px; max-width: 900px; }
+.news-list { display: grid; gap: 12px; }
 .news-item { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px; box-shadow: 0 1px 3px rgba(16,24,40,.06); }
 .news-item-date { font-size: 11px; color: #9ca3af; margin-bottom: 4px; }
 .news-item h3 { font-size: 14.5px; color: #1a3a5c; margin-bottom: 6px; }
@@ -729,14 +733,23 @@ select[multiple] option:checked { background: #3b82f6; color: #fff; }
    ============================================================ */
 
 /* Блок «Минимальные цены за КГ» над курсами */
-.min-prices { margin: 0 12px 12px; padding: 10px 12px; background: #f4f7fb; border: 1px solid #e5e7eb; border-radius: 8px; }
+.min-prices { margin: 0 12px 8px; padding: 10px 12px; background: #f4f7fb; border: 1px solid #e5e7eb; border-radius: 8px; }
 .min-prices.clickable { cursor: pointer; transition: border-color .15s, background .15s; }
 .min-prices.clickable:hover { border-color: #3b82f6; background: #eff6ff; }
 .min-prices-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 10.5px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: .03em; margin-bottom: 7px; }
 .min-prices-edit { color: #3b82f6; font-weight: 500; text-transform: none; font-size: 10.5px; }
-.min-price-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 12px; padding: 2px 0; }
+.min-price-row { padding: 3px 0; border-top: 1px solid #e9edf3; }
+.min-price-row:first-of-type { border-top: none; }
+.min-price-main { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 12px; }
 .min-price-name { color: #4b5563; }
 .min-price-value { font-weight: 700; color: #1a3a5c; font-variant-numeric: tabular-nums; }
+.min-price-date { font-size: 10px; color: #9ca3af; margin-top: 1px; }
+.min-prices-history-btn {
+  display: block; width: calc(100% - 24px); margin: 0 12px 12px; padding: 6px 8px;
+  border: 1px solid #d0d5dd; border-radius: 6px; background: #fff; color: #4b5563;
+  font-size: 11.5px; cursor: pointer; transition: all .15s;
+}
+.min-prices-history-btn:hover { border-color: #3b82f6; color: #1a3a5c; background: #eff6ff; }
 
 /* Раздел «Заказы»: фильтры и анализ продаж */
 .orders-page { padding: 22px 24px 30px; width: 100%; box-sizing: border-box; }
@@ -756,20 +769,21 @@ select[multiple] option:checked { background: #3b82f6; color: #fff; }
 .orders-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 22px; }
 
 /* Профиль: фото и настройки уведомлений */
-.profile-photo-row { display: flex; gap: 16px; align-items: flex-start; margin-bottom: 18px; }
+.profile-photo-row { display: flex; gap: 18px; align-items: center; margin-bottom: 18px; }
 .profile-photo-box {
-  width: 96px; height: 96px; border-radius: 50%; overflow: hidden; flex-shrink: 0;
+  width: 112px; height: 112px; min-width: 112px; border-radius: 50%; overflow: hidden; flex-shrink: 0;
   background: #f4f7fb; border: 1px solid #e5e7eb;
   display: flex; align-items: center; justify-content: center;
-  font-size: 30px; color: #c3cad6;
+  font-size: 34px; color: #c3cad6;
 }
-.profile-photo-box img { width: 100%; height: 100%; object-fit: cover; display: none; }
+.profile-photo-box img { width: 100%; height: 100%; object-fit: cover; object-position: center; display: none; flex-shrink: 0; }
 .profile-photo-box img[src]:not([src=""]) { display: block; }
-.profile-photo-actions { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.profile-photo-row .profile-photo-actions { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; min-width: 0; }
 
 /* Аватар в сайдбаре с фотографией */
+.user-avatar { flex-shrink: 0; }
 .user-avatar.has-photo { padding: 0; overflow: hidden; background: none; }
-.user-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.user-avatar img { width: 100%; height: 100%; object-fit: cover; object-position: center; display: block; flex-shrink: 0; }
 
 /* ============================================================
    Неактивные элементы управления
