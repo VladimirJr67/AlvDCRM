@@ -508,15 +508,10 @@ function checkDueReminders() {
   return due.length;
 }
 
-// Всплывающая карточка в правом нижнем углу.
+// Всплывающая карточка в правом нижнем углу (позицию и звук берём из профиля).
 function showReminderPopup(reminder) {
-  let host = document.getElementById('toastHost');
-  if (!host) {
-    host = document.createElement('div');
-    host.id = 'toastHost';
-    host.className = 'toast-host';
-    document.body.appendChild(host);
-  }
+  const host = ensureToastHost();
+  playNotifySound();
 
   const level = reminderLevelInfo(reminder.color);
   const client = reminder.clientId ? clients.find(c => c.id === reminder.clientId) : null;

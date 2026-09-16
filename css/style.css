@@ -518,7 +518,13 @@ select[multiple] option:checked { background: #3b82f6; color: #fff; }
 /* ============================================================
    Всплывающее уведомление о напоминании
    ============================================================ */
-.toast-host { position: fixed; right: 18px; bottom: 18px; z-index: 500; display: flex; flex-direction: column; gap: 10px; max-width: 340px; }
+.toast-host { position: fixed; z-index: 500; display: flex; flex-direction: column; gap: 10px; max-width: 340px; }
+/* Позиция всплывающих окон выбирается в профиле пользователя */
+.toast-host.pos-bottom-right { right: 18px; bottom: 18px; }
+.toast-host.pos-bottom-left { left: 18px; bottom: 18px; }
+.toast-host.pos-top-right { right: 18px; top: 18px; }
+.toast-host.pos-top-left { left: 18px; top: 18px; }
+.toast-host.pos-center { left: 50%; top: 50%; transform: translate(-50%, -50%); align-items: center; }
 .toast {
   background: #fff; border: 1px solid #e5e7eb; border-left: 4px solid #f59e0b; border-radius: 10px;
   box-shadow: 0 12px 34px rgba(16,24,40,.18); padding: 12px 14px; animation: toast-in .18s ease-out;
@@ -717,6 +723,53 @@ select[multiple] option:checked { background: #3b82f6; color: #fff; }
   border-radius: 6px; font-size: 12.5px; outline: none;
 }
 .card-transfer select:focus, .card-transfer input:focus { border-color: #3b82f6; }
+
+/* ============================================================
+   Этап 3: минимальные цены, заказы, профиль
+   ============================================================ */
+
+/* Блок «Минимальные цены за КГ» над курсами */
+.min-prices { margin: 0 12px 12px; padding: 10px 12px; background: #f4f7fb; border: 1px solid #e5e7eb; border-radius: 8px; }
+.min-prices.clickable { cursor: pointer; transition: border-color .15s, background .15s; }
+.min-prices.clickable:hover { border-color: #3b82f6; background: #eff6ff; }
+.min-prices-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 10.5px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: .03em; margin-bottom: 7px; }
+.min-prices-edit { color: #3b82f6; font-weight: 500; text-transform: none; font-size: 10.5px; }
+.min-price-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 12px; padding: 2px 0; }
+.min-price-name { color: #4b5563; }
+.min-price-value { font-weight: 700; color: #1a3a5c; font-variant-numeric: tabular-nums; }
+
+/* Раздел «Заказы»: фильтры и анализ продаж */
+.orders-page { padding: 22px 24px 30px; width: 100%; box-sizing: border-box; }
+.orders-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.orders-head h1 { font-size: 22px; font-weight: 600; color: #1a3a5c; }
+.orders-filters {
+  display: flex; gap: 14px; align-items: flex-end; flex-wrap: wrap;
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px 14px; margin-bottom: 18px;
+}
+.orders-filters label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: #6b7280; }
+.orders-filters select, .orders-filters input {
+  padding: 7px 9px; border: 1px solid #d0d5dd; border-radius: 5px;
+  font-size: 12.5px; outline: none; background: #fff; color: #374151;
+}
+.orders-filters select:focus, .orders-filters input:focus { border-color: #3b82f6; }
+.orders-analysis-title { font-size: 15px; font-weight: 600; color: #374151; margin-bottom: 12px; }
+.orders-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 22px; }
+
+/* Профиль: фото и настройки уведомлений */
+.profile-photo-row { display: flex; gap: 16px; align-items: flex-start; margin-bottom: 18px; }
+.profile-photo-box {
+  width: 96px; height: 96px; border-radius: 50%; overflow: hidden; flex-shrink: 0;
+  background: #f4f7fb; border: 1px solid #e5e7eb;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 30px; color: #c3cad6;
+}
+.profile-photo-box img { width: 100%; height: 100%; object-fit: cover; display: none; }
+.profile-photo-box img[src]:not([src=""]) { display: block; }
+.profile-photo-actions { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+
+/* Аватар в сайдбаре с фотографией */
+.user-avatar.has-photo { padding: 0; overflow: hidden; background: none; }
+.user-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
 /* ============================================================
    Неактивные элементы управления

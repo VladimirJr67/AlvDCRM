@@ -176,7 +176,9 @@ const DEFAULT_DB = {
   orgTypes: [],
   contactPositions: [],
   // Лента новостей и объявлений для команды.
-  news: []
+  news: [],
+  // Минимальные цены за кг по покрытиям: { 'Анод': { value, updatedAt } }.
+  minPrices: {}
 };
 
 // Типы взаимодействий по умолчанию — сидируются только при первом старте
@@ -199,6 +201,7 @@ function normalizeDb(db) {
   d.orgTypes = Array.isArray(d.orgTypes) ? d.orgTypes : [];
   d.contactPositions = Array.isArray(d.contactPositions) ? d.contactPositions : [];
   d.news = Array.isArray(d.news) ? d.news : [];
+  d.minPrices = (d.minPrices && typeof d.minPrices === 'object' && !Array.isArray(d.minPrices)) ? d.minPrices : {};
   d.interactionTypes = Array.isArray(d.interactionTypes) ? d.interactionTypes : [];
   // Легаси/fresh-базы без коллекции — наполняем дефолтами.
   if (!(db && Array.isArray(db.interactionTypes)) && !d.interactionTypes.length) {

@@ -25,6 +25,7 @@
       <img src="https://avatars.mds.yandex.net/i?id=59709a441721a5e380612fdd93e30472_l-5098586-images-thumbs&n=13" alt="Алвид">
       <span>Алвид</span>
     </div>
+    <div id="sidebarMinPrices"></div>
     <div class="sidebar-rates" id="sidebarRates" title="Курсы ЦБ РФ">
       <div class="rate-item" title="Доллар США (USD)">
         <span class="rate-ccy">$</span>
@@ -43,8 +44,9 @@
     </div>
     <div class="menu" id="sidebarMenu"></div>
     <div class="user-info">
-      <div class="user-avatar">A</div>
-      <span class="user-info-name">Admin</span>
+      <div class="user-avatar" id="userAvatar">A</div>
+      <span class="user-info-name" id="userInfoName">Admin</span>
+      <button class="logout-btn" onclick="openProfileModal()" title="Профиль и настройки уведомлений">Профиль</button>
       <button class="logout-btn" onclick="doLogout()">Выйти</button>
     </div>
   </div>
@@ -59,6 +61,8 @@
 <script src="js/interactionTypes.js"></script>
 <script src="js/dictionaries.js"></script>
 <script src="js/rates.js"></script>
+<script src="js/minPrices.js"></script>
+<script src="js/profile.js"></script>
 <script src="js/geo.js"></script>
 <script src="js/dadata.js"></script>
 <script src="js/auth.js"></script>

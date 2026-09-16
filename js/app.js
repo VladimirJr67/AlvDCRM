@@ -139,11 +139,21 @@ function setActiveMenuState(section) {
 }
 
 function updateUserInfo() {
-  const avatar = document.querySelector('.user-avatar');
-  const nameEl = document.querySelector('.user-info-name');
-  if (currentUser) {
-    if (avatar) avatar.textContent = (currentUser.login[0] || 'A').toUpperCase();
-    if (nameEl) nameEl.textContent = currentUser.login;
+  const avatar = document.getElementById('userAvatar') || document.querySelector('.user-avatar');
+  const nameEl = document.getElementById('userInfoName') || document.querySelector('.user-info-name');
+  if (!currentUser) return;
+
+  const label = (currentUser.name || currentUser.login || '').trim();
+  if (nameEl) nameEl.textContent = label || currentUser.login;
+
+  if (avatar) {
+    if (currentUser.photo) {
+      avatar.innerHTML = `<img src="${currentUser.photo}" alt="">`;
+      avatar.classList.add('has-photo');
+    } else {
+      avatar.textContent = (label[0] || 'A').toUpperCase();
+      avatar.classList.remove('has-photo');
+    }
   }
 }
 
@@ -171,6 +181,8 @@ async function enterApp() {
   updateTasksMenuBadge();
   updateNotificationBadge();
   updateNewsMenuBadge();
+  renderMinPricesBlock();
+  applyNotifyPosition();
 
   initRates();
 
@@ -582,8 +594,7 @@ function injectModals() {
       </div>
     </div>
 
-    <div class="modal-overlay" id="clientNotesModal" onclick="if(event.target===this)closeModal('clientNotesModal')">
-      <div class="modal" style="width:760px;max-width:94vw;">
+    <div class="modal-overlay" id="clientNotesModal" onclick="if(event.target===this)closeModal('clientNotesModal')">      <div class="modal" style="width:760px;max-width:94vw;">
         <div class="modal-head">
           <h2 id="notesModalTitle">Особые отметки</h2>
           <button type="button" class="modal-close-icon" onclick="closeModal('clientNotesModal')" title="Закрыть" aria-label="Закрыть">✕</button>
@@ -609,6 +620,79 @@ function injectModals() {
           <button type="button" class="btn btn-sm" id="noteAddBtn" onclick="showNotesAddForm()">+ Добавить отметку</button>
         </div>
         <div class="notes-list" id="notesList"></div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="profileModal" onclick="if(event.target===this)closeModal('profileModal')">
+      <div class="modal" style="width:580px;max-width:94vw;">
+        <div class="modal-head">
+          <h2>Профиль</h2>
+          <button type="button" class="modal-close-icon" onclick="closeModal('profileModal')" title="Закрыть" aria-label="Закрыть">✕</button>
+        </div>
+
+        <div class="profile-photo-row">
+          <div class="profile-photo-box"><img id="profilePhoto" alt=""></div>
+          <div class="profile-photo-actions">
+            <input type="file" id="profilePhotoInput" accept="image/*" style="display:none" onchange="onProfilePhotoSelected(event)">
+            <button type="button" class="btn btn-sm btn-secondary" onclick="document.getElementById('profilePhotoInput').click()">Загрузить фото</button>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="clearProfilePhoto()">Удалить фото</button>
+            <div class="field-hint">Фото сжимается до 200×200 и хранится в базе, поэтому доступно со всех компьютеров.</div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-row">
+            <div class="form-group"><label>Логин</label><input type="text" id="profileLogin" disabled></div>
+            <div class="form-group"><label>ФИО</label><input type="text" id="profileName"></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Телефон</label><input type="text" id="profilePhone" placeholder="+7 ..."></div>
+            <div class="form-group"><label>Отдел</label><input type="text" id="profileDepartment"></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Должность</label><input type="text" id="profileJob"></div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <h3>Уведомления</h3>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Звук</label>
+              <div style="display:flex;gap:8px;align-items:center;">
+                <select id="profileSound" style="flex:1;"></select>
+                <button type="button" class="btn btn-sm btn-secondary" onclick="testNotifySound()" title="Прослушать выбранный звук">Проверить</button>
+              </div>
+            </div>
+            <div class="form-group"><label>Позиция окон</label><select id="profilePosition"></select></div>
+          </div>
+          <div class="field-hint">
+            Пока уведомления показываются внутри окна CRM. Системные уведомления Windows
+            включим отдельно — для них нужен запуск по localhost или HTTPS.
+          </div>
+        </div>
+
+        <div id="profileMessage" class="integration-msg"></div>
+
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('profileModal')">Отмена</button>
+          <button type="button" class="btn" onclick="saveProfile()">Сохранить</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="minPricesModal" onclick="if(event.target===this)closeModal('minPricesModal')">
+      <div class="modal" style="width:480px;max-width:94vw;">
+        <div class="modal-head">
+          <h2>Минимальные цены за кг</h2>
+          <button type="button" class="modal-close-icon" onclick="closeModal('minPricesModal')" title="Закрыть" aria-label="Закрыть">✕</button>
+        </div>
+        <div class="form-section" id="minPricesForm"></div>
+        <div class="field-hint">Пустое поле убирает цену. Дата изменения запоминается автоматически и видна в подсказке блока.</div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('minPricesModal')">Отмена</button>
+          <button type="button" class="btn" onclick="saveMinPrices()">Сохранить</button>
+        </div>
       </div>
     </div>
   `;
@@ -925,6 +1009,7 @@ function startPolling() {
     updateTasksMenuBadge();
     updateNotificationBadge();
     updateNewsMenuBadge();
+    renderMinPricesBlock();
     renderSection(currentSection);
   }, 5000);
 }
@@ -945,6 +1030,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadNotifications();
   loadOrders();
   loadNews();
+  loadMinPrices();
 
   if (restoreSession()) {
     enterApp();
