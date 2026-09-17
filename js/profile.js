@@ -5,12 +5,24 @@
    в базе (data-URL), но перед сохранением сжимается до 200×200 —
    иначе снимок с телефона раздувал бы db.json и замедлял сохранение.
 
+   Тема оформления: светлая или тёмная. Выбор хранится в users.theme и
+   применяется классом на <body> (слой тёмных правил — в css/style.css).
+
    Настройки уведомлений: звук (несколько базовых, синтезируются
-   через Web Audio — файлы не нужны) и позиция всплывающих окон.
+   через Web Audio — файлы не нужны), позиция всплывающих окон и показ
+   системных попапов поверх всех окон (Web Notifications API).
    ============================================================ */
 
 const PROFILE_PHOTO_SIZE = 200;        // сторона квадрата, к которой приводим фото
 const PROFILE_PHOTO_QUALITY = 0.85;    // качество JPEG
+
+// Темы оформления профиля.
+const THEMES = [
+  { id: 'light', name: 'Светлая' },
+  { id: 'dark', name: 'Тёмная' }
+];
+
+const DEFAULT_THEME = 'light';
 
 // Базовые звуки уведомления: короткие сигналы, которые генерируются
 // на месте, поэтому в проект не нужно класть аудиофайлы.
@@ -30,14 +42,70 @@ const NOTIFY_POSITIONS = [
   { id: 'center', name: 'По центру' }
 ];
 
-const DEFAULT_NOTIFY_SETTINGS = { sound: 'short', position: 'bottom-right' };
+const DEFAULT_NOTIFY_SETTINGS = { sound: 'short', position: 'bottom-right', native: true };
 
 function notifySettings() {
   const s = (currentUser && currentUser.settings) || {};
   return {
     sound: NOTIFY_SOUNDS.some(x => x.id === s.sound) ? s.sound : DEFAULT_NOTIFY_SETTINGS.sound,
-    position: NOTIFY_POSITIONS.some(x => x.id === s.position) ? s.position : DEFAULT_NOTIFY_SETTINGS.position
+    position: NOTIFY_POSITIONS.some(x => x.id === s.position) ? s.position : DEFAULT_NOTIFY_SETTINGS.position,
+    native: s.native !== false
   };
+}
+
+/* ===== Тема оформления ===== */
+
+// Тема текущего пользователя: неизвестное значение считаем светлой темой.
+function currentTheme() {
+  const t = currentUser && currentUser.theme;
+  return THEMES.some(x => x.id === t) ? t : DEFAULT_THEME;
+}
+
+// Тема применяется классом theme-dark на <body> и атрибутом data-theme на
+// <html>: CSS-слой тёмной темы смотрит на оба признака.
+function applyTheme() {
+  const theme = currentTheme();
+  if (typeof document === 'undefined' || !document.body) return theme;
+  document.body.classList.toggle('theme-dark', theme === 'dark');
+  document.documentElement.setAttribute('data-theme', theme);
+  return theme;
+}
+
+function setThemeFromProfile(value) {
+  if (!currentUser) return;
+  const live = findUserById(currentUser.id);
+  if (!live) return;
+  live.theme = THEMES.some(t => t.id === value) ? value : DEFAULT_THEME;
+  currentUser = live;
+  saveUsers();
+  saveSessionFor(live);
+  applyTheme();
+}
+
+/* ===== Системные уведомления в профиле ===== */
+
+function nativeNotifyStatusText() {
+  if (!nativeNotifySupported()) {
+    return 'Недоступны: браузер не поддерживает или страница открыта не по localhost/https';
+  }
+  const p = nativeNotifyPermission();
+  if (p === 'granted') return 'Разрешены — попапы показываются поверх всех окон';
+  if (p === 'denied') return 'Запрещены в настройках браузера: включите их для этого сайта';
+  return 'Разрешение ещё не запрашивалось';
+}
+
+function refreshNativeNotifyUi() {
+  const status = document.getElementById('profileNativeStatus');
+  if (status) status.textContent = nativeNotifyStatusText();
+  const btn = document.getElementById('profileNativeBtn');
+  if (btn) btn.style.display = nativeNotifyPermission() === 'granted' ? 'none' : '';
+}
+
+// Кнопка «Включить системные уведомления»: спрашиваем разрешение у браузера.
+async function enableNativeNotifications() {
+  const res = await requestNativeNotifyPermission();
+  setProfileMessage(res.ok ? 'Системные уведомления включены' : res.error, res.ok ? 'ok' : 'error');
+  refreshNativeNotifyUi();
 }
 
 /* ===== Звук и позиция всплывающих окон ===== */
@@ -113,6 +181,14 @@ function openProfileModal() {
   const photo = document.getElementById('profilePhoto');
   if (photo) photo.src = currentUser.photo || '';
 
+  // Тема оформления.
+  const themeSel = document.getElementById('profileTheme');
+  if (themeSel) {
+    const theme = currentTheme();
+    themeSel.innerHTML = THEMES.map(t =>
+      `<option value="${t.id}"${t.id === theme ? ' selected' : ''}>${escapeHtml(t.name)}</option>`).join('');
+  }
+
   const settings = notifySettings();
   const soundSel = document.getElementById('profileSound');
   soundSel.innerHTML = NOTIFY_SOUNDS.map(s =>
@@ -122,6 +198,12 @@ function openProfileModal() {
     posSel.innerHTML = NOTIFY_POSITIONS.map(p =>
       `<option value="${p.id}"${p.id === settings.position ? ' selected' : ''}>${escapeHtml(p.name)}</option>`).join('');
   }
+
+  // Системные уведомления: регистрация Service Worker и статус разрешения.
+  const nativeCheck = document.getElementById('profileNative');
+  if (nativeCheck) nativeCheck.checked = settings.native;
+  refreshNativeNotifyUi();
+  if (typeof initNativeNotifications === 'function') initNativeNotifications();
 
   setProfileMessage('');
   document.getElementById('profileModal').classList.add('active');
@@ -208,10 +290,16 @@ function saveProfile() {
 
   const soundSel = document.getElementById('profileSound');
   const posSel = document.getElementById('profilePosition');
+  const nativeCheck = document.getElementById('profileNative');
   live.settings = {
     sound: soundSel ? soundSel.value : DEFAULT_NOTIFY_SETTINGS.sound,
-    position: posSel ? posSel.value : DEFAULT_NOTIFY_SETTINGS.position
+    position: posSel ? posSel.value : DEFAULT_NOTIFY_SETTINGS.position,
+    native: nativeCheck ? !!nativeCheck.checked : DEFAULT_NOTIFY_SETTINGS.native
   };
+
+  // Тема — тоже часть профиля и сохраняется сразу.
+  const themeSel = document.getElementById('profileTheme');
+  if (themeSel) live.theme = THEMES.some(t => t.id === themeSel.value) ? themeSel.value : DEFAULT_THEME;
 
   currentUser = live;
   saveUsers();                    // уходит в общую базу
@@ -219,6 +307,7 @@ function saveProfile() {
 
   updateUserInfo();
   applyNotifyPosition();
+  applyTheme();
   setProfileMessage('Профиль сохранён', 'ok');
   closeModal('profileModal');
 }

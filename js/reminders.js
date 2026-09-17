@@ -151,7 +151,7 @@ function clientReminderBadgeHtml(clientId) {
   const m = clientReminderMarker(clientId);
   if (!m) return '';
   return `<span class="client-reminder-badge" style="background:${m.level.color}1f;color:${m.level.color};border-color:${m.level.color}66;"
-                title="${escapeHtml(clientReminderTitle(clientId))}">🔔 Напоминания: ${m.count}</span>`;
+                title="${escapeHtml(clientReminderTitle(clientId))}">Напоминания: ${m.count}</span>`;
 }
 
 /* ===== Раздел «Напоминания» ===== */
@@ -196,7 +196,7 @@ function renderReminders() {
     <div class="reminders-page">
       <div class="reminders-head">
         <div class="reminders-head-text">
-          <h1>🔔 Напоминания${reminderDateFilter ? ' — ' + formatReminderDate(reminderDateFilter) : ''}</h1>
+          <h1>Напоминания${reminderDateFilter ? ' — ' + formatReminderDate(reminderDateFilter) : ''}</h1>
           <div class="reminders-sub">Личные напоминания видите только вы, клиентские — вся команда</div>
         </div>
         <div class="reminders-head-actions">
@@ -218,9 +218,9 @@ function renderReminders() {
 
       <div class="reminders-layout">
         <div class="reminders-main">
-          ${group('⚠ Просрочено', overdue, 'overdue', '#ef4444')}
-          ${group('📅 Предстоящие', upcoming, 'upcoming', '#3b82f6')}
-          ${group('✅ Выполнено', completed.slice(0, 12), 'completed', '#10b981')}
+          ${group('Просрочено', overdue, 'overdue', '#ef4444')}
+          ${group('Предстоящие', upcoming, 'upcoming', '#3b82f6')}
+          ${group('Выполнено', completed.slice(0, 12), 'completed', '#10b981')}
           ${filtered.length === 0 ? `
             <div class="reminders-empty">
               <h2>${reminderDateFilter ? 'На выбранную дату напоминаний нет' : 'Нет напоминаний'}</h2>
@@ -247,15 +247,15 @@ function renderReminderCard(reminder, status) {
                title="Отметить выполненным" class="reminder-card-check">
         <div class="reminder-card-title">${escapeHtml(reminder.title)}</div>
         <div class="reminder-card-actions">
-          <button class="btn-icon-btn" onclick="editReminder(${reminder.id})" title="Редактировать">✏️</button>
-          <button class="btn-icon-btn" onclick="deleteReminder(${reminder.id})" title="Удалить">🗑</button>
+          <button class="btn-icon-btn" onclick="editReminder(${reminder.id})" title="Редактировать">Изменить</button>
+          <button class="btn-icon-btn" onclick="deleteReminder(${reminder.id})" title="Удалить">Удалить</button>
         </div>
       </div>
 
       ${reminder.description ? `<p class="reminder-card-text">${escapeHtml(reminder.description)}</p>` : ''}
 
       <div class="reminder-card-when${status === 'overdue' ? ' overdue' : ''}">
-        📅 ${formatReminderDate(reminder.date)} · 🕐 ${escapeHtml(reminder.time || '—')}
+        ${formatReminderDate(reminder.date)} · ${escapeHtml(reminder.time || '—')}
       </div>
 
       <div class="reminder-card-meta">
@@ -369,8 +369,7 @@ function onReminderScopeChange() {
   }
 }
 
-function openReminderModal(reminder = null, clientId = null) {
-  document.getElementById('reminderModalTitle').textContent = reminder ? 'Редактировать напоминание' : 'Новое напоминание';
+function openReminderModal(reminder = null, clientId = null) {  document.getElementById('reminderModalTitle').textContent = reminder ? 'Редактировать напоминание' : 'Новое напоминание';
   document.getElementById('reminderId').value = reminder?.id || '';
   document.getElementById('reminderTitle').value = reminder?.title || '';
   document.getElementById('reminderDescription').value = reminder?.description || '';
@@ -393,6 +392,25 @@ function openReminderModal(reminder = null, clientId = null) {
   initReminderClientSearch();
   onReminderScopeChange();
   document.getElementById('reminderModal').classList.add('active');
+}
+
+// Убрать привязку к клиенту из окна напоминания (кнопка «убрать» рядом с
+// подписью клиента). Напоминание при этом остаётся, просто становится личным.
+function unlinkReminderFromClient() {
+  const idEl = document.getElementById('reminderClientId');
+  if (idEl) idEl.value = '';
+  const search = document.getElementById('reminderClientSearch');
+  if (search) search.value = '';
+  selectedReminderClientId = null;
+
+  const link = document.getElementById('reminderClientLink');
+  if (link) { link.style.display = 'none'; link.innerHTML = ''; }
+  const fixed = document.getElementById('reminderClientFixed');
+  if (fixed) { fixed.style.display = 'none'; fixed.innerHTML = ''; }
+
+  const selfRadio = document.querySelector('input[name="reminderScope"][value="self"]');
+  if (selfRadio) selfRadio.checked = true;
+  onReminderScopeChange();
 }
 
 function saveReminder(e) {
@@ -499,9 +517,11 @@ function checkDueReminders() {
   due.forEach(r => {
     r.notifiedAt = new Date().toISOString();
     showReminderPopup(r);
-    // Дубль в «Уведомления» — чтобы напоминание не потерялось, если попап закрыли.
+    // Дубль в «Уведомления» — чтобы напоминание не потерялось, если попап
+    // закрыли. Попап, звук и системное уведомление уже показаны, поэтому
+    // запись в список идёт без повторного всплытия (silent).
     notifyUser(r.createdBy, 'Напоминание: ' + r.title,
-      (r.description || '') + (r.time ? ' · ' + r.time : ''), null);
+      (r.description || '') + (r.time ? ' · ' + r.time : ''), null, { silent: true });
   });
 
   saveReminders();
@@ -509,9 +529,13 @@ function checkDueReminders() {
 }
 
 // Всплывающая карточка в правом нижнем углу (позицию и звук берём из профиля).
+// Дополнительно показываем системное уведомление — оно видно поверх всех окон,
+// если окно CRM свёрнуто.
 function showReminderPopup(reminder) {
   const host = ensureToastHost();
   playNotifySound();
+  showNativeNotification('Напоминание: ' + reminder.title,
+    (reminder.description || '') + (reminder.time ? ' · ' + reminder.time : ''), { tag: 'alvid-reminder' });
 
   const level = reminderLevelInfo(reminder.color);
   const client = reminder.clientId ? clients.find(c => c.id === reminder.clientId) : null;
@@ -528,15 +552,17 @@ function showReminderPopup(reminder) {
     <div class="toast-title">${escapeHtml(reminder.title)}</div>
     ${reminder.description ? `<div class="toast-text">${escapeHtml(reminder.description)}</div>` : ''}
     <div class="toast-meta">
-      🕐 ${escapeHtml(reminder.time || '')}${client ? ' · ' + escapeHtml(client.orgName) : ''} · ${escapeHtml(level.name)}
+      ${escapeHtml(reminder.time || '')}${client ? ' · ' + escapeHtml(client.orgName) : ''} · ${escapeHtml(level.name)}
     </div>
     <div class="toast-actions">
-      <button type="button" class="btn btn-sm btn-secondary toast-done">Выполнено</button>
+      <button type="button" class="btn btn-sm btn-secondary toast-close-action">Закрыть</button>
       <button type="button" class="btn btn-sm btn-secondary toast-open">Открыть раздел</button>
     </div>`;
 
   el.querySelector('.toast-close').onclick = () => el.remove();
-  el.querySelector('.toast-done').onclick = () => { toggleReminderComplete(reminder.id); el.remove(); };
+  // Кнопка в попапе только убирает его с экрана: напоминание не помечается
+  // выполненным — это делается в разделе «Напоминания».
+  el.querySelector('.toast-close-action').onclick = () => el.remove();
   el.querySelector('.toast-open').onclick = () => { el.remove(); goToSection('reminders'); };
 
   host.appendChild(el);
