@@ -381,8 +381,8 @@ function renderClientContacts(id) {
             <td>${messengerChipsHtml(ct.messengers)}</td>
             <td>${escapeHtml(ct.email || '—')}</td>
             ${canManage ? `<td class="col-actions">
-              <button class="btn-icon-btn" onclick="event.stopPropagation(); editClientContact(${id}, ${idx})" title="Редактировать">✏️</button>
-              <button class="btn-icon-btn" onclick="event.stopPropagation(); deleteContact(${id}, ${idx})" title="Удалить">🗑️</button>
+              <button class="btn-icon-btn" onclick="event.stopPropagation(); editClientContact(${id}, ${idx})" title="Редактировать">Изменить</button>
+              <button class="btn-icon-btn" onclick="event.stopPropagation(); deleteContact(${id}, ${idx})" title="Удалить">Удалить</button>
             </td>` : ''}
           </tr>`).join('')}
         </tbody>
@@ -452,14 +452,31 @@ function clearContactHistoryFilter() {
 }
 
 // Метки комментария. «Для себя» — личная пометка, «Для отчёта» — попадает
-// в отчётность администратора.
+// в отчётность администратора. Канонические коды — forSelf / forReport;
+// старые значения self / report из прежних баз приводятся к ним.
 const COMMENT_TAGS = [
-  { key: 'self', label: 'Для себя', color: '#6b7280' },
-  { key: 'report', label: 'Для отчёта', color: '#1d4ed8' }
+  { key: 'forSelf', label: 'Для себя', color: '#6b7280' },
+  { key: 'forReport', label: 'Для отчёта', color: '#1d4ed8' }
 ];
 
-function commentTagsHtml(tags) {
+const COMMENT_TAG_ALIASES = {
+  self: 'forSelf', forself: 'forSelf', for_self: 'forSelf',
+  report: 'forReport', forreport: 'forReport', for_report: 'forReport'
+};
+
+function normalizeCommentTag(key) {
+  const raw = String(key == null ? '' : key).trim();
+  if (!raw) return '';
+  return COMMENT_TAG_ALIASES[raw.toLowerCase()] || raw;
+}
+
+function commentTagsList(tags) {
   const list = Array.isArray(tags) ? tags : [];
+  return list.map(normalizeCommentTag).filter(k => COMMENT_TAGS.some(t => t.key === k));
+}
+
+function commentTagsHtml(tags) {
+  const list = commentTagsList(tags);
   if (!list.length) return '';
   return list.map(key => {
     const t = COMMENT_TAGS.find(x => x.key === key);
@@ -469,7 +486,7 @@ function commentTagsHtml(tags) {
 }
 
 function commentTagLabels(tags) {
-  const list = Array.isArray(tags) ? tags : [];
+  const list = commentTagsList(tags);
   return list.map(key => {
     const t = COMMENT_TAGS.find(x => x.key === key);
     return t ? t.label : key;
@@ -482,7 +499,7 @@ function commentTagLabels(tags) {
 function historyEntryHtml(h, opts) {
   const o = opts || {};
   const editBtn = o.canEdit
-    ? `<button type="button" class="btn-icon-btn" onclick="openHistoryModal(${o.clientId}, ${o.idx})" title="Редактировать комментарий">✏️</button>`
+    ? `<button type="button" class="btn-icon-btn" onclick="openHistoryModal(${o.clientId}, ${o.idx})" title="Редактировать комментарий">Изменить</button>`
     : '';
   return `
     <div class="history-entry">
@@ -495,6 +512,7 @@ function historyEntryHtml(h, opts) {
       <div style="font-size:11px;color:#6b7280;margin-top:4px;">
         ${escapeHtml(h.manager || '')}${h.contactPerson ? ' · ' + escapeHtml(h.contactPerson) : ''}
       </div>
+      ${activityStatusHtml(h)}
       ${h.tags && h.tags.length ? `<div class="comment-tags">${commentTagsHtml(h.tags)}</div>` : ''}
     </div>
   `;
@@ -569,7 +587,7 @@ function openAllHistoryModal(clientId) {
                   <td><div class="history-comment">${escapeHtml(h.comment)}</div></td>
                   <td style="text-align:right;">
                     ${canEditComment(h)
-                      ? `<button class="btn-icon-btn" onclick="editCommentFromHistory(${client.id}, ${idx})" title="Редактировать комментарий">✏️</button>`
+                      ? `<button class="btn-icon-btn" onclick="editCommentFromHistory(${client.id}, ${idx})" title="Редактировать комментарий">Изменить</button>`
                       : ''}
                   </td>
                 </tr>`;
@@ -645,7 +663,7 @@ function renderClientCard(id) {
             </div>
           </div>
           <div class="cc-actions">
-            <button class="btn btn-sm btn-secondary" onclick="openCardTaskModal(${client.id})">+ Задача</button>
+            <button class="btn btn-sm btn-secondary" onclick="openTaskModalWithClient(${client.id})">+ Задача</button>
             <button class="btn btn-sm btn-secondary" onclick="openCardReminderModal(${client.id})">+ Напоминание</button>
             <button class="btn btn-sm btn-secondary" onclick="openClientNotes(${client.id})">Особые отметки</button>
           </div>
@@ -671,18 +689,24 @@ function renderClientCard(id) {
         </div>
       </div>
 
-      ${isAdmin() ? `
+      ${(isAdmin() || canEditClient(client)) ? `
       <div class="cc-block">
         <div class="cc-block-head"><h3>Ответственный менеджер</h3></div>
         <div class="cc-block-body">
+          ${pendingTransferHtml(client)}
           <div class="card-transfer">
-            <select id="cardOwnerSelect" title="Менеджер, за которым закреплён клиент">${clientOwnerOptions(client.createdBy)}</select>
+            <select id="cardOwnerSelect" title="Менеджер, которому передаём клиента">${clientOwnerOptions(client.createdBy)}</select>
             <input type="text" id="cardTransferComment" placeholder="Комментарий менеджеру (необязательно)">
-            <button type="button" class="btn btn-sm" onclick="applyClientTransfer()">Передать клиента</button>
+            ${isAdmin()
+              ? `<button type="button" class="btn btn-sm btn-secondary" onclick="requestClientTransferFromCard()">Отправить запрос</button>
+                 <button type="button" class="btn btn-sm" onclick="applyClientTransfer()">Передать сразу</button>`
+              : `<button type="button" class="btn btn-sm" onclick="requestClientTransferFromCard()">Отправить запрос на перенос</button>`}
           </div>
           <div class="field-hint">
             Сейчас: <strong>${escapeHtml(managerName)}</strong>.
-            При смене менеджер получит уведомление «На вас перенесли клиента в кол-ве 1» с вашим комментарием.
+            ${isAdmin()
+              ? '«Передать сразу» меняет ответственного без подтверждения, «Отправить запрос» — ждёт решения менеджера.'
+              : 'Клиент перейдёт к коллеге только после того, как он примет запрос; отклонить его тоже можно.'}
           </div>
         </div>
       </div>` : ''}
@@ -1008,17 +1032,17 @@ function readCommentTags(selfId, reportId) {
   const tags = [];
   const selfEl = document.getElementById(selfId);
   const reportEl = document.getElementById(reportId);
-  if (selfEl && selfEl.checked) tags.push('self');
-  if (reportEl && reportEl.checked) tags.push('report');
+  if (selfEl && selfEl.checked) tags.push('forSelf');
+  if (reportEl && reportEl.checked) tags.push('forReport');
   return tags;
 }
 
 function setCommentTagInputs(selfId, reportId, tags) {
-  const list = Array.isArray(tags) ? tags : [];
+  const list = commentTagsList(tags);
   const selfEl = document.getElementById(selfId);
   const reportEl = document.getElementById(reportId);
-  if (selfEl) selfEl.checked = list.indexOf('self') > -1;
-  if (reportEl) reportEl.checked = list.indexOf('report') > -1;
+  if (selfEl) selfEl.checked = list.indexOf('forSelf') > -1;
+  if (reportEl) reportEl.checked = list.indexOf('forReport') > -1;
 }
 
 // Открытие формы комментария. editIdx != null — правим существующую запись
@@ -1039,8 +1063,12 @@ function openHistoryModal(clientId, editIdx) {
   const typeSelect = document.getElementById('historyType');
   const types = (interactionTypes && interactionTypes.length) ? interactionTypes : ['Звонок'];
   typeSelect.innerHTML = types.map(t => `<option>${escapeHtml(t)}</option>`).join('');
-  // Сбрасываем состояние формы заказа («Размещение заказа»).
+  // Сброс состояния форм заказа и заказа матриц, список коллег для встречи.
   resetOrderForm();
+  const colleagueSel = document.getElementById('historyColleague');
+  if (colleagueSel) colleagueSel.innerHTML = historyColleagueOptions();
+  const nextActivityEl = document.getElementById('historyNextActivity');
+  if (nextActivityEl) nextActivityEl.value = '';
 
   const editing = (editIdx !== undefined && editIdx !== null && editIdx !== '');
   const title = document.querySelector('#historyModal h2');
@@ -1062,6 +1090,9 @@ function openHistoryModal(clientId, editIdx) {
       const personSel = document.getElementById('historyContactPerson');
       if (personSel) personSel.value = entry.contactPerson || '';
       setCommentTagInputs('historyTagSelf', 'historyTagReport', entry.tags);
+      // Следующая активность и коллега по встрече — из сохранённой записи.
+      if (nextActivityEl) nextActivityEl.value = entry.nextActivityAt || '';
+      if (colleagueSel && entry.colleagueId) colleagueSel.value = String(entry.colleagueId);
       if (entry.order) {
         document.getElementById('orderKg').value = entry.order.kg === null || entry.order.kg === undefined ? '' : entry.order.kg;
         document.getElementById('orderCost').value = entry.order.cost === null || entry.order.cost === undefined ? '' : entry.order.cost;
@@ -1090,8 +1121,148 @@ function openHistoryModal(clientId, editIdx) {
 
 // Тип считается «заказным», если в названии есть «заказ»: так работают
 // и «Размещение заказа», и созданный в справочнике тип «Заказ».
+// «Заказ матриц» — отдельная ветка со своими полями, поэтому исключён.
 function isOrderType(type) {
-  return /заказ/i.test(String(type || ''));
+  return /заказ/i.test(String(type || '')) && !isMatrixType(type);
+}
+
+// «Заказ матриц»: окно с шифрами, покрытием и комментарием.
+function isMatrixType(type) {
+  return /матриц/i.test(String(type || ''));
+}
+
+function isMeetingType(type) {
+  return /встреч/i.test(String(type || ''));
+}
+
+/* ===== Закрытие активности и авто-задачи =====
+   Активность закрывается только вместе со следующей датой активности: она же
+   становится сроком задачи в привязанном столбце. Единственное исключение —
+   тип «Нерентабелен»: он закрывает активность без следующего шага. */
+
+const NO_NEXT_DATE_ACTIVITY = /нерентаб/i;
+
+function isNoNextDateActivity(type) {
+  return NO_NEXT_DATE_ACTIVITY.test(String(type || ''));
+}
+
+// Проверка правила. Возвращает { ok: true, nextAt } либо { ok: false, error }.
+function checkNextActivity(type, value) {
+  if (isNoNextDateActivity(type)) return { ok: true, nextAt: null };
+  const v = String(value == null ? '' : value).trim();
+  if (!v) {
+    return {
+      ok: false,
+      error: 'Укажите следующую дату активности — без неё активность не закрывается.\n' +
+             'Исключение: тип «Нерентабелен».'
+    };
+  }
+  return { ok: true, nextAt: v };
+}
+
+// Дата-время активности в читаемом виде.
+function formatActivityMoment(value) {
+  const v = String(value || '').trim();
+  if (!v) return '—';
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return v;
+  return d.toLocaleString('ru-RU', {
+    day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit'
+  });
+}
+
+// Шифры из окна «Заказ матриц»: по одному в строке или через запятую.
+function readMatrixCiphers() {
+  const el = document.getElementById('matrixCiphers');
+  if (!el) return [];
+  return String(el.value || '')
+    .split(/[\n,;]+/)
+    .map(s => s.trim())
+    .filter(Boolean);
+}
+
+// Служебные поля записи активности. closedAt заполняется, когда следующий шаг
+// назначен или активность закрыта как нерентабельная; иначе запись остаётся
+// «не закрытой» и это видно в карточке.
+function applyActivityFields(entry, type, nextAt, columnId) {
+  entry.activityType = type;
+  entry.nextActivityAt = nextAt || null;
+  entry.closedAt = (nextAt || isNoNextDateActivity(type)) ? new Date().toISOString() : null;
+  entry.columnId = columnId || null;
+  return entry;
+}
+
+// Текст задачи, созданной по активности.
+function activityTaskDescription(entry, client, extra) {
+  const parts = [];
+  parts.push(entry.comment || '');
+  if (extra) parts.push(extra);
+  if (entry.contactPerson) parts.push('Контактное лицо: ' + entry.contactPerson);
+  if (client) parts.push('Клиент: ' + (client.orgName || '—'));
+  if (entry.nextActivityAt) parts.push('Следующая активность: ' + formatActivityMoment(entry.nextActivityAt));
+  parts.push('Комментарий оставил(а): ' + ((currentUser && (currentUser.name || currentUser.login)) || '—'));
+  return parts.filter(Boolean).join('\n');
+}
+
+// Создать задачи по активности: основную в привязанном столбце и, для встречи
+// с коллегой, отдельную задачу коллеге с уведомлением.
+function createTasksForActivity(opts) {
+  const result = { task: null, colleagueTask: null, columnId: null };
+  const columnId = activityColumnId(opts.type);
+  if (!columnId) return result;          // активность не привязана — только комментарий
+  result.columnId = columnId;
+
+  const base = {
+    activityType: opts.type,
+    clientId: opts.clientId != null ? opts.clientId : null,
+    contactId: opts.contactId != null ? opts.contactId : null,
+    deadline: opts.nextAt || '',
+    description: opts.description || '',
+    colleagueId: opts.colleagueId != null ? opts.colleagueId : null
+  };
+
+  result.task = createActivityTask(Object.assign({}, base, {
+    title: activityTaskTitle(opts.type, opts.clientName, opts.titleExtra)
+  }));
+
+  const meId = currentUser ? currentUser.id : null;
+  if (result.task && isMeetingType(opts.type) && opts.colleagueId && opts.colleagueId !== meId) {
+    result.colleagueTask = createActivityTask(Object.assign({}, base, {
+      title: activityTaskTitle(opts.type, opts.clientName, opts.titleExtra),
+      ownerId: opts.colleagueId,
+      colleagueId: meId,
+      description: (opts.description || '') + '\nВстречу назначил(а): ' +
+        ((currentUser && (currentUser.name || currentUser.login)) || '—')
+    }));
+    if (result.colleagueTask) {
+      const col = taskColumns.find(c => c.id === columnId);
+      notifyUser(
+        opts.colleagueId,
+        'Встреча: ' + (opts.clientName || 'клиент'),
+        'Вы участник встречи. Задача добавлена в столбец «' + ((col && col.name) || 'Встреча') + '».',
+        result.colleagueTask.id
+      );
+    }
+  }
+  return result;
+}
+
+// Строка состояния активности в списке комментариев.
+function activityStatusHtml(entry) {
+  if (!entry) return '';
+  const next = entry.nextActivityAt ? formatActivityMoment(entry.nextActivityAt) : '';
+  const closed = !!entry.closedAt;
+  if (!next && !closed) return '';
+  const badge = closed
+    ? '<span class="badge" style="background:#dcfce7;color:#166534;">закрыта</span>'
+    : '<span class="badge" style="background:#fef3c7;color:#92400e;">не закрыта — нужна следующая дата</span>';
+  const nextLine = next
+    ? `<span style="margin-left:6px;color:#1d4ed8;">следующая активность: ${escapeHtml(next)}</span>`
+    : '';
+  const taskLine = entry.taskId
+    ? `<span style="margin-left:6px;color:#6b7280;">задача №${entry.taskId}</span>`
+    : '';
+  return `<div style="font-size:11px;margin-top:5px;">${badge}${nextLine}${taskLine}</div>`;
 }
 
 // Стоимость за килограмм. null, если данных не хватает: нулевой вес или
@@ -1124,15 +1295,58 @@ function resetOrderForm() {
   if (cost) cost.value = '';
   if (price) price.value = '';
   renderOrderConditions('');
+  // Поля заказа матриц сбрасываются вместе с заказом.
+  const ciphers = document.getElementById('matrixCiphers');
+  if (ciphers) ciphers.value = '';
+  const coating = document.getElementById('matrixCoating');
+  if (coating) coating.value = '';
 }
 
-// Показываем блок параметров заказа при выборе «заказного» типа.
+// Показываем нужный блок формы при выборе типа активности:
+// «Заказ матриц» — шифры и покрытие, «Размещение заказа» — параметры заказа,
+// «Встреча» — выбор коллеги.
 function onHistoryTypeChange() {
-  const section = document.getElementById('orderFormSection');
   const typeEl = document.getElementById('historyType');
-  const isOrder = isOrderType(typeEl ? typeEl.value : '');
-  if (section) section.style.display = isOrder ? 'block' : 'none';
+  const type = typeEl ? typeEl.value : '';
+
+  const orderSection = document.getElementById('orderFormSection');
+  const isOrder = isOrderType(type);
+  if (orderSection) orderSection.style.display = isOrder ? 'block' : 'none';
   if (isOrder) recalcOrderCost();
+
+  const matrixSection = document.getElementById('matrixFormSection');
+  const isMatrix = isMatrixType(type);
+  if (matrixSection) matrixSection.style.display = isMatrix ? 'block' : 'none';
+  if (isMatrix) renderMatrixCoatings();
+
+  const colleagueRow = document.getElementById('historyColleagueRow');
+  if (colleagueRow) colleagueRow.style.display = isMeetingType(type) ? '' : 'none';
+
+  const hint = document.getElementById('historyNextActivityHint');
+  if (hint) {
+    hint.textContent = isNoNextDateActivity(type)
+      ? 'Тип «Нерентабелен»: активность закрывается без следующей даты.'
+      : 'Без следующей даты активность не закрывается — она же становится сроком задачи.';
+  }
+}
+
+// Покрытия для заказа матриц — тот же справочник, что у заказов.
+function renderMatrixCoatings() {
+  const select = document.getElementById('matrixCoating');
+  if (!select) return;
+  const current = select.value;
+  select.innerHTML = '<option value="">—</option>' +
+    ORDER_CONDITIONS.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('');
+  select.value = current;
+}
+
+// Список коллег для встречи: менеджеры и руководители, кроме себя.
+function historyColleagueOptions() {
+  const meId = currentUser ? currentUser.id : null;
+  return users
+    .filter(u => isManagerRole(u) && u.id !== meId)
+    .map(u => `<option value="${u.id}">${escapeHtml(u.name || u.login)} (${escapeHtml(userPositionLabel(u))})</option>`)
+    .join('');
 }
 
 // Автопересчёт: Стоимость за кг = Общая стоимость / Кол-во кг.
@@ -1157,9 +1371,29 @@ function saveHistory(e) {
   const type = document.getElementById('historyType').value;
   let comment = document.getElementById('historyComment').value.trim();
   let orderData = null;
+  let matrixData = null;
 
-  // Заказ: собираем параметры, формируем текст комментария и создаём
-  // запись в модуле «Заказы». Стоимость за кг считаем из суммы и веса.
+  // 1. Правило: активность закрывается только вместе со следующей датой.
+  //    Исключение — «Нерентабелен».
+  const nextEl = document.getElementById('historyNextActivity');
+  const nextCheck = checkNextActivity(type, nextEl ? nextEl.value : '');
+  if (!nextCheck.ok) { alert(nextCheck.error); return; }
+
+  // 2. «Заказ матриц»: шифры, покрытие и комментарий.
+  if (isMatrixType(type)) {
+    const ciphers = readMatrixCiphers();
+    if (!ciphers.length) { alert('Укажите хотя бы один шифр матрицы'); return; }
+    const coatingEl = document.getElementById('matrixCoating');
+    const coating = coatingEl ? coatingEl.value.trim() : '';
+    matrixData = { ciphers: ciphers, coating: coating };
+    if (!comment) {
+      comment = 'Заказ матриц: ' + ciphers.join(', ') + (coating ? ' (' + coating + ')' : '');
+    }
+  }
+
+  // 3. «Размещение заказа» (старая система): собираем параметры, формируем
+  //    текст комментария и создаём запись в модуле «Заказы». Стоимость за кг
+  //    считаем из суммы и веса. Комментарий остаётся в комментариях.
   if (isOrderType(type)) {
     const conditionEl = document.getElementById('orderCondition');
     const kgRaw = document.getElementById('orderKg').value;
@@ -1185,8 +1419,20 @@ function saveHistory(e) {
   if (!comment) { alert('Заполните комментарий'); return; }
 
   const tags = readCommentTags('historyTagSelf', 'historyTagReport');
+  // Комментарий к заказу матриц уходит в отчёт — отметка ставится сама.
+  if (matrixData && tags.indexOf('forReport') === -1) tags.push('forReport');
+
+  const colleagueEl = document.getElementById('historyColleague');
+  const colleagueId = (isMeetingType(type) && colleagueEl && colleagueEl.value)
+    ? parseInt(colleagueEl.value, 10)
+    : null;
+
   const editIdxEl = document.getElementById('historyEditIdx');
   const editIdx = editIdxEl ? editIdxEl.value : '';
+
+  // Столбец, привязанный к активности (может быть не привязана — тогда задачи
+  // не будет, останется только комментарий).
+  const boundColumnId = activityColumnId(type);
 
   // Правка ранее оставленного комментария.
   if (editIdx !== '') {
@@ -1201,6 +1447,18 @@ function saveHistory(e) {
     entry.tags = tags;
     entry.editedAt = new Date().toISOString();
     if (orderData) entry.order = orderData;
+    applyActivityFields(entry, type, nextCheck.nextAt, boundColumnId || entry.columnId || null);
+
+    // Если по активности уже создана задача — обновляем её срок и описание,
+    // чтобы правка комментария не расходилась с задачей.
+    const linked = entry.taskId ? tasks.find(t => t.id === entry.taskId) : null;
+    if (linked) {
+      linked.deadline = nextCheck.nextAt || '';
+      linked.description = activityTaskDescription(entry, client, matrixExtraText(matrixData));
+      saveTasks();
+    }
+
+    if (matrixData) saveMatrixOrders(client, matrixData.ciphers, matrixData.coating, comment);
 
     saveClients(clients);
     closeModal('historyModal');
@@ -1210,7 +1468,7 @@ function saveHistory(e) {
     return;
   }
 
-  client.history.push({
+  const entry = {
     date: new Date().toISOString(),
     type: type,
     contactPerson: document.getElementById('historyContactPerson').value,
@@ -1219,7 +1477,28 @@ function saveHistory(e) {
     comment: comment,
     tags: tags,
     order: orderData
+  };
+  applyActivityFields(entry, type, nextCheck.nextAt, boundColumnId);
+
+  // Заказ матриц: по записи на каждый шифр — они и есть «матрицы».
+  if (matrixData) {
+    saveMatrixOrders(client, matrixData.ciphers, matrixData.coating, comment);
+  }
+
+  client.history.push(entry);
+
+  // Задачи по активности: в привязанный столбец; для встречи — ещё и коллеге.
+  const created = createTasksForActivity({
+    type: type,
+    clientId: client.id,
+    clientName: client.orgName,
+    nextAt: nextCheck.nextAt,
+    colleagueId: colleagueId,
+    titleExtra: matrixData ? matrixData.ciphers.join(', ') : '',
+    description: activityTaskDescription(entry, client, matrixExtraText(matrixData))
   });
+  if (created.task) entry.taskId = created.task.id;
+
   saveClients(clients);
 
   if (orderData) {
@@ -1242,6 +1521,29 @@ function saveHistory(e) {
   refreshClientViews(clientId);
 }
 
+// Дополнительная строка описания задачи для заказа матриц.
+function matrixExtraText(matrixData) {
+  if (!matrixData) return '';
+  const parts = ['Шифры: ' + matrixData.ciphers.join(', ')];
+  if (matrixData.coating) parts.push('Покрытие: ' + matrixData.coating);
+  return parts.join('\n');
+}
+
+// Записи заказов матриц: по одной на шифр, статус — «Поступила».
+function saveMatrixOrders(client, ciphers, coating, comment) {
+  ciphers.forEach(cipher => {
+    addMatrix({
+      cipher: cipher,
+      coating: coating || '',
+      status: MATRIX_STATUSES[0],
+      clientId: client ? client.id : null,
+      clientName: client ? client.orgName : '',
+      comment: comment || '',
+      createdBy: currentUser ? currentUser.id : null
+    });
+  });
+}
+
 // Список менеджеров для передачи клиента. Показываем роли «Менеджер
 // по продажам», а если текущий ответственный — администратор,
 // добавляем его, чтобы значение в списке не терялось.
@@ -1258,11 +1560,12 @@ function clientOwnerOptions(currentOwnerId) {
 }
 
 // Передача клиента другому менеджеру прямо из карточки (только администратор).
+// Менеджеры пользуются запросом: см. requestClientTransferFromCard().
 function applyClientTransfer() {
   const id = cardClientId || selectedClientId;
   const client = clients.find(c => c.id === id);
   if (!client) return;
-  if (!isAdmin()) { alert('Передавать клиентов может только администратор.'); return; }
+  if (!isAdmin()) { alert('Передавать клиентов сразу может только администратор. Отправьте запрос.'); return; }
 
   const select = document.getElementById('cardOwnerSelect');
   const commentEl = document.getElementById('cardTransferComment');
@@ -1277,13 +1580,64 @@ function applyClientTransfer() {
   }
 
   client.createdBy = newOwnerId;
+  client.responsibleManagerId = newOwnerId;
   saveClients(clients);
   notifyClientTransfer(newOwnerId, 1, comment);
+
+  // Открытые запросы по этому клиенту закрываем: передача уже состоялась.
+  const pending = pendingTransferForClient(client.id);
+  if (pending && typeof cancelTransferRequest === 'function') cancelTransferRequest(pending.id);
 
   if (commentEl) commentEl.value = '';
   renderClientsTable();
   renderClientContacts(client.id);
   renderClientCard(client.id);
+  if (typeof updateTransfersMenuBadge === 'function') updateTransfersMenuBadge();
+}
+
+// Запрос на перенос клиента из карточки: клиент уйдёт коллеге только после
+// того, как он примет запрос в разделе «Переносы клиентов».
+function requestClientTransferFromCard() {
+  const id = cardClientId || selectedClientId;
+  const client = clients.find(c => c.id === id);
+  if (!client) return;
+
+  const select = document.getElementById('cardOwnerSelect');
+  const commentEl = document.getElementById('cardTransferComment');
+  const targetId = select ? select.value : '';
+  const comment = commentEl ? commentEl.value.trim() : '';
+
+  if (!targetId) { alert('Выберите менеджера, которому передаём клиента'); return; }
+
+  const res = createClientTransferRequest(client.id, targetId, comment);
+  if (!res.ok) { alert(res.error); return; }
+
+  if (commentEl) commentEl.value = '';
+  alert('Запрос отправлен: ' + transferManagerName(parseInt(targetId, 10)) +
+    ' получит уведомление и примет решение.');
+  renderClientCard(client.id);
+  if (typeof updateTransfersMenuBadge === 'function') updateTransfersMenuBadge();
+}
+
+// Строка о текущем запросе на перенос в карточке клиента.
+function pendingTransferHtml(client) {
+  if (typeof pendingTransferForClient !== 'function') return '';
+  const r = pendingTransferForClient(client.id);
+  if (!r) return '';
+  const canCancel = currentUser && (r.fromManagerId === currentUser.id || isAdmin());
+  return `
+    <div class="transfer-pending">
+      <span>Запрос на перенос: <strong>${escapeHtml(transferManagerName(r.fromManagerId))}</strong> →
+        <strong>${escapeHtml(transferManagerName(r.toManagerId))}</strong> · ожидает решения</span>
+      ${canCancel ? `<button type="button" class="btn-icon-btn" onclick="cancelTransferFromCard(${r.id})" title="Отменить запрос">✕</button>` : ''}
+    </div>`;
+}
+
+function cancelTransferFromCard(requestId) {
+  const res = cancelTransferRequest(requestId);
+  if (!res.ok) { alert(res.error); return; }
+  const id = cardClientId || selectedClientId;
+  if (id) renderClientCard(id);
 }
 
 // Перерисовать блоки клиента после изменения комментариев.
@@ -1362,6 +1716,8 @@ function resetNotesForm() {
   }
 
   setCommentTagInputs('noteTagSelf', 'noteTagReport', []);
+  const nextEl = document.getElementById('noteNextActivity');
+  if (nextEl) nextEl.value = '';
   const saveBtn = document.getElementById('noteSaveBtn');
   if (saveBtn) saveBtn.textContent = 'Добавить отметку';
   const cancelBtn = document.getElementById('noteCancelBtn');
@@ -1392,10 +1748,11 @@ function renderClientNotes(clientId) {
           <span class="note-date">${formatDate(entry.date)}${entry.editedAt ? ' · изменено' : ''}</span>
           <span class="badge">${escapeHtml(entry.type || '')}</span>
           ${canEditComment(entry)
-            ? `<button class="btn-icon-btn" onclick="startEditNote(${clientId}, ${idx})" title="Редактировать отметку">✏️</button>`
+            ? `<button class="btn-icon-btn" onclick="startEditNote(${clientId}, ${idx})" title="Редактировать отметку">Изменить</button>`
             : ''}
         </div>
         <div class="note-text">${escapeHtml(entry.comment || '')}</div>
+        ${activityStatusHtml(entry)}
         ${entry.tags && entry.tags.length ? `<div class="comment-tags">${commentTagsHtml(entry.tags)}</div>` : ''}
       </div>`;
   }).join('');
@@ -1415,6 +1772,8 @@ function startEditNote(clientId, idx) {
   const typeSel = document.getElementById('noteType');
   if (typeSel && entry.type) typeSel.value = entry.type;
   setCommentTagInputs('noteTagSelf', 'noteTagReport', entry.tags);
+  const nextEl = document.getElementById('noteNextActivity');
+  if (nextEl) nextEl.value = entry.nextActivityAt || '';
 
   const saveBtn = document.getElementById('noteSaveBtn');
   if (saveBtn) saveBtn.textContent = 'Сохранить изменения';
@@ -1440,6 +1799,14 @@ function saveClientNote() {
   const editIdxEl = document.getElementById('noteEditIdx');
   const editIdx = editIdxEl ? editIdxEl.value : '';
 
+  // Отметка — такая же активность, поэтому правило то же: закрывается только
+  // вместе со следующей датой. Исключение — «Нерентабелен».
+  const nextEl = document.getElementById('noteNextActivity');
+  const nextCheck = checkNextActivity(type, nextEl ? nextEl.value : '');
+  if (!nextCheck.ok) { alert(nextCheck.error); return; }
+
+  const boundColumnId = activityColumnId(type);
+
   if (editIdx !== '') {
     const entry = client.history[parseInt(editIdx, 10)];
     if (!entry) return;
@@ -1451,8 +1818,14 @@ function saveClientNote() {
     entry.type = type;
     entry.tags = tags;
     entry.editedAt = new Date().toISOString();
+    applyActivityFields(entry, type, nextCheck.nextAt, boundColumnId || entry.columnId || null);
+    const linked = entry.taskId ? tasks.find(t => t.id === entry.taskId) : null;
+    if (linked) {
+      linked.deadline = nextCheck.nextAt || '';
+      saveTasks();
+    }
   } else {
-    client.history.push({
+    const entry = {
       date: new Date().toISOString(),
       type: type,
       contactPerson: '',
@@ -1461,7 +1834,19 @@ function saveClientNote() {
       comment: text,
       tags: tags,
       order: null
+    };
+    applyActivityFields(entry, type, nextCheck.nextAt, boundColumnId);
+    client.history.push(entry);
+
+    // Задача по активности — в привязанный столбец (если привязка есть).
+    const created = createTasksForActivity({
+      type: type,
+      clientId: client.id,
+      clientName: client.orgName,
+      nextAt: nextCheck.nextAt,
+      description: activityTaskDescription(entry, client, '')
     });
+    if (created.task) entry.taskId = created.task.id;
   }
 
   saveClients(clients);
