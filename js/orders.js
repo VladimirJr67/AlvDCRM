@@ -1,13 +1,18 @@
 /* ============================================================
-   js/orders.js — модуль «Заказы».
+   js/orders.js — раздел «Заказы/Матрицы», вкладка «Заказы».
 
-   Запись появляется автоматически, когда в комментарии к клиенту выбирается
-   тип «Размещение заказа» и заполняются параметры (кол-во кг, состояние
-   поставки, общая стоимость, стоимость за кг).
+   Раздел состоит из двух вкладок: «Заказы» (этот файл, старая система) и
+   «Матрицы» (js/matrices.js). Внутри вкладки — фильтры, анализ продаж за
+   период и таблица.
+
+   Запись заказа появляется автоматически, когда в комментарии к клиенту
+   выбирается тип «Размещение заказа» и заполняются параметры (кол-во кг,
+   состояние поставки, общая стоимость, стоимость за кг).
 
    Права: менеджер видит только свои заказы, администратор — все или заказы
-   конкретного пользователя. Экспорт в Excel доступен администратору.
-   Фильтры: по клиенту, по покрытию и по периоду (анализ продаж).
+   конкретного пользователя; у нового аккаунта вкладка пуста. Экспорт в Excel
+   доступен только администратору. Фильтры: по клиенту, по покрытию и по
+   периоду (анализ продаж).
    ============================================================ */
 
 let orders = [];
@@ -156,9 +161,45 @@ function orderClientOptions() {
 
 /* ===== Раздел «Заказы» ===== */
 
+/* ===== Раздел «Заказы/Матрицы» =====
+   Внутри два независимых списка: «Заказы» (старая система) и «Матрицы»
+   (js/matrices.js). У каждой вкладки свои фильтры, и права у обеих одинаковые:
+   менеджер видит только свои записи, администратор — все или записи
+   выбранного пользователя. У нового аккаунта раздел пуст. */
+
+let ordersTab = 'orders';   // 'orders' | 'matrices'
+
 function renderOrders() {
   const main = document.getElementById('mainContent');
   if (!main) return;
+
+  main.innerHTML = `
+    <div class="orders-page">
+      <div class="orders-head">
+        <h1>Заказы/Матрицы</h1>
+      </div>
+      <div class="section-tabs">
+        <button class="btn ${ordersTab === 'orders' ? '' : 'btn-secondary'}" onclick="setOrdersTab('orders')">Заказы</button>
+        <button class="btn ${ordersTab === 'matrices' ? '' : 'btn-secondary'}" onclick="setOrdersTab('matrices')">Матрицы</button>
+      </div>
+      <div id="ordersTabBody"></div>
+    </div>
+  `;
+
+  if (ordersTab === 'matrices' && typeof renderMatricesTab === 'function') renderMatricesTab();
+  else renderOrdersTab();
+}
+
+function setOrdersTab(tab) {
+  ordersTab = (tab === 'matrices') ? 'matrices' : 'orders';
+  renderOrders();
+}
+
+/* ===== Вкладка «Заказы» ===== */
+
+function renderOrdersTab() {
+  const host = document.getElementById('ordersTabBody');
+  if (!host) return;
 
   const list = filteredOrders();
   const sorted = [...list].sort((a, b) => new Date(b.date) - new Date(a.date));
@@ -178,13 +219,7 @@ function renderOrders() {
   const userOpts = users.map(u =>
     `<option value="${u.id}"${String(ordersUserFilter) === String(u.id) ? ' selected' : ''}>${escapeHtml(u.name || u.login)}</option>`).join('');
 
-  main.innerHTML = `
-    <div class="orders-page">
-      <div class="orders-head">
-        <h1>Заказы</h1>
-        ${isAdmin() ? '<button class="btn" onclick="exportOrdersExcel()">Экспорт в Excel</button>' : ''}
-      </div>
-
+  host.innerHTML = `
       <div class="orders-filters">
         ${isAdmin() ? `
           <label>Пользователь
@@ -213,6 +248,7 @@ function renderOrders() {
         </label>
         <button class="btn btn-sm btn-secondary" onclick="setOrdersPeriodToday()">Сегодня</button>
         ${filtersSet ? '<button class="btn btn-sm btn-secondary" onclick="resetOrdersFilters()">Сбросить</button>' : ''}
+        ${isAdmin() ? '<button class="btn btn-sm" onclick="exportOrdersExcel()">Экспорт заказов в Excel</button>' : ''}
       </div>
 
       <h3 class="orders-analysis-title">Анализ продаж${periodSet ? ' за период' : ''}</h3>
@@ -252,7 +288,7 @@ function renderOrders() {
                     <td>${fmtMoney(o.avgPrice)}</td>
                     <td><strong>${fmtMoney(o.cost)}</strong></td>
                     <td style="text-align:right;white-space:nowrap;">
-                      ${canDelete ? `<button class="btn-icon-btn" onclick="deleteOrder(${o.id})" title="Удалить заказ">🗑</button>` : ''}
+                      ${canDelete ? `<button class="btn-icon-btn" onclick="deleteOrder(${o.id})" title="Удалить заказ">Удалить</button>` : ''}
                     </td>
                   </tr>`;
                 }).join('')}
@@ -261,7 +297,6 @@ function renderOrders() {
           </div>
         </div>
       `}
-    </div>
   `;
 }
 

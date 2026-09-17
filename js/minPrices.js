@@ -22,7 +22,11 @@ function loadMinPrices() {
   minPriceHistory = Array.isArray(history) ? history : [];
 }
 
-function saveMinPrices() {
+// Запись цен и истории в LocalStorage с синхронизацией в db.json.
+// Внимание: имя функции отличается от обработчика кнопки «Сохранить»
+// (saveMinPrices ниже) — раньше обе назывались одинаково, из-за чего
+// вторая перекрывала первую и цены не сохранялись вовсе.
+function persistMinPrices() {
   localStorage.setItem('alvid_crm_min_prices', JSON.stringify(minPrices));
   localStorage.setItem('alvid_crm_min_prices_history', JSON.stringify(minPriceHistory));
   queueServerSave();
@@ -152,7 +156,7 @@ function saveMinPrices() {
     changed++;
   });
 
-  if (changed) saveMinPrices();
+  if (changed) persistMinPrices();
   else renderMinPricesBlock();
 
   closeModal('minPricesModal');
