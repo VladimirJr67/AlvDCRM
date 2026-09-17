@@ -11,11 +11,18 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT) || 3000;
 const DB_PATH = path.join(ROOT, 'db.json');
 const TMP_DB_PATH = path.join(ROOT, 'db.json.tmp');
+
+// Активные сессии входов. Хранятся отдельно от db.json: клиент отправляет на
+// сервер полный снапшот базы, и служебные данные сессий в нём не должны
+// участвовать — иначе сохранение из браузера затирало бы чужие входы.
+const SESSIONS_PATH = path.join(ROOT, 'sessions.json');
+const SESSIONS_TMP_PATH = path.join(ROOT, 'sessions.json.tmp');
 
 // ===== Локальная конфигурация интеграций =====
 // В этом файле хранятся API-ключи внешних сервисов. Он внесён в .gitignore
@@ -25,7 +32,10 @@ const CONFIG_PATH = path.join(ROOT, 'config.local.json');
 const CONFIG_TMP_PATH = path.join(ROOT, 'config.local.json.tmp');
 
 // Файлы, которые сервер не отдаёт клиенту ни при каких условиях.
-const NEVER_SERVE = new Set(['config.local.json', 'config.local.json.tmp', 'db.json.tmp']);
+const NEVER_SERVE = new Set([
+  'config.local.json', 'config.local.json.tmp', 'db.json.tmp',
+  'sessions.json', 'sessions.json.tmp'
+]);
 
 const DADATA_URL = 'https://suggestions.dadata.ru/suggestions/api/4_1/rs';
 
@@ -156,17 +166,123 @@ async function dadataCities(query, countryCode) {
   return list.map(s => (s.data && s.data.city) || s.value).filter(Boolean);
 }
 
+// ===== Схема базы: версия и справочные значения =====
+// v6 — роли admin/manager/lead, ответственный менеджер у клиента, теги и
+// служебные поля комментариев, особые отметки, столбцы по менеджерам,
+// привязка активности к столбцу, матрицы, запросы на перенос, чаты.
+const DB_VERSION = 6;
+
+// Роли системы: администратор, менеджер по продажам, руководитель.
+// Роли «technolog» в модели нет и не планируется: у технологов отдельный
+// контур работы, доступ в CRM им не выдаётся (проверено поиском по проекту —
+// упоминаний technolog/«технолог» нет ни в коде, ни в данных).
+const ROLES = { ADMIN: 'admin', MANAGER: 'manager', LEAD: 'lead' };
+
+// Историческое значение role:'user' означало менеджера по продажам —
+// при миграции приводится к 'manager'. Неизвестные значения тоже становятся
+// менеджером: это наименее привилегированная рабочая роль.
+const ROLE_ALIASES = {
+  admin: 'admin', администратор: 'admin',
+  manager: 'manager', user: 'manager', менеджер: 'manager', 'менеджер по продажам': 'manager',
+  lead: 'lead', head: 'lead', руководитель: 'lead', 'руководитель отдела': 'lead'
+};
+
+function normalizeRole(role) {
+  const key = String(role == null ? '' : role).trim().toLowerCase();
+  return ROLE_ALIASES[key] || 'manager';
+}
+
+// Теги комментария контакта: канонические коды forSelf / forReport.
+// Легаси-значения self / report приводятся к ним при миграции.
+const COMMENT_TAGS = ['forSelf', 'forReport'];
+const COMMENT_TAG_ALIASES = {
+  self: 'forSelf', forself: 'forSelf', for_self: 'forSelf', 'для себя': 'forSelf',
+  report: 'forReport', forreport: 'forReport', for_report: 'forReport', 'для отчёта': 'forReport'
+};
+
+function normalizeCommentTags(tags) {
+  const src = Array.isArray(tags)
+    ? tags
+    : (tags && typeof tags === 'object' ? Object.keys(tags).filter(k => tags[k]) : []);
+  const out = [];
+  src.forEach(t => {
+    const raw = String(t == null ? '' : t).trim();
+    if (!raw) return;
+    const canon = COMMENT_TAG_ALIASES[raw.toLowerCase()] || raw;
+    if (COMMENT_TAGS.indexOf(canon) > -1 && out.indexOf(canon) < 0) out.push(canon);
+  });
+  return out;
+}
+
+// Статусы заказа матриц.
+const MATRIX_STATUSES = ['Поступила', 'Отписана'];
+const MATRIX_STATUS_DEFAULT = 'Поступила';
+
+// Статусы запроса на перенос клиента к другому менеджеру.
+const TRANSFER_STATUSES = ['pending', 'approved', 'rejected'];
+
+// Привязка типа активности к столбцу канбана: { '<тип активности>': '<id столбца>' }.
+// Карта заполняется администратором (Администрирование → Типы взаимодействий):
+// это осознанная настройка, а не догадка системы. Пустая карта означает, что
+// задачи по активностям не создаются — остаются только комментарии.
+const DEFAULT_ACTIVITY_TO_COLUMN = {};
+
+// Автопривязки прежних версий: активности ссылались на бизнес-статусы доски.
+// Такая карта считается устаревшей и сбрасывается — администратор настроит
+// привязки заново (кнопка «Создать столбцы и привязки по ТЗ»).
+const LEGACY_ACTIVITY_TO_COLUMN = {
+  'Звонок': 'in_progress',
+  'Информация': 'in_progress',
+  'Встреча': 'in_progress',
+  'Письмо': 'in_progress',
+  'Размещение заказа': 'order_placed'
+};
+
+function isLegacyActivityMap(map) {
+  const keys = Object.keys(map || {});
+  if (keys.length < 4) return false;
+  return keys.every(k => !!LEGACY_ACTIVITY_TO_COLUMN[k] &&
+    (map[k] === 'in_progress' || map[k] === 'order_placed'));
+}
+
+// Настройки всплывающих уведомлений по умолчанию (совпадают с js/profile.js).
+const DEFAULT_NOTIFY_SETTINGS = { sound: 'short', position: 'bottom-right' };
+
+function asArray(v) {
+  return Array.isArray(v) ? v : [];
+}
+
+function plainObject(v) {
+  return (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};
+}
+
 // Дефолтная структура БД — создаётся при первом старте.
 const DEFAULT_DB = {
-  version: 5,
+  version: DB_VERSION,
   users: [
-    { id: 1, login: 'Admin', password: 'Admin', role: 'admin', name: 'Администратор' },
-    { id: 2, login: 'manager', password: 'manager', role: 'user', name: 'Менеджер' }
+    { id: 1, login: 'Admin', password: 'Admin', role: ROLES.ADMIN, name: 'Администратор', position: '', theme: 'light', substituteFor: null, substituteUntil: null },
+    { id: 2, login: 'manager', password: 'manager', role: ROLES.MANAGER, name: 'Менеджер', position: '', theme: 'light', substituteFor: null, substituteUntil: null }
   ],
   clients: [],
   contacts: [],
   tasks: [],
+  // Глобальные столбцы канбана (общие для всех).
   taskColumns: [],
+  // Индивидуальные столбцы: { '<id пользователя>': [ столбец, ... ] }.
+  // В JSON это отдельный ключ, потому что массив taskColumns не может нести
+  // собственное свойство perManager (JSON.stringify теряет такие свойства).
+  taskColumnsPerManager: {},
+  // Привязка активности к столбцу: { '<тип активности>': '<id столбца>' }.
+  activityToColumnMap: {},
+  // Особые отметки — отдельно от комментариев.
+  specialNotes: [],
+  // Заказы матриц: шифр, покрытие, статус «Поступила»/«Отписана», клиент, дата.
+  matrices: [],
+  // Запросы на перенос клиента к другому менеджеру.
+  clientTransferRequests: [],
+  // Внутренние чаты: менеджеры и руководители.
+  chatManagers: [],
+  chatLeads: [],
   reminders: [],
   notifications: [],
   interactionTypes: [],
@@ -185,37 +301,269 @@ const DEFAULT_DB = {
 
 // Типы взаимодействий по умолчанию — сидируются только при первом старте
 // (когда в db.json ещё нет коллекции interactionTypes).
-const DEFAULT_INTERACTION_TYPES = ['Звонок', 'Информация', 'Встреча', 'Письмо', 'Размещение заказа'];
+const DEFAULT_INTERACTION_TYPES = [
+  'Звонок', 'Информация', 'Встреча', 'Письмо',
+  'Размещение заказа', 'Отправил КП', 'Заказ матриц', 'Нерентабелен'
+];
+
+// Обязательные типы: на них держится логика активностей и их нельзя потерять.
+// Список синхронизирован с PROTECTED_INTERACTION_TYPES в js/interactionTypes.js:
+//   «Размещение заказа» — параметры заказа и запись в «Заказах»;
+//   «Заказ матриц»      — окно шифров и покрытия, записи в matrices[];
+//   «Отправил КП»       — активность отправки коммерческого предложения;
+//   «Нерентабелен»      — единственное исключение из правила следующей даты.
+const REQUIRED_INTERACTION_TYPES = ['Размещение заказа', 'Отправил КП', 'Заказ матриц', 'Нерентабелен'];
 
 // Легаси-набор без «Размещения заказа» — при миграции дополняется новым типом.
 const LEGACY_INTERACTION_TYPES = ['Звонок', 'Информация', 'Встреча', 'Письмо'];
 
+// ===== Миграции данных =====
+// Правило простое: ничего не удаляем и не перезаписываем — только дополняем
+// отсутствующие поля. Функция идемпотентна, поэтому вызывается и при загрузке
+// базы, и при каждом сохранении.
+
+// «Текущий менеджер» базы — к нему привязываются карточки клиентов, у которых
+// ответственный не был указан (до появления роли manager ответственного не
+// хранили вовсе). Если менеджеров несколько, берём первого по id: он и есть
+// тот, кто вёл базу до разделения ролей.
+function defaultManagerId(users) {
+  const managers = asArray(users).filter(u => u && (u.role === ROLES.MANAGER || u.role === ROLES.LEAD));
+  if (!managers.length) return null;
+  return managers.reduce((best, u) => (best == null || (u.id || 0) < best ? u.id : best), null);
+}
+
+// Ответственный менеджер карточки клиента.
+function resolveResponsibleManagerId(client, users, fallbackId) {
+  const known = id => asArray(users).some(u => u && u.id === id);
+  if (client.responsibleManagerId != null && known(client.responsibleManagerId)) {
+    return client.responsibleManagerId;
+  }
+  // Автор карточки: если это менеджер или руководитель — он и ответственный.
+  if (client.createdBy != null) {
+    const author = asArray(users).find(u => u && u.id === client.createdBy);
+    if (author && (author.role === ROLES.MANAGER || author.role === ROLES.LEAD)) return author.id;
+  }
+  return fallbackId;
+}
+
+// Комментарий (запись истории взаимодействия). Единый вид для комментариев
+// контактных лиц (contacts[].comments[]) и записей карточек клиентов
+// (clients[].history[]): теги «для себя»/«для отчёта», закрытие, следующая
+// активность и её тип со столбцом канбана.
+function normalizeCommentEntry(entry) {
+  if (!entry || typeof entry !== 'object') return entry;
+  entry.tags = normalizeCommentTags(entry.tags);
+  if (!('closedAt' in entry)) entry.closedAt = null;
+  if (!('nextActivityAt' in entry)) entry.nextActivityAt = null;
+  if (!('activityType' in entry)) entry.activityType = String(entry.type || '');
+  if (!('columnId' in entry)) entry.columnId = null;
+  return entry;
+}
+
+function normalizeContactRecord(contact) {
+  if (!contact || typeof contact !== 'object') return contact;
+  if (!('oldBaseId' in contact)) contact.oldBaseId = null;
+  contact.comments = asArray(contact.comments).map(normalizeCommentEntry);
+  return contact;
+}
+
 function normalizeDb(db) {
   const d = Object.assign({}, DEFAULT_DB, db || {});
-  d.users = d.users || [];
-  d.clients = d.clients || [];
-  d.contacts = d.contacts || [];
-  d.tasks = d.tasks || [];
-  d.taskColumns = d.taskColumns || [];
-  d.reminders = d.reminders || [];
-  d.notifications = d.notifications || [];
-  d.orders = d.orders || [];
-  d.orgTypes = Array.isArray(d.orgTypes) ? d.orgTypes : [];
-  d.contactPositions = Array.isArray(d.contactPositions) ? d.contactPositions : [];
-  d.news = Array.isArray(d.news) ? d.news : [];
-  d.minPrices = (d.minPrices && typeof d.minPrices === 'object' && !Array.isArray(d.minPrices)) ? d.minPrices : {};
-  d.minPriceHistory = Array.isArray(d.minPriceHistory) ? d.minPriceHistory : [];
-  d.interactionTypes = Array.isArray(d.interactionTypes) ? d.interactionTypes : [];
+
+  // --- Коллекции верхнего уровня ---
+  d.users = asArray(d.users);
+  d.clients = asArray(d.clients);
+  d.contacts = asArray(d.contacts);
+  d.tasks = asArray(d.tasks);
+  d.taskColumns = asArray(d.taskColumns);
+  d.reminders = asArray(d.reminders);
+  d.notifications = asArray(d.notifications);
+  d.orders = asArray(d.orders);
+  d.orgTypes = asArray(d.orgTypes);
+  d.contactPositions = asArray(d.contactPositions);
+  d.news = asArray(d.news);
+  d.minPrices = plainObject(d.minPrices);
+  d.minPriceHistory = asArray(d.minPriceHistory);
+  d.interactionTypes = asArray(d.interactionTypes);
+  d.specialNotes = asArray(d.specialNotes);
+  d.matrices = asArray(d.matrices);
+  d.clientTransferRequests = asArray(d.clientTransferRequests);
+  d.chatManagers = asArray(d.chatManagers);
+  d.chatLeads = asArray(d.chatLeads);
+  d.taskColumnsPerManager = plainObject(d.taskColumnsPerManager);
+  d.activityToColumnMap = plainObject(d.activityToColumnMap);
+
   // Легаси/fresh-базы без коллекции — наполняем дефолтами.
   if (!(db && Array.isArray(db.interactionTypes)) && !d.interactionTypes.length) {
     d.interactionTypes = DEFAULT_INTERACTION_TYPES.slice();
   } else if (d.interactionTypes.length === LEGACY_INTERACTION_TYPES.length &&
              LEGACY_INTERACTION_TYPES.every((t, i) => d.interactionTypes[i] === t)) {
-    // Одноразовая миграция: старый «чистый» справочник дополняется «Размещением заказа».
+    // Одноразовая миграция: старый «чистый» справочник дополняется новыми типами.
     // Если администратор уже правил справочник — его изменения не трогаем.
     d.interactionTypes = DEFAULT_INTERACTION_TYPES.slice();
   }
+  // Обязательные типы активностей дописываются, если их нет: без них не
+  // работают окно заказа матриц, форма заказа и исключение «Нерентабелен».
+  REQUIRED_INTERACTION_TYPES.forEach(type => {
+    if (!d.interactionTypes.some(t => String(t).toLowerCase() === type.toLowerCase())) {
+      d.interactionTypes.push(type);
+    }
+  });
+
+  // --- Пользователи: роли и профиль ---
+  d.users.forEach(u => {
+    if (!u || typeof u !== 'object') return;
+    u.role = normalizeRole(u.role);          // 'user' → 'manager'
+    if (typeof u.position !== 'string') u.position = '';
+    if (typeof u.theme !== 'string' || !u.theme) u.theme = 'light';
+    if (!('substituteFor' in u)) u.substituteFor = null;   // за кого замещает
+    if (!('substituteUntil' in u)) u.substituteUntil = null; // до какой даты
+    // Кто из руководителей отслеживает задачи сотрудника (раздел «Отслеживание»).
+    u.trackedBy = asArray(u.trackedBy);
+  });
+
+  const fallbackManager = defaultManagerId(d.users);
+
+  // --- Клиенты: идентификатор в прежней базе и ответственный менеджер ---
+  d.clients.forEach(c => {
+    if (!c || typeof c !== 'object') return;
+    if (!('oldBaseId' in c)) c.oldBaseId = null;
+    c.responsibleManagerId = resolveResponsibleManagerId(c, d.users, fallbackManager);
+    if (Array.isArray(c.history)) c.history.forEach(normalizeCommentEntry);
+  });
+
+  // --- Контактные лица: комментарии с тегами ---
+  d.contacts.forEach(normalizeContactRecord);
+
+  // --- Особые отметки: отдельная от комментариев сущность ---
+  d.specialNotes.forEach(n => {
+    if (!n || typeof n !== 'object') return;
+    if (!('clientId' in n)) n.clientId = null;
+    if (!('contactId' in n)) n.contactId = null;
+    if (typeof n.text !== 'string') n.text = '';
+    if (typeof n.color !== 'string') n.color = '';
+    if (!('authorId' in n)) n.authorId = null;
+    if (!('authorName' in n)) n.authorName = '';
+    if (!('createdAt' in n)) n.createdAt = new Date().toISOString();
+    if (!('active' in n)) n.active = true;   // снятая отметка хранится как active:false
+  });
+
+  // --- Столбцы канбана: индивидуальные наборы по менеджерам ---
+  Object.keys(d.taskColumnsPerManager).forEach(userId => {
+    d.taskColumnsPerManager[userId] = asArray(d.taskColumnsPerManager[userId]).map((c, i) => {
+      const col = (c && typeof c === 'object') ? c : {};
+      return {
+        id: col.id || ('mgr_' + userId + '_' + i),
+        name: typeof col.name === 'string' && col.name ? col.name : 'Столбец',
+        color: typeof col.color === 'string' && col.color ? col.color : '#6b7280',
+        order: typeof col.order === 'number' ? col.order : i
+      };
+    });
+  });
+
+  // --- Привязка активности к столбцу ---
+  Object.keys(d.activityToColumnMap).forEach(type => {
+    if (!d.activityToColumnMap[type]) delete d.activityToColumnMap[type];
+  });
+  if (isLegacyActivityMap(d.activityToColumnMap)) {
+    // Прежние автопривязки сбрасываем: привязки назначает администратор.
+    d.activityToColumnMap = Object.assign({}, DEFAULT_ACTIVITY_TO_COLUMN);
+  }
+
+  // --- Задачи: наблюдение, отработанная ссылка, коллега ---
+  d.tasks.forEach(t => {
+    if (!t || typeof t !== 'object') return;
+    if (!Array.isArray(t.trackingBy)) t.trackingBy = [];     // кто следит за задачей
+    if (!('linkWorkedOff' in t)) t.linkWorkedOff = false;    // ссылка отработана
+    if (!('colleagueId' in t)) t.colleagueId = null;         // коллега-соисполнитель
+    // Вид задачи: 'regular' — обычная, 'link' — «Отработка ссылки»
+    // (закрывается только после галочки «Ссылка отработана»).
+    if (t.kind !== 'link') t.kind = 'regular';
+    if (typeof t.linkUrl !== 'string') t.linkUrl = '';
+  });
+
+  // --- Уведомления: где показывать и со звуком ---
+  d.notifications.forEach(n => {
+    if (!n || typeof n !== 'object') return;
+    if (typeof n.position !== 'string' || !n.position) n.position = DEFAULT_NOTIFY_SETTINGS.position;
+    if (typeof n.sound !== 'string' || !n.sound) n.sound = DEFAULT_NOTIFY_SETTINGS.sound;
+  });
+
+  // --- Матрицы: шифр, покрытие, статус, клиент, дата ---
+  d.matrices.forEach(m => {
+    if (!m || typeof m !== 'object') return;
+    if (typeof m.cipher !== 'string') m.cipher = '';
+    if (typeof m.coating !== 'string') m.coating = '';
+    if (MATRIX_STATUSES.indexOf(m.status) < 0) m.status = MATRIX_STATUS_DEFAULT;
+    if (!('clientId' in m)) m.clientId = null;
+    if (typeof m.clientName !== 'string') m.clientName = '';
+    if (!('date' in m)) m.date = null;
+    if (typeof m.comment !== 'string') m.comment = '';
+    if (!('createdBy' in m)) m.createdBy = null;
+  });
+
+  // --- Запросы на перенос клиента ---
+  d.clientTransferRequests.forEach(r => {
+    if (!r || typeof r !== 'object') return;
+    if (!('clientId' in r)) r.clientId = null;
+    if (!('fromManagerId' in r)) r.fromManagerId = null;
+    if (!('toManagerId' in r)) r.toManagerId = null;
+    if (typeof r.reason !== 'string') r.reason = '';
+    if (TRANSFER_STATUSES.indexOf(r.status) < 0) r.status = 'pending';
+    if (!('createdAt' in r)) r.createdAt = new Date().toISOString();
+    if (!('decidedAt' in r)) r.decidedAt = null;
+    if (!('decidedBy' in r)) r.decidedBy = null;
+  });
+
+  // --- Чаты: сообщения менеджеров и руководителей ---
+  [d.chatManagers, d.chatLeads].forEach(list => {
+    list.forEach(m => {
+      if (!m || typeof m !== 'object') return;
+      if (!('authorId' in m)) m.authorId = null;
+      if (typeof m.authorName !== 'string') m.authorName = '';
+      if (typeof m.text !== 'string') m.text = '';
+      if (!('createdAt' in m)) m.createdAt = new Date().toISOString();
+      if (!Array.isArray(m.readBy)) m.readBy = [];
+    });
+  });
+
+  d.version = DB_VERSION;
   return d;
+}
+
+// Полная миграция с отчётом: возвращает нормализованную базу, признак
+// «что-то изменилось» и статистику для вывода в консоль/--migrate.
+// Статистика считается по снимку «до» — normalizeDb правит объекты на месте,
+// поэтому состояния «до» и «после» нельзя измерять на одном и том же объекте.
+function migrateDb(rawDb) {
+  let snapshot = {};
+  try {
+    snapshot = JSON.parse(JSON.stringify(rawDb || {}));
+  } catch (e) {
+    snapshot = {};
+  }
+  const before = JSON.stringify(snapshot);
+  const db = normalizeDb(rawDb);
+  const after = JSON.stringify(db);
+
+  const rawUsers = asArray(snapshot.users);
+  const rawClients = asArray(snapshot.clients);
+  const hasTag = x => x && Array.isArray(x.tags) && x.tags.length > 0;
+
+  return {
+    db: db,
+    changed: before !== after,
+    stats: {
+      fromVersion: snapshot.version != null ? snapshot.version : 0,
+      toVersion: DB_VERSION,
+      rolesChanged: rawUsers.filter(u => u && normalizeRole(u.role) !== u.role).length,
+      clientsBound: rawClients.filter(c => c && !c.responsibleManagerId).length,
+      contactsTouched: asArray(snapshot.contacts).length,
+      commentsRetagged: asArray(snapshot.contacts).reduce((n, c) => n + asArray(c && c.comments).filter(hasTag).length, 0)
+        + rawClients.reduce((n, c) => n + asArray(c && c.history).filter(hasTag).length, 0),
+      defaultManagerId: defaultManagerId(db.users)
+    }
+  };
 }
 
 function loadDb() {
@@ -254,6 +602,258 @@ function dbFingerprint() {
   } catch (e) {
     return '0:0';
   }
+}
+
+// ===== Сессия: вход, refresh-токен и httpOnly cookie =====
+// Пароли по-прежнему лежат в db.json открытым текстом (так требует ТЗ — админ
+// видит список логинов и паролей), поэтому сессия решает одну задачу: вход
+// сохраняется между перезагрузками страницы и перезапуском сервера.
+//
+//   alvid_sid     — access-токен, httpOnly, 30 минут, HMAC-подпись секретом сервера;
+//   alvid_refresh — refresh-токен, httpOnly, 90 дней, живёт только на /api/auth.
+//
+// Когда access истёк (вкладка была открыта давно или страницу перезагрузили
+// после паузы), сервер молча выдаёт новый по refresh-токену — пользователя
+// не разлогинивает. Выход — только кнопкой «Выйти».
+const ACCESS_COOKIE = 'alvid_sid';
+const REFRESH_COOKIE = 'alvid_refresh';
+const ACCESS_TTL_MS = 30 * 60 * 1000;             // 30 минут
+const REFRESH_TTL_MS = 90 * 24 * 60 * 60 * 1000;  // 90 дней
+const SESSION_TOUCH_MS = 10 * 60 * 1000;          // продление не чаще раза в 10 минут
+
+let sessionSecretCache = '';
+
+// Секрет подписи. Сначала переменная окружения, затем config.local.json —
+// файл вне git, тот же, где лежит ключ DaData.
+function sessionSecret() {
+  if (sessionSecretCache) return sessionSecretCache;
+  const fromEnv = (process.env.ALVID_SESSION_SECRET || '').trim();
+  if (fromEnv) { sessionSecretCache = fromEnv; return sessionSecretCache; }
+
+  const cfg = loadConfig();
+  const stored = (cfg.session && typeof cfg.session.secret === 'string') ? cfg.session.secret : '';
+  if (stored.length >= 32) { sessionSecretCache = stored; return sessionSecretCache; }
+
+  const secret = crypto.randomBytes(32).toString('hex');
+  cfg.session = Object.assign({}, cfg.session, { secret: secret });
+  try { saveConfig(cfg); } catch (e) { /* не смогли сохранить — секрет будет жить до перезапуска */ }
+  sessionSecretCache = secret;
+  return sessionSecretCache;
+}
+
+function tokenHash(token) {
+  return crypto.createHash('sha256').update(String(token)).digest('hex');
+}
+
+// Access-токен — подписанный HMAC-конверт: сервер не хранит его состояние,
+// а подделка невозможна без секрета.
+function signAccessToken(userId, ttlMs) {
+  const body = Buffer.from(JSON.stringify({
+    uid: userId,
+    exp: Date.now() + (ttlMs || ACCESS_TTL_MS)
+  })).toString('base64url');
+  const sig = crypto.createHmac('sha256', sessionSecret()).update(body).digest('base64url');
+  return body + '.' + sig;
+}
+
+function verifyAccessToken(token) {
+  if (!token || token.indexOf('.') < 0) return null;
+  const parts = token.split('.');
+  if (parts.length !== 2) return null;
+  const expected = crypto.createHmac('sha256', sessionSecret()).update(parts[0]).digest('base64url');
+  const a = Buffer.from(parts[1]);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  let payload = null;
+  try {
+    payload = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8'));
+  } catch (e) { return null; }
+  if (!payload || !payload.uid || !payload.exp || Date.now() > payload.exp) return null;
+  return payload;
+}
+
+function parseCookies(req) {
+  const out = {};
+  String(req.headers.cookie || '').split(';').forEach(part => {
+    const i = part.indexOf('=');
+    if (i < 0) return;
+    const name = part.slice(0, i).trim();
+    if (!name) return;
+    const value = part.slice(i + 1).trim();
+    try { out[name] = decodeURIComponent(value); } catch (e) { out[name] = value; }
+  });
+  return out;
+}
+
+function cookieString(name, value, opts) {
+  const o = opts || {};
+  let s = name + '=' + encodeURIComponent(value);
+  s += '; Path=' + (o.path || '/');
+  s += '; HttpOnly';
+  s += '; SameSite=Lax';
+  if (o.clear) s += '; Max-Age=0';
+  else if (o.maxAge != null) s += '; Max-Age=' + Math.floor(o.maxAge / 1000);
+  return s;
+}
+
+function accessCookieFor(userId) {
+  return cookieString(ACCESS_COOKIE, signAccessToken(userId), { path: '/', maxAge: ACCESS_TTL_MS });
+}
+
+function refreshCookieFor(token) {
+  return cookieString(REFRESH_COOKIE, token, { path: '/api/auth', maxAge: REFRESH_TTL_MS });
+}
+
+function clearSessionCookies() {
+  return [
+    cookieString(ACCESS_COOKIE, '', { path: '/', clear: true }),
+    cookieString(REFRESH_COOKIE, '', { path: '/api/auth', clear: true })
+  ];
+}
+
+function loadSessions() {
+  try {
+    const j = readJsonFile(SESSIONS_PATH);
+    return { version: 1, sessions: asArray(j && j.sessions) };
+  } catch (e) {
+    return { version: 1, sessions: [] };
+  }
+}
+
+function saveSessions(store) {
+  const now = Date.now();
+  store.sessions = asArray(store.sessions).filter(s => s && s.expiresAt > now);
+  fs.writeFileSync(SESSIONS_TMP_PATH, JSON.stringify(store, null, 2), 'utf8');
+  fs.renameSync(SESSIONS_TMP_PATH, SESSIONS_PATH);
+}
+
+// Новый вход: refresh-токен случаен и хранится только в виде хеша, поэтому
+// по файлу sessions.json войти нельзя.
+function startSession(user, req) {
+  const token = crypto.randomBytes(32).toString('hex');
+  const now = Date.now();
+  const store = loadSessions();
+  store.sessions.push({
+    id: crypto.randomBytes(8).toString('hex'),
+    userId: user.id,
+    tokenHash: tokenHash(token),
+    createdAt: now,
+    lastSeenAt: now,
+    expiresAt: now + REFRESH_TTL_MS,
+    userAgent: String(req.headers['user-agent'] || '').slice(0, 200)
+  });
+  saveSessions(store);
+  return token;
+}
+
+function dropSession(refreshToken) {
+  if (!refreshToken) return;
+  const store = loadSessions();
+  const hash = tokenHash(refreshToken);
+  const before = store.sessions.length;
+  store.sessions = store.sessions.filter(s => s.tokenHash !== hash);
+  if (store.sessions.length !== before) saveSessions(store);
+}
+
+function dropSessionsOfUser(userId) {
+  const store = loadSessions();
+  const before = store.sessions.length;
+  store.sessions = store.sessions.filter(s => s.userId !== userId);
+  if (store.sessions.length !== before) saveSessions(store);
+}
+
+// Кто пришёл по cookie: access-токен или (если он истёк) refresh-сессия.
+function resolveSession(req) {
+  const cookies = parseCookies(req);
+  const refreshToken = cookies[REFRESH_COOKIE] || '';
+  const access = verifyAccessToken(cookies[ACCESS_COOKIE]);
+
+  let session = null;
+  if (refreshToken) {
+    const hash = tokenHash(refreshToken);
+    session = loadSessions().sessions.find(s => s.tokenHash === hash && s.expiresAt > Date.now()) || null;
+  }
+
+  if (access && (!session || session.userId === access.uid)) {
+    return { userId: access.uid, session: session, accessValid: true, refreshToken: refreshToken };
+  }
+  if (session) {
+    // Access истёк или потерян, refresh жив — это и есть «F5 после паузы».
+    return { userId: session.userId, session: session, accessValid: false, refreshToken: refreshToken };
+  }
+  return null;
+}
+
+// Продление сессии: refresh-токен скользящий, поэтому активный пользователь
+// не вылетает никогда, а заброшенный вход умирает через 90 дней.
+function touchSession(session) {
+  if (!session) return false;
+  const now = Date.now();
+  const stale = (now - (session.lastSeenAt || 0)) > SESSION_TOUCH_MS;
+  const expiringSoon = (session.expiresAt - now) < (REFRESH_TTL_MS - SESSION_TOUCH_MS);
+  if (!stale && !expiringSoon) return false;
+  const store = loadSessions();
+  const live = store.sessions.find(s => s.id === session.id);
+  if (!live) return false;
+  live.lastSeenAt = now;
+  live.expiresAt = now + REFRESH_TTL_MS;
+  session.lastSeenAt = now;
+  session.expiresAt = live.expiresAt;
+  saveSessions(store);
+  return true;
+}
+
+function findUserForLogin(login, password) {
+  const db = loadDb();
+  const needle = String(login == null ? '' : login).trim().toLowerCase();
+  if (!needle) return null;
+  const user = db.users.find(u => String(u.login || '').trim().toLowerCase() === needle);
+  if (!user) return null;
+  const stored = String(user.password == null ? '' : user.password);
+  if (stored !== String(password == null ? '' : password)) return null;
+  return user;
+}
+
+// Ответ клиенту без пароля: клиентская часть пароль не получает.
+function publicUser(user) {
+  return {
+    id: user.id,
+    login: user.login,
+    name: user.name,
+    role: normalizeRole(user.role),
+    position: user.position || '',
+    theme: user.theme || 'light',
+    substituteFor: user.substituteFor != null ? user.substituteFor : null,
+    substituteUntil: user.substituteUntil != null ? user.substituteUntil : null
+  };
+}
+
+function sendJsonWithCookies(res, code, obj, cookies) {
+  const headers = { 'Content-Type': 'application/json; charset=utf-8' };
+  if (cookies && cookies.length) headers['Set-Cookie'] = cookies;
+  res.writeHead(code, headers);
+  res.end(JSON.stringify(obj));
+}
+
+// Ответ на /me и /refresh: оживляем access-токен, если он истёк, и отдаём
+// пользователя из актуальной базы (роль могла измениться администратором).
+function respondWithSession(req, res, session) {
+  const db = loadDb();
+  const user = db.users.find(u => u.id === session.userId);
+  if (!user) {
+    dropSessionsOfUser(session.userId);
+    sendJsonWithCookies(res, 401, { ok: false, error: 'Пользователь не найден' }, clearSessionCookies());
+    return;
+  }
+  const cookies = [];
+  if (!session.accessValid) cookies.push(accessCookieFor(user.id));
+  if (touchSession(session.session)) cookies.push(refreshCookieFor(session.refreshToken));
+  sendJsonWithCookies(res, 200, {
+    ok: true,
+    user: publicUser(user),
+    accessExpiresIn: Math.floor(ACCESS_TTL_MS / 1000),
+    refreshed: !session.accessValid
+  }, cookies);
 }
 
 const MIME = {
@@ -304,6 +904,58 @@ const server = http.createServer((req, res) => {
     return;
   }
   const pathname = url.pathname;
+
+  // ---- Сессия: вход, проверка, продление и выход ----
+  // Cookie httpOnly, поэтому клиентские скрипты токен не читают: сессию
+  // подтверждает только сервер. Проверка сессии обязательной для остальных
+  // API пока не сделана — база, как и раньше, доступна в доверенной сети.
+  if (pathname === '/api/auth/login') {
+    if (req.method !== 'POST') {
+      sendJson(res, 405, { ok: false, error: 'Method not allowed' });
+      return;
+    }
+    readJsonBody(req, (err, body) => {
+      if (err) {
+        sendJson(res, 400, { ok: false, error: 'Некорректный JSON' });
+        return;
+      }
+      const user = findUserForLogin(body.login, body.password);
+      if (!user) {
+        sendJson(res, 401, { ok: false, error: 'Неверный логин или пароль' });
+        return;
+      }
+      const refreshToken = startSession(user, req);
+      sendJsonWithCookies(res, 200, { ok: true, user: publicUser(user) }, [
+        accessCookieFor(user.id),
+        refreshCookieFor(refreshToken)
+      ]);
+    });
+    return;
+  }
+
+  if (pathname === '/api/auth/me' || pathname === '/api/auth/refresh') {
+    if (pathname === '/api/auth/refresh' && req.method !== 'POST') {
+      sendJson(res, 405, { ok: false, error: 'Method not allowed' });
+      return;
+    }
+    const session = resolveSession(req);
+    if (!session) {
+      sendJsonWithCookies(res, 401, { ok: false, error: 'Сессия не найдена' }, clearSessionCookies());
+      return;
+    }
+    respondWithSession(req, res, session);
+    return;
+  }
+
+  if (pathname === '/api/auth/logout') {
+    if (req.method !== 'POST') {
+      sendJson(res, 405, { ok: false, error: 'Method not allowed' });
+      return;
+    }
+    dropSession(parseCookies(req)[REFRESH_COOKIE]);
+    sendJsonWithCookies(res, 200, { ok: true }, clearSessionCookies());
+    return;
+  }
 
   // ---- API базы данных ----
   if (pathname === '/api/db') {
@@ -440,8 +1092,10 @@ const server = http.createServer((req, res) => {
   // ---- Статика ----
   let filePath = pathname === '/' ? path.join(ROOT, 'index.html') : path.join(ROOT, pathname);
 
-  // Конфигурацию с API-ключами и служебные файлы БД как статику не отдаём.
-  if (NEVER_SERVE.has(path.basename(filePath))) {
+  // Конфигурацию с API-ключами, базу и её резервные копии как статику
+  // не отдаём: db.json доступен только через /api/db.
+  const baseName = path.basename(filePath);
+  if (NEVER_SERVE.has(baseName) || /^db\.json/i.test(baseName) || /^sessions\.json/i.test(baseName)) {
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end('Not found');
     return;
@@ -476,6 +1130,58 @@ const server = http.createServer((req, res) => {
     serveFile(filePath, res);
   });
 });
+
+// ===== Миграция базы при старте =====
+// Схема обновляется один раз: если после нормализации база отличается от
+// файла, актуальный вариант записывается на диск, а прежний сохраняется
+// рядом как резервная копия (откат — вернуть копию на место db.json).
+function runStartupMigration() {
+  let raw;
+  try {
+    raw = readJsonFile(DB_PATH);
+  } catch (err) {
+    console.log('  База не найдена: db.json будет создан при первом сохранении (схема v' + DB_VERSION + ')');
+    return { changed: false, stats: null };
+  }
+
+  const res = migrateDb(raw);
+  if (!res.changed) {
+    console.log('  Схема базы: v' + res.stats.toVersion + ' — миграция не требуется');
+    return res;
+  }
+
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const backupName = 'db.json.v' + res.stats.fromVersion + '.' + stamp + '.bak';
+  try {
+    fs.copyFileSync(DB_PATH, path.join(ROOT, backupName));
+  } catch (e) {
+    console.log('  Не удалось создать резервную копию базы: ' + e.message);
+  }
+
+  saveDb(res.db);
+
+  const s = res.stats;
+  console.log('  Миграция схемы базы: v' + s.fromVersion + ' → v' + s.toVersion);
+  console.log('    • ролей приведено к admin/manager/lead: ' + s.rolesChanged);
+  console.log('    • клиентов привязано к менеджеру (id ' + s.defaultManagerId + '): ' + s.clientsBound);
+  console.log('    • комментариев с тегами нормализовано: ' + s.commentsRetagged);
+  console.log('    • резервная копия: ' + backupName);
+  return res;
+}
+
+// Флаг --migrate: выполнить миграцию базы и выйти, не поднимая сервер.
+// Нужен, чтобы обновить db.json до новой схемы отдельным шагом.
+if (process.argv.includes('--migrate')) {
+  console.log('');
+  console.log('  Алвид CRM — миграция схемы базы');
+  const res = runStartupMigration();
+  console.log('  Версия схемы на диске: v' + DB_VERSION);
+  console.log('  Записано в db.json: ' + (res.changed ? 'да' : 'нет (база уже по актуальной схеме)'));
+  console.log('');
+  process.exit(0);
+}
+
+runStartupMigration();
 
 server.listen(PORT, () => {
   console.log('');

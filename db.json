@@ -1,37 +1,50 @@
 {
-  "version": 5,
+  "version": 6,
   "users": [
     {
       "id": 1,
       "login": "Admin",
       "password": "Admin",
       "role": "admin",
-      "name": "Администратор"
+      "name": "?????????????",
+      "phone": "",
+      "department": "",
+      "position": "",
+      "settings": {
+        "sound": "double",
+        "position": "center"
+      },
+      "theme": "light",
+      "substituteFor": null,
+      "substituteUntil": null,
+      "trackedBy": []
     },
     {
       "id": 2,
       "login": "manager",
-      "password": "manager",
-      "role": "user",
-      "name": "Менеджер"
+      "password": "qwer1234",
+      "role": "manager",
+      "name": "????????",
+      "position": "",
+      "theme": "light",
+      "substituteFor": null,
+      "substituteUntil": null,
+      "trackedBy": []
     }
   ],
   "clients": [
     {
       "orgName": "11",
-      "orgCity": "",
-      "orgDirection": "",
+      "orgCountry": "RU",
+      "orgCity": "???????",
+      "orgDirection": "???????????????",
       "orgAddress": "",
       "orgPhones": "",
-      "orgStatus": "in_progress",
+      "orgStatus": "cooperation",
       "orgEmails": "",
       "orgWebsite": "",
-      "orgInn": "",
-      "contactName": "",
-      "contactPosition": "",
-      "contactPhoneWork": "",
-      "contactPhoneMobile": "",
-      "contactEmail": "",
+      "orgInn": "402509882511",
+      "orgOgrn": "",
       "id": 1,
       "contacts": [
         {
@@ -45,47 +58,247 @@
       "history": [
         {
           "date": "2026-08-27T15:38:55.703Z",
-          "type": "Размещение заказа",
+          "type": "?????????? ??????",
           "contactPerson": "",
           "manager": "Admin",
           "comment": "1212",
           "order": {
             "kg": 1212,
-            "condition": "Анод",
+            "condition": "????",
             "avgPrice": 650,
             "cost": 1221212
-          }
+          },
+          "tags": [],
+          "closedAt": null,
+          "nextActivityAt": null,
+          "activityType": "?????????? ??????",
+          "columnId": null
+        },
+        {
+          "date": "2026-09-15T19:28:47.749Z",
+          "type": "?????????? ??????",
+          "contactPerson": "",
+          "manager": "Admin",
+          "comment": "????? ?????",
+          "order": {
+            "kg": 1233,
+            "condition": "?????",
+            "avgPrice": 648.82,
+            "cost": 800000
+          },
+          "tags": [],
+          "closedAt": null,
+          "nextActivityAt": null,
+          "activityType": "?????????? ??????",
+          "columnId": null
+        },
+        {
+          "date": "2026-09-16T19:32:01.537Z",
+          "type": "??????",
+          "contactPerson": "",
+          "manager": "manager",
+          "authorId": 2,
+          "comment": "af",
+          "tags": [
+            "forSelf"
+          ],
+          "order": null,
+          "closedAt": null,
+          "nextActivityAt": null,
+          "activityType": "??????",
+          "columnId": null
         }
       ],
-      "createdBy": 1
+      "createdBy": 1,
+      "oldBaseId": null,
+      "responsibleManagerId": 2
     }
   ],
   "contacts": [],
-  "tasks": [],
-  "taskColumns": [],
-  "reminders": [],
-  "notifications": [],
+  "tasks": [
+    {
+      "title": "121",
+      "description": "121",
+      "deadline": "2026-10-01T12:29",
+      "priority": "low",
+      "status": "drawings",
+      "coAssignees": [],
+      "clientId": null,
+      "contactId": null,
+      "id": 1,
+      "createdAt": "2026-09-15T19:26:24.594Z",
+      "statusUpdatedAt": "2026-09-15T19:26:31.943Z",
+      "ownerId": 1,
+      "order": 0,
+      "completedAt": null,
+      "trackingBy": [],
+      "linkWorkedOff": false,
+      "colleagueId": null,
+      "kind": "regular",
+      "linkUrl": ""
+    },
+    {
+      "title": "1",
+      "description": "",
+      "deadline": "2026-09-16T22:28",
+      "priority": "low",
+      "status": "in_progress",
+      "coAssignees": [],
+      "clientId": null,
+      "contactId": null,
+      "id": 2,
+      "createdAt": "2026-09-16T19:27:32.620Z",
+      "statusUpdatedAt": "2026-09-16T19:27:32.620Z",
+      "ownerId": 1,
+      "order": 0,
+      "trackingBy": [],
+      "linkWorkedOff": false,
+      "colleagueId": null,
+      "kind": "regular",
+      "linkUrl": ""
+    }
+  ],
+  "taskColumns": [
+    {
+      "id": "in_progress",
+      "name": "? ??????",
+      "color": "#f59e0b",
+      "order": 0,
+      "locked": true
+    },
+    {
+      "id": "problem",
+      "name": "????????",
+      "color": "#ef4444",
+      "order": 1,
+      "locked": true
+    },
+    {
+      "id": "drawings",
+      "name": "?????? ? ?????????",
+      "color": "#8b5cf6",
+      "order": 2,
+      "locked": true
+    },
+    {
+      "id": "invoiced",
+      "name": "????????? ????",
+      "color": "#10b981",
+      "order": 3,
+      "locked": true
+    },
+    {
+      "id": "invoice_approval",
+      "name": "???? ?? ????????????",
+      "color": "#06b6d4",
+      "order": 4,
+      "locked": true
+    },
+    {
+      "id": "order_placed",
+      "name": "???????? ?????",
+      "color": "#84cc16",
+      "order": 5,
+      "locked": true
+    }
+  ],
+  "taskColumnsPerManager": {},
+  "activityToColumnMap": {},
+  "specialNotes": [],
+  "matrices": [],
+  "clientTransferRequests": [],
+  "chatManagers": [],
+  "chatLeads": [],
+  "reminders": [
+    {
+      "title": "????????",
+      "description": "2323?",
+      "date": "2026-09-15",
+      "time": "09:00",
+      "color": "#f59e0b",
+      "scope": "client",
+      "clientId": 1,
+      "id": 1,
+      "completed": false,
+      "createdAt": "2026-09-15T19:26:04.310Z",
+      "createdBy": 1,
+      "notifiedAt": "2026-09-15T19:26:21.478Z"
+    },
+    {
+      "title": "1",
+      "description": "2",
+      "date": "2026-09-16",
+      "time": "22:29",
+      "color": "#f59e0b",
+      "scope": "self",
+      "clientId": null,
+      "id": 2,
+      "completed": true,
+      "createdAt": "2026-09-16T19:28:31.857Z",
+      "createdBy": 1,
+      "notifiedAt": "2026-09-16T19:29:13.459Z",
+      "completedAt": "2026-09-16T19:29:17.898Z"
+    }
+  ],
+  "notifications": [
+    {
+      "id": 1,
+      "userId": 1,
+      "title": "???????????: ????????",
+      "message": "2323? � 09:00",
+      "taskId": null,
+      "read": false,
+      "createdAt": "2026-09-15T19:26:21.479Z",
+      "position": "bottom-right",
+      "sound": "short"
+    },
+    {
+      "id": 2,
+      "userId": 1,
+      "title": "???????????: 1",
+      "message": "2 � 22:29",
+      "taskId": null,
+      "read": false,
+      "createdAt": "2026-09-16T19:29:13.460Z",
+      "position": "bottom-right",
+      "sound": "short"
+    }
+  ],
   "interactionTypes": [
-    "Звонок",
-    "Информация",
-    "Встреча",
-    "Письмо",
-    "Размещение заказа"
+    "??????",
+    "??????????",
+    "???????",
+    "??????",
+    "?????????? ??????",
+    "???????? ??",
+    "????? ??????",
+    "????????????",
+    "Размещение заказа",
+    "Отправил КП",
+    "Заказ матриц",
+    "Нерентабелен"
   ],
   "orders": [
     {
       "id": 1,
       "clientId": 1,
       "clientName": "11",
-      "kg": 1212,
-      "condition": "Анод",
-      "avgPrice": 650,
-      "cost": 1221212,
-      "date": "2026-08-27T15:38:55.714Z",
+      "kg": 1233,
+      "condition": "?????",
+      "avgPrice": 648.82,
+      "cost": 800000,
+      "date": "2026-09-15T19:28:47.752Z",
       "createdBy": 1,
-      "comment": "1212"
+      "comment": "????? ?????"
     }
   ],
-  "orgTypes": [],
-  "contactPositions": []
+  "orgTypes": [
+    "???????????????"
+  ],
+  "contactPositions": [
+    "121"
+  ],
+  "news": [],
+  "minPrices": {},
+  "minPriceHistory": []
 }

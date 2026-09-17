@@ -3,15 +3,46 @@
 <head><meta charset="UTF-8"><title>test</title></head>
 <body>
 <script>
-  // Тестовый хук: задать сессию и перейти в приложение.
-  var session = new URLSearchParams(location.search).get('u') || 'admin';
-  if (session === 'user') {
-    localStorage.setItem('alvid_crm_session', JSON.stringify({userId: 2, login: 'manager', name: 'Менеджер', role: 'user'}));
-  } else {
-    localStorage.setItem('alvid_crm_session', JSON.stringify({userId: 1, login: 'Admin', name: 'Администратор', role: 'admin'}));
+  // Тестовый хук: войти под нужным пользователем и перейти в приложение.
+  //   ?u=admin|manager|lead        — под кем войти
+  //   &section=chat|orders|…       — сразу открыть раздел
+  //
+  // Вход идёт через сервер (httpOnly cookie), как в обычной работе: иначе
+  // приложение с серверной сессией не пустило бы дальше экрана входа.
+  var params = new URLSearchParams(location.search);
+  var who = params.get('u') || 'admin';
+  var section = params.get('section') || '';
+
+  var creds = {
+    admin: { login: 'Admin', password: 'Admin' },
+    manager: { login: 'manager', password: 'qwer1234' },
+    lead: { login: 'lead', password: 'lead' }
+  }[who] || { login: 'Admin', password: 'Admin' };
+
+  var target = '/' + (section ? '?section=' + encodeURIComponent(section) : '');
+
+  function go() { location.replace(target); }
+
+  // Запасной локальный вход — для случая, когда сервер отвечает отказом
+  // (например, пользователя с таким логином ещё нет в базе).
+  function localFallback() {
+    var roles = { admin: 'admin', manager: 'manager', lead: 'lead' };
+    var ids = { admin: 1, manager: 2, lead: 3 };
+    localStorage.setItem('alvid_crm_session', JSON.stringify({
+      userId: ids[who] || 1, login: creds.login, name: creds.login, role: roles[who] || 'admin'
+    }));
+    go();
   }
-  localStorage.setItem('alvid_crm_data_version', '3');
-  location.replace('/');
+
+  fetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(creds),
+    credentials: 'same-origin'
+  })
+    .then(function (r) { return r.json(); })
+    .then(function (j) { if (j && j.ok) go(); else localFallback(); })
+    .catch(function () { localFallback(); });
 </script>
 </body>
 </html>

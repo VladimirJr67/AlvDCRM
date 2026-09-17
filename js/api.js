@@ -44,6 +44,13 @@ function rehydrateAll(db) {
   contacts = db.contacts || [];
   tasks = db.tasks || [];
   taskColumns = db.taskColumns || [];
+  taskColumnsPerManager = db.taskColumnsPerManager || {};
+  activityToColumnMap = db.activityToColumnMap || {};
+  specialNotes = db.specialNotes || [];
+  matrices = db.matrices || [];
+  clientTransferRequests = db.clientTransferRequests || [];
+  chatManagers = db.chatManagers || [];
+  chatLeads = db.chatLeads || [];
   reminders = db.reminders || [];
   notifications = db.notifications || [];
   interactionTypes = db.interactionTypes || [];
@@ -58,12 +65,19 @@ function rehydrateAll(db) {
 // Собрать полный снапшот из глобалов приложения.
 function assembleDb() {
   return {
-    version: 5,
+    version: 6,
     users: users || [],
     clients: clients || [],
     contacts: contacts || [],
     tasks: tasks || [],
     taskColumns: taskColumns || [],
+    taskColumnsPerManager: taskColumnsPerManager || {},
+    activityToColumnMap: activityToColumnMap || {},
+    specialNotes: specialNotes || [],
+    matrices: matrices || [],
+    clientTransferRequests: clientTransferRequests || [],
+    chatManagers: chatManagers || [],
+    chatLeads: chatLeads || [],
     reminders: reminders || [],
     notifications: notifications || [],
     interactionTypes: interactionTypes || [],
@@ -182,9 +196,11 @@ function resolveCurrentUserAfterHydrate() {
   const found = users.find(u => u.id === currentUser.id) || users.find(u => u.login === currentUser.login);
   if (found) currentUser = found;
   else {
-    // Пользователь удалён на сервере — разлогиниваем.
+    // Пользователь удалён на сервере — разлогиниваем: гасим и локальную
+    // копию сессии, и серверную (иначе cookie останется жить).
     currentUser = null;
     localStorage.removeItem('alvid_crm_session');
+    if (typeof endServerSession === 'function') endServerSession();
     location.reload();
   }
 }

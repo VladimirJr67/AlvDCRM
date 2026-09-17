@@ -2,6 +2,10 @@
    js/users.js — учётные записи, роли и текущий пользователь.
    Пароли хранятся открыто: система локальная, администратору
    нужен видимый список логинов/паролей (по ТЗ).
+
+   Роли: admin (администратор), manager (менеджер по продажам),
+   lead (руководитель). Роли «technolog» в системе нет — у технологов
+   отдельный контур работы, доступ в CRM им не выдаётся.
    ============================================================ */
 
 let users = [];
@@ -10,15 +14,49 @@ let currentUser = null;
 const SESSION_KEY = 'alvid_crm_session';
 const USERS_KEY = 'alvid_crm_users';
 
+// Коды ролей и их подписи. Значение 'user' — историческое обозначение
+// менеджера: такие записи приводятся к 'manager' при загрузке.
+const ROLE_ADMIN = 'admin';
+const ROLE_MANAGER = 'manager';
+const ROLE_LEAD = 'lead';
+
+const ROLE_LABELS = {
+  admin: 'Администратор',
+  manager: 'Менеджер по продажам',
+  lead: 'Руководитель'
+};
+
+const ROLE_ALIASES = {
+  admin: 'admin', 'администратор': 'admin',
+  manager: 'manager', user: 'manager', 'менеджер': 'manager', 'менеджер по продажам': 'manager',
+  lead: 'lead', head: 'lead', 'руководитель': 'lead', 'руководитель отдела': 'lead'
+};
+
+function normalizeRole(role) {
+  const key = String(role == null ? '' : role).trim().toLowerCase();
+  return ROLE_ALIASES[key] || ROLE_MANAGER;
+}
+
 const DEFAULT_USERS = [
-  { id: 1, login: 'Admin', password: 'Admin', role: 'admin', name: 'Администратор', position: '' },
-  { id: 2, login: 'manager', password: 'manager', role: 'user', name: 'Менеджер', position: '' }
+  { id: 1, login: 'Admin', password: 'Admin', role: ROLE_ADMIN, name: 'Администратор', position: '', theme: 'light', substituteFor: null, substituteUntil: null, trackedBy: [] },
+  { id: 2, login: 'manager', password: 'manager', role: ROLE_MANAGER, name: 'Менеджер', position: '', theme: 'light', substituteFor: null, substituteUntil: null, trackedBy: [] }
 ];
 
 function loadUsers() {
   const saved = localStorage.getItem(USERS_KEY);
   if (saved) {
     try { users = JSON.parse(saved); } catch (e) { users = []; }
+  }
+  // Роли из старых локальных данных приводим к актуальным кодам.
+  if (Array.isArray(users)) {
+    users.forEach(u => {
+      if (!u) return;
+      u.role = normalizeRole(u.role);
+      // trackedBy — список руководителей, отслеживающих задачи сотрудника.
+      if (!Array.isArray(u.trackedBy)) u.trackedBy = [];
+    });
+  } else {
+    users = [];
   }
   if (!users.length) {
     users = DEFAULT_USERS.map(u => ({ ...u }));
@@ -39,14 +77,23 @@ function findUserByLogin(login) {
   return users.find(u => u.login.toLowerCase() === String(login).toLowerCase());
 }
 
-// Роли системы: администратор и менеджер по продажам (role === 'user').
-// Отдельного значения role для менеджера нет — так модель остаётся прежней.
+// Роли системы: администратор, менеджер по продажам, руководитель.
 function userRoleLabel(u) {
-  return (u && u.role === 'admin') ? 'Администратор' : 'Менеджер по продажам';
+  if (!u) return ROLE_LABELS[ROLE_MANAGER];
+  return ROLE_LABELS[normalizeRole(u.role)] || ROLE_LABELS[ROLE_MANAGER];
 }
 
+// Менеджерская работа: и менеджер по продажам, и руководитель.
 function isManagerRole(u) {
-  return !!u && u.role !== 'admin';
+  if (!u) return false;
+  const role = normalizeRole(u.role);
+  return role === ROLE_MANAGER || role === ROLE_LEAD;
+}
+
+// Руководитель — отдельная роль: те же рабочие инструменты, но с обзором
+// по менеджерам (перенос клиентов, столбцы канбана, чат руководителей).
+function isLeadRole(u) {
+  return !!u && normalizeRole(u.role) === ROLE_LEAD;
 }
 
 // Должность пользователя. Если не заполнена — показываем роль,
@@ -85,13 +132,20 @@ function searchUsers(query, excludeIds) {
 function isAdmin() {
   if (!currentUser) return false;
   const live = findUserById(currentUser.id) || findUserByLogin(currentUser.login);
-  return !!(live && live.role === 'admin');
+  return !!(live && normalizeRole(live.role) === ROLE_ADMIN);
+}
+
+// Текущий пользователь — руководитель.
+function isLead() {
+  if (!currentUser) return false;
+  const live = findUserById(currentUser.id) || findUserByLogin(currentUser.login);
+  return !!(live && normalizeRole(live.role) === ROLE_LEAD);
 }
 
 // Проверка, что изменения не сломают систему: нельзя удалить/понизить
 // последнего администратора.
 function countAdmins() {
-  return users.filter(u => u.role === 'admin').length;
+  return users.filter(u => normalizeRole(u.role) === ROLE_ADMIN).length;
 }
 
 function addUser(data) {
@@ -102,9 +156,13 @@ function addUser(data) {
     id: maxId + 1,
     login: data.login.trim(),
     password: data.password,
-    role: data.role === 'admin' ? 'admin' : 'user',
+    role: normalizeRole(data.role),
     name: (data.name || '').trim() || data.login.trim(),
-    position: (data.position || '').trim()
+    position: (data.position || '').trim(),
+    theme: data.theme || 'light',
+    substituteFor: data.substituteFor != null ? data.substituteFor : null,
+    substituteUntil: data.substituteUntil != null ? data.substituteUntil : null,
+    trackedBy: Array.isArray(data.trackedBy) ? data.trackedBy.slice() : []
   });
   saveUsers();
   return { ok: true };
@@ -118,9 +176,9 @@ function updateUser(id, data) {
   const dup = findUserByLogin(newLogin);
   if (dup && dup.id !== id) return { ok: false, error: 'Логин уже занят' };
 
-  const newRole = data.role === 'admin' ? 'admin' : 'user';
+  const newRole = normalizeRole(data.role);
   // Нельзя понизить последнего администратора
-  if (u.role === 'admin' && newRole !== 'admin' && countAdmins() <= 1) {
+  if (normalizeRole(u.role) === ROLE_ADMIN && newRole !== ROLE_ADMIN && countAdmins() <= 1) {
     return { ok: false, error: 'Нельзя понизить последнего администратора' };
   }
 
@@ -145,13 +203,15 @@ function deleteUser(id) {
   const u = findUserById(id);
   if (!u) return { ok: false, error: 'Пользователь не найден' };
   if (currentUser && currentUser.id === id) return { ok: false, error: 'Нельзя удалить собственную учётную запись' };
-  if (u.role === 'admin' && countAdmins() <= 1) return { ok: false, error: 'Нельзя удалить последнего администратора' };
+  if (normalizeRole(u.role) === ROLE_ADMIN && countAdmins() <= 1) return { ok: false, error: 'Нельзя удалить последнего администратора' };
 
   users = users.filter(x => x.id !== id);
 
   // Снять назначения задач с удалённого пользователя
   tasks.forEach(t => {
     if (t.assignedTo === id) { t.assignedTo = null; t.assignedBy = null; t.assignedAt = null; t.assignmentStatus = null; }
+    if (Array.isArray(t.trackingBy)) t.trackingBy = t.trackingBy.filter(x => x !== id);
+    if (t.colleagueId === id) t.colleagueId = null;
   });
   notifications = notifications.filter(n => n.userId !== id);
   saveUsers();

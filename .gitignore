@@ -7,3 +7,13 @@ config.local.json.tmp
 db.json.tmp
 node_modules/
 *.log
+
+# Активные сессии входов (httpOnly cookie) — служебный файл сервера.
+sessions.json
+sessions.json.tmp
+
+# Резервные копии базы, которые сервер делает перед миграцией схемы.
+db.json.v*.bak
+
+# Скриншоты проверки тёмной темы (временные артефакты проверок).
+_shots/
