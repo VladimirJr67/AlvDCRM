@@ -19,7 +19,7 @@ function taskManager(task) {
     const u = findUserById(task.ownerId);
     if (u) return u;
   }
-  return users.find(u => u.role === 'admin') || { id: null, login: 'Admin', name: 'Администратор' };
+  return users.find(u => normalizeRole(u.role) === ROLE_ADMIN) || { id: null, login: 'Admin', name: 'Администратор' };
 }
 
 function requiredColumnId(name) {
@@ -31,7 +31,7 @@ function renderAdminSection(section) {
   injectAdminModals();
   if (section === 'admin-analysis') renderAdminAnalysis();
   else if (section === 'admin-users') renderAdminUsers();
-  else if (section === 'admin-assignments') renderAdminAssignments();
+  else if (section === 'admin-task-columns') renderAdminTaskColumns();
   else if (section === 'admin-interaction-types') renderAdminInteractionTypes();
   else if (section === 'admin-integrations') renderAdminIntegrations();
 }
@@ -47,7 +47,7 @@ async function renderAdminIntegrations() {
   main.innerHTML = `
     <div style="padding:25px;max-width:820px;margin:0 auto;height:100%;box-sizing:border-box;overflow-y:auto;">
       <div style="margin-bottom:20px;">
-        <h1 style="font-size:22px;font-weight:600;color:#1a3a5c;">🔌 Интеграции</h1>
+        <h1 style="font-size:22px;font-weight:600;color:#1a3a5c;">Интеграции</h1>
       </div>
 
       <div class="integration-card">
@@ -164,13 +164,19 @@ function renderAdminInteractionTypes() {
   if (!main) return;
 
   main.innerHTML = `
-    <div style="padding:25px;max-width:700px;margin:0 auto;height:100%;box-sizing:border-box;overflow-y:auto;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-        <h1 style="font-size:22px;font-weight:600;color:#1a3a5c;">🏷️ Типы взаимодействий</h1>
+    <div style="padding:25px;max-width:860px;margin:0 auto;height:100%;box-sizing:border-box;overflow-y:auto;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;gap:10px;">
+        <h1 style="font-size:22px;font-weight:600;color:#1a3a5c;">Типы взаимодействий</h1>
+        <button class="btn btn-secondary" onclick="goToSection('admin-task-columns')">Столбцы и привязки</button>
       </div>
       <p style="font-size:12px;color:#9ca3af;margin-bottom:15px;">
-        Справочник типов для комментариев в карточках клиентов. Эти типы видит каждый пользователь
-        при добавлении взаимодействия; создавать и изменять их может только администратор.
+        Справочник типов для комментариев в карточках клиентов. Столбец задачи для каждого типа
+        назначается в разделе «Столбцы задач»; если столбец не выбран, задача не создаётся —
+        комментарий остаётся как есть (так работает «Информация»).
+      </p>
+      <p style="font-size:12px;color:#9ca3af;margin-bottom:15px;">
+        Активность закрывается только вместе со следующей датой активности — она же становится
+        сроком задачи. Исключение: тип «Нерентабелен». Обязательные типы не удаляются.
       </p>
       <form onsubmit="addInteractionTypeFromAdmin(event)" style="display:flex;gap:8px;margin-bottom:20px;">
         <input type="text" id="newInteractionTypeInput" placeholder="Название типа (например, «Звонок»)" style="flex:1;padding:8px 10px;border:1px solid #d0d5dd;border-radius:5px;font-size:13px;outline:none;">
@@ -179,25 +185,281 @@ function renderAdminInteractionTypes() {
       <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:auto;">
         <table class="admin-table">
           <thead><tr>
-            <th>Тип взаимодействия</th><th style="text-align:right;">Действия</th>
+            <th>Тип взаимодействия</th><th>Столбец задачи</th><th style="text-align:right;">Действия</th>
           </tr></thead>
           <tbody>
-            ${interactionTypes.length ? interactionTypes.map((t, i) => `
+            ${interactionTypes.length ? interactionTypes.map((t, i) => {
+              const boundId = activityColumnId(t);
+              const boundCol = boundId ? taskColumnById(boundId) : null;
+              const staleBind = !!activityToColumnMap[t] && !boundCol;
+              const protectedType = isProtectedInteractionType(t);
+              return `
               <tr style="cursor:default;">
-                <td><span class="badge">${escapeHtml(t)}</span></td>
-                <td style="text-align:right;white-space:nowrap;">
-                  <button class="btn-icon-btn" onclick="renameInteractionTypeFromAdmin(${i})" title="Переименовать">✏️</button>
-                  <button class="btn-icon-btn" onclick="deleteInteractionTypeFromAdmin(${i})" title="Удалить">🗑</button>
+                <td>
+                  <span class="badge">${escapeHtml(t)}</span>
+                  ${protectedType ? '<span title="Обязательный тип" style="margin-left:6px;color:#9ca3af;">обязательный</span>' : ''}
                 </td>
-              </tr>
-            `).join('') : `
-              <tr><td colspan="2" style="text-align:center;color:#9ca3af;padding:30px;">Типы не добавлены</td></tr>
+                <td>
+                  ${boundCol
+                    ? `<span class="badge" style="background:${escapeHtml(boundCol.color || '#6b7280')};color:#fff;">${escapeHtml(boundCol.name)}</span>`
+                    : '<span style="color:#9ca3af;font-size:12px;">не привязан — только комментарий</span>'}
+                  ${staleBind ? '<div class="field-hint" style="color:#b45309;">Столбец привязки удалён — выберите новый в «Столбцах задач».</div>' : ''}
+                </td>
+                <td style="text-align:right;white-space:nowrap;">
+                  <button class="btn-icon-btn" onclick="renameInteractionTypeFromAdmin(${i})" title="Переименовать">Изменить</button>
+                  ${protectedType ? '' : `<button class="btn-icon-btn" onclick="deleteInteractionTypeFromAdmin(${i})" title="Удалить">Удалить</button>`}
+                </td>
+              </tr>`;
+            }).join('') : `
+              <tr><td colspan="3" style="text-align:center;color:#9ca3af;padding:30px;">Типы не добавлены</td></tr>
             `}
           </tbody>
         </table>
       </div>
     </div>
   `;
+}
+
+/* ===================== Столбцы задач =====================
+   Администратор настраивает доску целиком:
+     • глобальные столбцы — их видят все менеджеры;
+     • индивидуальные — попадают только на доску выбранного менеджера;
+     • привязку активностей к столбцам, включая «ни к какому» (как «Информация»).
+   На самой доске кнопок правки нет: там столбцы только показываются. */
+
+let adminColumnsManagerId = null;
+
+function columnsOwnerLabel(ownerId) {
+  const u = ownerId != null ? findUserById(ownerId) : null;
+  return u ? (u.name || u.login) : (ownerId != null ? 'менеджер #' + ownerId : '');
+}
+
+// Варианты выбора столбца для привязки активности: глобальные и индивидуальные
+// (у индивидуальных подписан владелец — они видны только ему).
+function bindingColumnOptionsHtml(selectedId) {
+  const global = globalTaskColumns().map(c =>
+    `<option value="${c.id}"${c.id === selectedId ? ' selected' : ''}>${escapeHtml(c.name)}</option>`).join('');
+
+  let individual = '';
+  Object.keys(taskColumnsPerManager || {}).forEach(uid => {
+    managerTaskColumns(uid).forEach(c => {
+      individual += `<option value="${c.id}"${c.id === selectedId ? ' selected' : ''}>` +
+        `${escapeHtml(c.name)} — ${escapeHtml(columnsOwnerLabel(Number(uid)))}</option>`;
+    });
+  });
+
+  return `<option value=""${selectedId ? '' : ' selected'}>— не привязывать (только комментарий) —</option>` +
+    (global ? `<optgroup label="Глобальные столбцы">${global}</optgroup>` : '') +
+    (individual ? `<optgroup label="Индивидуальные столбцы">${individual}</optgroup>` : '');
+}
+
+function columnRowHtml(col) {
+  const used = tasks.filter(t => t.status === col.id).length;
+  const disabled = col.locked ? 'disabled' : '';
+  const owner = taskColumnOwner(col.id);
+  return `
+    <tr style="cursor:default;">
+      <td>
+        <input type="text" id="colName_${col.id}" value="${escapeHtml(col.name)}" ${disabled}
+               style="width:100%;padding:5px 7px;border:1px solid ${col.locked ? '#e5e7eb' : '#d0d5dd'};border-radius:5px;font-size:12.5px;">
+        ${col.locked ? '<div class="field-hint">Обязательный столбец: переименовать и удалить нельзя</div>' : ''}
+        ${owner ? `<div class="field-hint">Только для: ${escapeHtml(columnsOwnerLabel(Number(owner)))}</div>` : ''}
+      </td>
+      <td><input type="color" id="colColor_${col.id}" value="${escapeHtml(col.color || '#6b7280')}" ${disabled}
+                 style="width:44px;height:28px;padding:0;border:1px solid #d0d5dd;border-radius:5px;background:#fff;"></td>
+      <td style="text-align:center;">${used}</td>
+      <td style="text-align:right;white-space:nowrap;">
+        <button class="btn-icon-btn" onclick="moveColumnFromAdmin('${col.id}', -1)" title="Переместить влево" ${disabled}>‹</button>
+        <button class="btn-icon-btn" onclick="moveColumnFromAdmin('${col.id}', 1)" title="Переместить вправо" ${disabled}>›</button>
+        <button class="btn-icon-btn" onclick="saveColumnFromAdmin('${col.id}')" title="Сохранить название и цвет" ${disabled}>Сохранить</button>
+        <button class="btn-icon-btn" onclick="deleteColumnFromAdmin('${col.id}')" title="Удалить столбец" ${disabled}>Удалить</button>
+      </td>
+    </tr>`;
+}
+
+function columnsTableHtml(list) {
+  if (!list.length) {
+    return '<tr><td colspan="4" style="text-align:center;color:#9ca3af;padding:24px;">Столбцов нет</td></tr>';
+  }
+  return list.map(columnRowHtml).join('');
+}
+
+function renderAdminTaskColumns() {
+  const main = document.getElementById('mainContent');
+  if (!main) return;
+
+  const managers = users.filter(u => isManagerRole(u));
+  if (adminColumnsManagerId == null || !findUserById(adminColumnsManagerId)) {
+    adminColumnsManagerId = managers.length ? managers[0].id : null;
+  }
+
+  const globalList = globalTaskColumns();
+  const ownList = adminColumnsManagerId ? managerTaskColumns(adminColumnsManagerId) : [];
+  const globalUsed = globalList.reduce((sum, c) => sum + tasks.filter(t => t.status === c.id).length, 0);
+  const ownUsed = ownList.reduce((sum, c) => sum + tasks.filter(t => t.status === c.id).length, 0);
+
+  main.innerHTML = `
+    <div style="padding:25px;max-width:1000px;margin:0 auto;height:100%;box-sizing:border-box;overflow-y:auto;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:16px;">
+        <h1 style="font-size:22px;font-weight:600;color:#1a3a5c;">Столбцы задач</h1>
+        <button class="btn btn-secondary" onclick="applyRecommendedBindingsFromAdmin()">Создать столбцы и привязки по ТЗ</button>
+      </div>
+      <p style="font-size:12px;color:#9ca3af;margin-bottom:20px;">
+        Глобальные столбцы появляются у всех менеджеров, индивидуальные — только на доске
+        выбранного менеджера. Удалённый столбец исчезает с доски, а его задачи переезжают
+        в первый оставшийся. Обязательные столбцы (В работе, Завершены и другие статусы
+        дашборда) переименовать и удалить нельзя.
+      </p>
+
+      <h3 class="orders-analysis-title">Глобальные столбцы (${globalList.length}, задач: ${globalUsed})</h3>
+      <form onsubmit="addGlobalColumnFromAdmin(event)" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+        <input type="text" id="newGlobalColumnName" placeholder="Название нового столбца" style="flex:1;min-width:200px;padding:8px 10px;border:1px solid #d0d5dd;border-radius:5px;font-size:13px;">
+        <input type="color" id="newGlobalColumnColor" value="#3b82f6" title="Цвет столбца" style="width:52px;height:36px;padding:0;border:1px solid #d0d5dd;border-radius:5px;background:#fff;">
+        <button type="submit" class="btn">Добавить глобальный</button>
+      </form>
+      <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:auto;margin-bottom:26px;">
+        <table class="admin-table">
+          <thead><tr><th>Название</th><th>Цвет</th><th>Задач</th><th style="text-align:right;">Действия</th></tr></thead>
+          <tbody>${columnsTableHtml(globalList)}</tbody>
+        </table>
+      </div>
+
+      <h3 class="orders-analysis-title">Индивидуальные столбцы менеджера (${ownList.length}, задач: ${ownUsed})</h3>
+      <div class="tracking-add" style="margin-bottom:12px;">
+        <select id="adminColumnsManager" onchange="setAdminColumnsManager(this.value)">
+          ${managers.length ? managers.map(u =>
+            `<option value="${u.id}"${u.id === adminColumnsManagerId ? ' selected' : ''}>${escapeHtml(u.name || u.login)} (${escapeHtml(userPositionLabel(u))})</option>`).join('')
+            : '<option value="">— нет менеджеров —</option>'}
+        </select>
+        <span class="field-hint">Столбцы видны только выбранному менеджеру.</span>
+      </div>
+      ${adminColumnsManagerId ? `
+        <form onsubmit="addManagerColumnFromAdmin(event)" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+          <input type="text" id="newManagerColumnName" placeholder="Название личного столбца" style="flex:1;min-width:200px;padding:8px 10px;border:1px solid #d0d5dd;border-radius:5px;font-size:13px;">
+          <input type="color" id="newManagerColumnColor" value="#0ea5e9" title="Цвет столбца" style="width:52px;height:36px;padding:0;border:1px solid #d0d5dd;border-radius:5px;background:#fff;">
+          <button type="submit" class="btn">Добавить для менеджера</button>
+        </form>
+        <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:auto;margin-bottom:26px;">
+          <table class="admin-table">
+            <thead><tr><th>Название</th><th>Цвет</th><th>Задач</th><th style="text-align:right;">Действия</th></tr></thead>
+            <tbody>${columnsTableHtml(ownList)}</tbody>
+          </table>
+        </div>
+      ` : '<div class="empty-state" style="padding:22px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:26px;">Менеджеров пока нет — сначала создайте пользователя в разделе «Пользователи».</div>'}
+
+      <h3 class="orders-analysis-title">Привязка активностей к столбцам</h3>
+      <p style="font-size:12px;color:#9ca3af;margin-bottom:12px;">
+        Активность с привязанным столбцом создаёт задачу в нём. «Не привязывать» оставляет
+        только комментарий — так работает «Информация».
+      </p>
+      <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:auto;">
+        <table class="admin-table">
+          <thead><tr><th>Тип активности</th><th>Столбец задачи</th></tr></thead>
+          <tbody>
+            ${interactionTypes.length ? interactionTypes.map((t, i) => {
+              const boundId = activityColumnId(t);
+              const stale = !!activityToColumnMap[t] && !boundId;
+              const rec = ACTIVITY_COLUMN_RECOMMENDED.find(r => r.type === t);
+              return `
+                <tr style="cursor:default;">
+                  <td>
+                    <span class="badge">${escapeHtml(t)}</span>
+                    ${rec ? `<div class="field-hint">Рекомендуется: «${escapeHtml(rec.column)}»</div>` : ''}
+                  </td>
+                  <td>
+                    <select onchange="setActivityColumnFromAdmin(${i}, this.value)"
+                            style="padding:5px 8px;border:1px solid #d0d5dd;border-radius:5px;font-size:12px;">
+                      ${bindingColumnOptionsHtml(boundId)}
+                    </select>
+                    ${stale ? '<div class="field-hint" style="color:#b45309;">Столбец привязки удалён — выберите новый.</div>' : ''}
+                  </td>
+                </tr>`;
+            }).join('') : '<tr><td colspan="2" style="text-align:center;color:#9ca3af;padding:24px;">Типы не добавлены</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function setAdminColumnsManager(value) {
+  adminColumnsManagerId = value ? parseInt(value, 10) : null;
+  renderAdminTaskColumns();
+}
+
+function addGlobalColumnFromAdmin(e) {
+  if (e && e.preventDefault) e.preventDefault();
+  const nameEl = document.getElementById('newGlobalColumnName');
+  const colorEl = document.getElementById('newGlobalColumnColor');
+  const res = addTaskColumnScoped('global', null, nameEl ? nameEl.value : '', colorEl ? colorEl.value : '');
+  if (!res.ok) { alert(res.error); return; }
+  renderAdminTaskColumns();
+}
+
+function addManagerColumnFromAdmin(e) {
+  if (e && e.preventDefault) e.preventDefault();
+  if (!adminColumnsManagerId) { alert('Выберите менеджера'); return; }
+  const nameEl = document.getElementById('newManagerColumnName');
+  const colorEl = document.getElementById('newManagerColumnColor');
+  const res = addTaskColumnScoped('manager', adminColumnsManagerId, nameEl ? nameEl.value : '', colorEl ? colorEl.value : '');
+  if (!res.ok) { alert(res.error); return; }
+  renderAdminTaskColumns();
+}
+
+function saveColumnFromAdmin(colId) {
+  const nameEl = document.getElementById('colName_' + colId);
+  const colorEl = document.getElementById('colColor_' + colId);
+  const res = renameTaskColumn(colId, nameEl ? nameEl.value : '', colorEl ? colorEl.value : '');
+  if (!res.ok) { alert(res.error); return; }
+  renderAdminTaskColumns();
+}
+
+function moveColumnFromAdmin(colId, delta) {
+  const res = moveTaskColumn(colId, delta);
+  if (!res.ok) { alert(res.error); return; }
+  renderAdminTaskColumns();
+}
+
+function deleteColumnFromAdmin(colId) {
+  const ref = columnScopeRef(colId);
+  if (!ref) return;
+  if (ref.column.locked) { alert('Обязательный столбец удалить нельзя'); return; }
+
+  const used = tasks.filter(t => t.status === colId).length;
+  let msg = 'Удалить столбец «' + ref.column.name + '»?';
+  if (used) msg += '\nЗадачи (' + used + ') переедут в первый оставшийся столбец.';
+  if (!confirm(msg)) return;
+
+  const res = deleteTaskColumnScoped(colId);
+  if (!res.ok) { alert(res.error); return; }
+  if (res.moved) {
+    console.log('Столбец «' + ref.column.name + '» удалён, задач перенесено: ' + res.moved + ' → «' + res.target + '»');
+  }
+  renderAdminTaskColumns();
+}
+
+// Назначение столбца для активности из админки (индекс строки справочника).
+function setActivityColumnFromAdmin(index, columnId) {
+  const type = interactionTypes[index];
+  if (type === undefined) return;
+  const res = setActivityColumn(type, columnId || null);
+  if (!res.ok) { alert(res.error); }
+  renderAdminTaskColumns();
+}
+
+// Кнопка «Создать столбцы и привязки по ТЗ»: администратор одним действием
+// заводит рабочие столбцы и связывает с ними активности. Автоматически
+// ничего не создаётся — только по нажатию.
+function applyRecommendedBindingsFromAdmin() {
+  const report = applyRecommendedActivityBindings();
+  renderAdminTaskColumns();
+  const lines = [];
+  lines.push('Созданы столбцы: ' + (report.columns.length ? report.columns.join(', ') : 'новые не потребовались'));
+  lines.push('Привязки активностей:');
+  report.bindings.forEach(b => lines.push('  • ' + b));
+  lines.push('');
+  lines.push('Задачи по этим активностям будут падать в указанные столбцы.');
+  alert(lines.join('\n'));
 }
 
 function addInteractionTypeFromAdmin(e) {
@@ -222,14 +484,15 @@ function deleteInteractionTypeFromAdmin(index) {
   const current = interactionTypes[index];
   if (current === undefined) return;
   if (!confirm(`Удалить тип «${current}»?\nСуществующие комментарии сохранятся.`)) return;
-  deleteInteractionType(index);
+  const res = deleteInteractionType(index);
+  if (!res.ok) { alert(res.error); return; }
   renderAdminInteractionTypes();
 }
 
 /* ===================== Анализ ===================== */
 
 let adminAnalysisTab = 'stats';   // 'stats' | 'comments'
-let adminCommentTagFilter = 'all'; // 'all' | 'self' | 'report' — фильтр по отметке
+let adminCommentTagFilter = 'all'; // 'all' | 'forSelf' | 'forReport' — фильтр по отметке
 let adminAnalysisDateFrom = null; // начало периода фильтра по датам
 let adminAnalysisDateTo = null;   // конец периода фильтра по датам
 
@@ -277,8 +540,8 @@ function renderAdminAnalysis() {
         <span style="font-size:13px;color:#4b5563;font-weight:500;margin-left:8px;">Отметка:</span>
         <select onchange="setAdminCommentTagFilter(this.value)" style="padding:6px 9px;border:1px solid #d0d5dd;border-radius:5px;font-size:12px;outline:none;">
           <option value="all"${adminCommentTagFilter === 'all' ? ' selected' : ''}>Все комментарии</option>
-          <option value="self"${adminCommentTagFilter === 'self' ? ' selected' : ''}>Для себя</option>
-          <option value="report"${adminCommentTagFilter === 'report' ? ' selected' : ''}>Для отчёта</option>
+          <option value="forSelf"${adminCommentTagFilter === 'forSelf' ? ' selected' : ''}>Для себя</option>
+          <option value="forReport"${adminCommentTagFilter === 'forReport' ? ' selected' : ''}>Для отчёта</option>
         </select>` : ''}
       ${(from || to) ? `<span style="font-size:12px;color:#9ca3af;">Показаны данные за период</span>` : ''}
     </div>`;
@@ -288,8 +551,8 @@ function renderAdminAnalysis() {
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
         <h1 style="font-size:22px;font-weight:600;color:#1a3a5c;">Анализ</h1>
         ${adminAnalysisTab === 'comments'
-          ? '<button class="btn" onclick="exportCommentsExcel()">⬇ Выгрузить комментарии в Excel</button>'
-          : '<button class="btn" onclick="exportAdminReport()">⬇ Экспорт в Excel</button>'}
+          ? '<button class="btn" onclick="exportCommentsExcel()">Выгрузить комментарии в Excel</button>'
+          : '<button class="btn" onclick="exportAdminReport()">Экспорт в Excel</button>'}
       </div>
       ${tabs}
       ${dateBar}
@@ -370,7 +633,7 @@ function commentsForRange() {
   clients.forEach(c => {
     (c.history || []).forEach(h => {
       if (!inAnalysisRange(h.date)) return;
-      const tags = Array.isArray(h.tags) ? h.tags : [];
+      const tags = commentTagsList(h.tags);
       if (adminCommentTagFilter !== 'all' && tags.indexOf(adminCommentTagFilter) === -1) return;
       result.push({
         manager: h.manager || '',
@@ -539,6 +802,19 @@ function exportAdminReport() {
 
 /* ===================== Пользователи ===================== */
 
+// Цветная метка роли в списке пользователей: администратор, руководитель,
+// менеджер по продажам.
+function roleBadgeHtml(u) {
+  const role = normalizeRole(u && u.role);
+  const styles = {
+    admin: 'background:#dbeafe;color:#1e40af;',
+    lead: 'background:#ede9fe;color:#5b21b6;',
+    manager: 'background:#f3f4f6;color:#4b5563;'
+  };
+  return '<span class="badge" style="' + (styles[role] || styles.manager) + '">' +
+    escapeHtml(userRoleLabel(u)) + '</span>';
+}
+
 function renderAdminUsers() {
   const main = document.getElementById('mainContent');
   if (!main) return;
@@ -561,9 +837,7 @@ function renderAdminUsers() {
                 <td>${escapeHtml(u.name || '—')}</td>
                 <td>${escapeHtml((u.position || '').trim() || '—')}</td>
                 <td><span style="font-family:'Courier New',monospace;">${escapeHtml(u.password)}</span></td>
-                <td>${u.role === 'admin'
-                  ? '<span class="badge" style="background:#dbeafe;color:#1e40af;">Администратор</span>'
-                  : '<span class="badge" style="background:#f3f4f6;color:#4b5563;">Пользователь</span>'}</td>
+                <td>${roleBadgeHtml(u)}</td>
                 <td style="text-align:right;white-space:nowrap;">
                   <button class="btn-icon-btn" style="font-size:12px;" onclick="openUserModal(${u.id})" title="Редактировать">Изменить</button>
                   <button class="btn-icon-btn" style="font-size:12px;color:#e53e3e;" onclick="removeUser(${u.id})" title="Удалить">Удалить</button>
@@ -587,7 +861,7 @@ function openUserModal(id = null) {
   const pwdInput = document.getElementById('userPassword');
   pwdInput.value = u ? u.password : ''; // существующий пароль не сбрасываем
   pwdInput.placeholder = u ? 'Введите новый, если хотите сменить' : 'Пароль';
-  document.getElementById('userRole').value = u ? u.role : 'user';
+  document.getElementById('userRole').value = u ? normalizeRole(u.role) : ROLE_MANAGER;
   document.getElementById('userModal').classList.add('active');
 }
 
@@ -624,226 +898,10 @@ function removeUser(id) {
 
 /* ===================== Назначение задач ===================== */
 
-function renderAdminAssignments() {
-  const main = document.getElementById('mainContent');
-  if (!main) return;
-
-  // Иерархия «Менеджер → список его задач». Показываем задачи,
-  // назначенные конкретному пользователю (без списка компаний).
-  const groups = users.map(u => ({
-    user: u,
-    list: tasks.filter(t => t.assignedTo === u.id)
-      .sort((a, b) => (a.deadline || '').localeCompare(b.deadline || ''))
-  }));
-
-  main.innerHTML = `
-    <div style="padding:25px;max-width:1100px;margin:0 auto;height:100%;box-sizing:border-box;overflow-y:auto;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-        <h1 style="font-size:22px;font-weight:600;color:#1a3a5c;">📋 Задачи менеджеров</h1>
-      </div>
-      <p style="font-size:12px;color:#9ca3af;margin-bottom:15px;">
-        Выберите менеджера и нажмите «Добавить задачу». Задачи группируются под своим менеджером;
-        статусы всех задач видны здесь в реальном времени.
-      </p>
-      ${groups.map(g => `
-        <div class="manager-group">
-          <div class="manager-group-header">
-            <div class="manager-group-title">
-              <div class="user-avatar" style="width:28px;height:28px;font-size:12px;">${escapeHtml((g.user.login[0] || '?').toUpperCase())}</div>
-              <strong>${escapeHtml(g.user.login)}</strong>
-              <span class="manager-group-count">${g.list.length}</span>
-            </div>
-            <button class="btn btn-sm" onclick="openAdminNewTaskModal(${g.user.id})">+ Добавить задачу</button>
-          </div>
-          ${g.list.length === 0 ? `
-            <div class="manager-group-empty">Нет назначенных задач</div>
-          ` : `
-            <div class="scrollable-table" style="max-height:320px;">
-              <div class="table-body" style="max-height:320px;">
-                <table>
-                  <thead><tr>
-                    <th>Тип задачи</th><th>Компания</th><th>Дедлайн</th><th>Комментарий</th><th>Статус назначения</th><th style="text-align:right;">Действия</th>
-                  </tr></thead>
-                  <tbody>
-                    ${g.list.map(t => {
-                      const client = t.clientId ? clients.find(c => c.id === t.clientId) : null;
-                      const col = taskColumns.find(c => c.id === t.status);
-                      const st = assignmentStatusInfo(t.assignmentStatus);
-                      const isOverdue = taskOverdue(t);
-                      return `<tr style="cursor:default;" onclick="event.stopPropagation()">
-                        <td><span class="badge" style="background:${col ? col.color : '#e5e7eb'};color:#fff;">${escapeHtml(col ? col.name : '—')}</span></td>
-                        <td>${client
-                          ? escapeHtml(client.orgName)
-                          : '<span class="badge" style="background:#fef3c7;color:#92400e;">Новая компания</span>'}</td>
-                        <td style="color:${isOverdue ? '#ef4444' : '#6b7280'};font-weight:${isOverdue ? '600' : '400'};">${t.deadline ? formatDate(t.deadline) : '—'}</td>
-                        <td><div class="history-comment">${escapeHtml(t.description || '—')}</div></td>
-                        <td>
-                          <span class="assign-status" style="background:${st.color};color:#fff;">${st.label}</span>
-                          <select onclick="event.stopPropagation()" onchange="setAssignmentStatus(${t.id}, this.value)"
-                                  style="font-size:11px;padding:3px 4px;border:1px solid #d0d5dd;border-radius:4px;background:#fff;color:#374151;max-width:110px;margin-left:6px;">
-                            ${ASSIGNMENT_STATUSES.map(s => `<option value="${s.value}" ${s.value === t.assignmentStatus ? 'selected' : ''}>${s.label}</option>`).join('')}
-                          </select>
-                        </td>
-                        <td style="text-align:right;white-space:nowrap;">
-                          <button class="btn-icon-btn" onclick="unassignTask(${t.id})" title="Снять назначение">➖</button>
-                          <button class="btn-icon-btn" onclick="deleteTask(${t.id})" title="Удалить задачу">🗑</button>
-                        </td>
-                      </tr>`;
-                    }).join('')}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          `}
-        </div>
-      `).join('')}
-      ${users.length === 0 ? '<div class="empty-state" style="padding:40px 20px;"><p>Пользователи не созданы</p></div>' : ''}
-    </div>
-  `;
-}
-
 // Форма назначения новой задачи конкретному менеджеру.
-function openAdminNewTaskModal(userId) {
-  const content = document.getElementById('adminNewTaskModal');
-  if (!content) return;
-
-  document.getElementById('adminNewTaskId').value = '';
-
-  const userSelect = document.getElementById('adminTaskUserSelect');
-  userSelect.innerHTML = users.map(u =>
-    `<option value="${u.id}" ${u.id === userId ? 'selected' : ''}>${escapeHtml(u.login)} (${userRoleLabel(u)})</option>`
-  ).join('');
-
-  // Тип задачи — предустановленный список (колонки канбана).
-  const typeSelect = document.getElementById('adminTaskType');
-  const sortedCols = [...taskColumns].sort((a, b) => a.order - b.order);
-  typeSelect.innerHTML = sortedCols.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
-
-  // Компания — необязательное поле с автоподбором: список компаний длинный,
-  // набрать название быстрее, чем листать выпадающий список.
-  document.getElementById('adminTaskClient').value = '';
-  document.getElementById('adminTaskClientSearch').value = '';
-  hideAdminTaskClientDropdown();
-
-  document.getElementById('adminTaskComment').value = '';
-  document.getElementById('adminTaskDeadline').value = '';
-  syncAdminTaskNoClient();
-  content.classList.add('active');
-}
-
 /* ===== Автоподбор компании в форме назначения задачи ===== */
 
-function hideAdminTaskClientDropdown() {
-  const dd = document.getElementById('adminTaskClientDropdown');
-  if (dd) dd.style.display = 'none';
-}
-
-function onAdminTaskClientSearch() {
-  const input = document.getElementById('adminTaskClientSearch');
-  const dd = document.getElementById('adminTaskClientDropdown');
-  if (!input || !dd) return;
-
-  const q = (input.value || '').trim().toLowerCase();
-  if (!q) {
-    // Поле очистили — задача снова «без компании».
-    document.getElementById('adminTaskClient').value = '';
-    hideAdminTaskClientDropdown();
-    syncAdminTaskNoClient();
-    return;
-  }
-
-  const matches = clients
-    .filter(c => (c.orgName || '').toLowerCase().includes(q))
-    .slice(0, 20);
-
-  if (!matches.length) {
-    dd.innerHTML = '<div class="manager-option-empty">Компании не найдены</div>';
-    dd.style.display = 'block';
-    return;
-  }
-  dd.innerHTML = matches.map(c =>
-    `<div class="client-typeahead-item" data-id="${c.id}" data-name="${escapeHtml(c.orgName)}">${escapeHtml(c.orgName)}</div>`
-  ).join('');
-  dd.style.display = 'block';
-}
-
-function selectAdminTaskClient(id, name) {
-  document.getElementById('adminTaskClient').value = id;
-  document.getElementById('adminTaskClientSearch').value = name;
-  hideAdminTaskClientDropdown();
-  syncAdminTaskNoClient();
-}
-
 // Чекбокс «Ссылка на обработку новой компании»: активен, пока компания не выбрана.
-function syncAdminTaskNoClient() {
-  const clientInput = document.getElementById('adminTaskClient');
-  const noClient = document.getElementById('adminTaskNoClient');
-  const note = document.getElementById('adminTaskNoClientNote');
-  const hasCompany = !!(clientInput && clientInput.value);
-  if (noClient) noClient.checked = !hasCompany;
-  if (note) {
-    note.textContent = hasCompany
-      ? 'Задача привязана к выбранной компании.'
-      : 'Задача не привязана к существующему клиенту — в обработке новая компания.';
-  }
-}
-
-function saveAdminNewTask(e) {
-  e.preventDefault();
-  const userId = parseInt(document.getElementById('adminTaskUserSelect').value);
-  const typeId = document.getElementById('adminTaskType').value;
-  const clientIdVal = document.getElementById('adminTaskClient').value;
-  const comment = document.getElementById('adminTaskComment').value.trim();
-  const noClient = document.getElementById('adminTaskNoClient').checked;
-
-  if (!userId) { alert('Выберите менеджера (пользователя)'); return; }
-  if (!typeId) { alert('Выберите тип задачи'); return; }
-
-  const col = taskColumns.find(c => c.id === typeId);
-  const clientId = clientIdVal ? parseInt(clientIdVal) : null;
-
-  const maxId = tasks.reduce((m, t) => Math.max(m, t.id || 0), 0);
-  const task = {
-    id: maxId + 1,
-    title: col ? col.name : 'Задача',
-    description: comment,
-    deadline: document.getElementById('adminTaskDeadline').value || null,
-    status: typeId,
-    statusUpdatedAt: new Date().toISOString(),
-    assignees: [],
-    ownerId: currentUser ? currentUser.id : null,
-    assignedTo: userId,
-    assignedBy: currentUser ? currentUser.id : null,
-    assignedAt: new Date().toISOString(),
-    assignmentStatus: 'pending', // «Не принято»
-    clientId: clientId,
-    newClient: !clientId && noClient,
-    order: tasks.filter(t => t.status === typeId).length,
-    createdAt: new Date().toISOString()
-  };
-  tasks.push(task);
-  saveTasks();
-
-  const target = findUserById(userId);
-  if (target) {
-    notifyUser(userId, `Назначена задача «${task.title}»`, comment || 'Новая задача в работе', task.id);
-  }
-  closeModal('adminNewTaskModal');
-  renderAdminAssignments();
-}
-
-function unassignTask(taskId) {
-  const t = tasks.find(x => x.id === taskId);
-  if (!t) return;
-  if (!confirm('Снять назначение задачи?')) return;
-  t.assignedTo = null;
-  t.assignedBy = null;
-  t.assignedAt = null;
-  t.assignmentStatus = null;
-  saveTasks();
-  renderAdminAssignments();
-}
-
 /* ===================== Модальные окна админ-модуля ===================== */
 
 function injectAdminModals() {
@@ -853,7 +911,7 @@ function injectAdminModals() {
     <div class="modal-overlay" id="adminTasksModal" onclick="if(event.target===this)closeModal('adminTasksModal')">
       <div class="modal" style="width:820px;max-width:94vw;">
         <div style="display:flex;justify-content:flex-end;margin-bottom:6px;">
-          <button type="button" class="btn btn-sm btn-secondary" onclick="closeModal('adminTasksModal')">✕ Закрыть</button>
+          <button type="button" class="btn btn-sm btn-secondary" onclick="closeModal('adminTasksModal')">Закрыть</button>
         </div>
         <h2 style="margin-bottom:15px;">Задачи менеджера</h2>
         <div id="adminTasksListContent"></div>
@@ -875,7 +933,8 @@ function injectAdminModals() {
             <div class="form-row">
               <div class="form-group"><label>Роль</label>
                 <select id="userRole">
-                  <option value="user">Пользователь</option>
+                  <option value="manager">Менеджер по продажам</option>
+                  <option value="lead">Руководитель</option>
                   <option value="admin">Администратор</option>
                 </select>
               </div>
@@ -889,48 +948,6 @@ function injectAdminModals() {
       </div>
     </div>
 
-    <div class="modal-overlay" id="adminNewTaskModal">
-      <div class="modal">
-        <h2>Назначить задачу</h2>
-        <form onsubmit="saveAdminNewTask(event)">
-          <input type="hidden" id="adminNewTaskId">
-          <div class="form-section">
-            <div class="form-row">
-              <div class="form-group"><label>Менеджер (пользователь) *</label><select id="adminTaskUserSelect"></select></div>
-            </div>
-            <div class="form-row">
-              <div class="form-group"><label>Тип задачи *</label><select id="adminTaskType"></select></div>
-            </div>
-            <div class="form-row">
-              <div class="form-group"><label>Дедлайн</label><input type="datetime-local" id="adminTaskDeadline"></div>
-              <div class="form-group client-typeahead-group">
-                <label>Компания (необязательно)</label>
-                <input type="text" id="adminTaskClientSearch" placeholder="Начните вводить название..." autocomplete="off"
-                       oninput="onAdminTaskClientSearch()" onfocus="onAdminTaskClientSearch()">
-                <input type="hidden" id="adminTaskClient">
-                <div class="client-typeahead-dropdown" id="adminTaskClientDropdown"></div>
-              </div>
-            </div>
-            <div class="form-row">
-              <div class="form-group" style="padding:8px 10px;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;">
-                <label style="display:flex;align-items:center;gap:8px;margin:0;cursor:pointer;">
-                  <input type="checkbox" id="adminTaskNoClient" style="width:16px;height:16px;" onchange="document.getElementById('adminTaskNoClientNote').textContent = this.checked ? 'Задача не привязана к существующему клиенту — в обработке новая компания.' : 'Задача привязана к выбранной компании.';">
-                  <span style="font-size:12px;color:#92400e;font-weight:500;">Ссылка на обработку новой компании</span>
-                </label>
-                <div id="adminTaskNoClientNote" style="font-size:11px;color:#92400e;margin-top:4px;"></div>
-              </div>
-            </div>
-            <div class="form-row">
-              <div class="form-group"><label>Комментарий</label><textarea id="adminTaskComment" rows="4"></textarea></div>
-            </div>
-          </div>
-          <div class="modal-actions">
-            <button type="button" class="btn btn-secondary" onclick="closeModal('adminNewTaskModal')">Отмена</button>
-            <button type="submit" class="btn">Назначить</button>
-          </div>
-        </form>
-      </div>
-    </div>
-  `;
+      `;
   document.body.insertAdjacentHTML('beforeend', html);
 }

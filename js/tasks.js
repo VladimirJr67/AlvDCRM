@@ -78,6 +78,366 @@ function ensureRequiredTaskColumns() {
   if (changed) saveTaskColumns();
 }
 
+/* ===== Привязка активностей к столбцам =====
+   Активность, отмеченная в комментарии, автоматически создаёт задачу в том
+   столбце, который администратор выбрал в разделе «Администрирование → Типы
+   взаимодействий». Карта привязок — activityToColumnMap вида
+   { '<тип активности>': '<id столбца>' }.
+
+   Если у активности столбец не назначен, задача не создаётся: остаётся только
+   комментарий. Так работает «Информация» — её привязывать не нужно. */
+
+// Рекомендуемые привязки из ТЗ. Используются только как подсказки в админке
+// и в кнопке «Создать столбцы и привязки»: сами столбцы система не создаёт —
+// это осознанное действие администратора.
+const ACTIVITY_COLUMN_RECOMMENDED = [
+  { type: 'Звонок', column: 'Звонки' },
+  { type: 'Отправил КП', column: 'Отправлено КП' },
+  { type: 'Встреча', column: 'Встреча' },
+  { type: 'Размещение заказа', column: 'Заказы' },
+  { type: 'Заказ матриц', column: 'Заказы/Матрицы' }
+];
+
+// Цвета рекомендуемых столбцов — чтобы новые столбцы не сливались с доской.
+const ACTIVITY_COLUMN_COLORS = {
+  'Звонки': '#3b82f6',
+  'Отправлено КП': '#6366f1',
+  'Встреча': '#14b8a6',
+  'Заказы': '#f59e0b',
+  'Заказы/Матрицы': '#8b5cf6'
+};
+
+function taskColumnByName(name) {
+  const needle = String(name == null ? '' : name).trim().toLowerCase();
+  if (!needle) return null;
+  return taskColumns.find(c => String(c.name == null ? '' : c.name).trim().toLowerCase() === needle) || null;
+}
+
+// Столбец, привязанный к активности. null — привязки нет или столбец удалён.
+function activityColumnId(activityType) {
+  const key = String(activityType == null ? '' : activityType);
+  const id = activityToColumnMap ? activityToColumnMap[key] : null;
+  if (!id) return null;
+  return taskColumns.some(c => c.id === id) ? id : null;
+}
+
+function saveActivityToColumnMap() {
+  if (typeof queueServerSave === 'function') queueServerSave();
+}
+
+// Назначить или снять привязку активности к столбцу (вызывает админка).
+function setActivityColumn(activityType, columnId) {
+  const key = String(activityType == null ? '' : activityType).trim();
+  if (!key) return { ok: false, error: 'Не выбран тип активности' };
+  activityToColumnMap = activityToColumnMap || {};
+  if (columnId) {
+    if (!taskColumns.some(c => c.id === columnId)) return { ok: false, error: 'Столбец не найден' };
+    activityToColumnMap[key] = columnId;
+  } else {
+    delete activityToColumnMap[key];
+  }
+  saveActivityToColumnMap();
+  return { ok: true };
+}
+
+// Создать столбец без диалогов — для кнопки в админке.
+function addTaskColumnByName(name, color) {
+  const clean = String(name == null ? '' : name).trim();
+  if (!clean) return null;
+  const existing = taskColumnByName(clean);
+  if (existing) return existing;
+  const maxOrder = taskColumns.reduce((m, c) => Math.max(m, c.order || 0), -1);
+  const col = {
+    id: 'activity_' + Date.now() + '_' + taskColumns.length,
+    name: clean,
+    color: color || '#6b7280',
+    order: maxOrder + 1,
+    locked: false
+  };
+  taskColumns.push(col);
+  saveTaskColumns();
+  return col;
+}
+
+// Применить рекомендуемые привязки: создать недостающие столбцы и связать их
+// с активностями. Вызывается кнопкой администратора — само ничего не создаёт.
+function applyRecommendedActivityBindings() {
+  const report = { columns: [], bindings: [] };
+  ACTIVITY_COLUMN_RECOMMENDED.forEach(rec => {
+    let col = taskColumnByName(rec.column);
+    if (!col) {
+      col = addTaskColumnByName(rec.column, ACTIVITY_COLUMN_COLORS[rec.column]);
+      if (col) report.columns.push(col.name);
+    }
+    if (!col) return;
+    setActivityColumn(rec.type, col.id);
+    report.bindings.push(rec.type + ' → ' + col.name);
+  });
+  return report;
+}
+
+/* ===== Задачи, созданные активностью ===== */
+
+// Создать задачу без формы (активность, автодействие). Возвращает задачу.
+function addAutoTask(data) {
+  const now = new Date().toISOString();
+  const maxId = tasks.reduce((m, t) => Math.max(m, t.id || 0), 0);
+  const task = {
+    id: maxId + 1,
+    title: data.title || 'Активность',
+    description: data.description || '',
+    deadline: data.deadline || '',
+    priority: data.priority || 'medium',
+    status: data.status,
+    coAssignees: Array.isArray(data.coAssignees) ? data.coAssignees.slice() : [],
+    clientId: data.clientId != null ? data.clientId : null,
+    contactId: data.contactId != null ? data.contactId : null,
+    ownerId: data.ownerId != null ? data.ownerId : (currentUser ? currentUser.id : null),
+    createdAt: now,
+    statusUpdatedAt: now,
+    order: tasks.filter(t => t.status === data.status).length,
+    completedAt: null,
+    colleagueId: data.colleagueId != null ? data.colleagueId : null,
+    trackingBy: Array.isArray(data.trackingBy) ? data.trackingBy.slice() : [],
+    linkWorkedOff: false,
+    source: data.source || 'activity'
+  };
+  tasks.push(task);
+  // Руководители, отслеживающие исполнителя, попадают в наблюдатели задачи.
+  syncTrackingForTask(task);
+  saveTasks();
+  return task;
+}
+
+// Задача по активности: столбец берётся из привязки. Если активность не
+// привязана — задачи нет, возвращается null (комментарий остаётся как есть).
+function createActivityTask(data) {
+  const columnId = activityColumnId(data.activityType);
+  if (!columnId) return null;
+  return addAutoTask(Object.assign({}, data, { status: columnId }));
+}
+
+// Заголовок задачи по активности: «Звонок: ООО Ромашка» и т.п.
+function activityTaskTitle(activityType, clientName, extra) {
+  const parts = [String(activityType || 'Активность')];
+  if (clientName) parts.push(String(clientName));
+  let title = parts.join(': ');
+  if (extra) title += ' — ' + extra;
+  return title;
+}
+
+/* ===== Столбцы доски: глобальные и индивидуальные =====
+   Глобальные столбцы (taskColumns) видят все менеджеры; индивидуальные лежат
+   в taskColumnsPerManager = { '<id пользователя>': [ столбец, ... ] } и попадают
+   только на доску своего менеджера. Настраивает и то и другое администратор
+   в разделе «Администрирование → Столбцы задач». */
+
+function saveTaskColumnsPerManager() {
+  if (typeof queueServerSave === 'function') queueServerSave();
+}
+
+function globalTaskColumns() {
+  return [...taskColumns].sort((a, b) => (a.order || 0) - (b.order || 0));
+}
+
+// Индивидуальные столбцы конкретного менеджера.
+function managerTaskColumns(userId) {
+  const key = String(userId == null ? '' : userId);
+  const list = (taskColumnsPerManager && taskColumnsPerManager[key]) || [];
+  return Array.isArray(list) ? list.slice().sort((a, b) => (a.order || 0) - (b.order || 0)) : [];
+}
+
+// Столбцы, которые видит пользователь на своей доске: глобальные + свои.
+function columnsForManager(userId) {
+  const own = managerTaskColumns(userId);
+  // Индивидуальные идут после глобальных, чтобы не разрывать общий порядок.
+  const maxOrder = globalTaskColumns().reduce((m, c) => Math.max(m, c.order || 0), -1);
+  return globalTaskColumns().concat(
+    own.map((c, i) => Object.assign({}, c, { order: typeof c.order === 'number' ? c.order : maxOrder + 1 + i, individual: true }))
+  );
+}
+
+function columnsForCurrentUser() {
+  return columnsForManager(currentUser ? currentUser.id : null);
+}
+
+function taskColumnById(columnId) {
+  return taskColumns.find(c => c.id === columnId) || null;
+}
+
+// Поиск индивидуального столбца по всем менеджерам (нужен для подписи в админке).
+function taskColumnOwner(columnId) {
+  const map = taskColumnsPerManager || {};
+  return Object.keys(map).find(uid => (map[uid] || []).some(c => c.id === columnId)) || null;
+}
+
+// Все столбцы системы — для настроек администратора.
+function allTaskColumnsWithScope() {
+  const list = globalTaskColumns().map(c => ({ column: c, scope: 'global', ownerId: null }));
+  Object.keys(taskColumnsPerManager || {}).forEach(uid => {
+    managerTaskColumns(uid).forEach(c => list.push({ column: c, scope: 'manager', ownerId: Number(uid) }));
+  });
+  return list;
+}
+
+/* ===== Изменение столбцов (админка) ===== */
+
+function nextColumnOrder(scope, ownerId) {
+  const list = scope === 'manager' ? managerTaskColumns(ownerId) : globalTaskColumns();
+  return list.reduce((m, c) => Math.max(m, c.order || 0), -1) + 1;
+}
+
+// Добавить столбец: scope = 'global' (видят все) или 'manager' (только он).
+function addTaskColumnScoped(scope, ownerId, name, color) {
+  const clean = String(name == null ? '' : name).trim();
+  if (!clean) return { ok: false, error: 'Введите название столбца' };
+
+  const target = scope === 'manager' ? managerTaskColumns(ownerId) : globalTaskColumns();
+  if (target.some(c => String(c.name).trim().toLowerCase() === clean.toLowerCase())) {
+    return { ok: false, error: 'Столбец с таким названием уже есть' };
+  }
+
+  const column = {
+    id: (scope === 'manager' ? 'mgr_' : 'col_') + Date.now() + '_' + Math.floor(Math.random() * 1000),
+    name: clean,
+    color: color || '#6b7280',
+    order: nextColumnOrder(scope, ownerId)
+  };
+
+  if (scope === 'manager') {
+    const key = String(ownerId);
+    taskColumnsPerManager[key] = (taskColumnsPerManager[key] || []).concat([column]);
+    saveTaskColumnsPerManager();
+  } else {
+    taskColumns.push(column);
+    saveTaskColumns();
+  }
+  return { ok: true, column: column };
+}
+
+// Найти столбец вместе с его списком (глобальным или индивидуальным).
+function columnScopeRef(columnId) {
+  const global = taskColumns.find(c => c.id === columnId);
+  if (global) return { scope: 'global', ownerId: null, list: taskColumns, column: global };
+  const map = taskColumnsPerManager || {};
+  for (const uid of Object.keys(map)) {
+    const found = (map[uid] || []).find(c => c.id === columnId);
+    if (found) return { scope: 'manager', ownerId: Number(uid), list: map[uid], column: found };
+  }
+  return null;
+}
+
+function renameTaskColumn(columnId, name, color) {
+  const ref = columnScopeRef(columnId);
+  if (!ref) return { ok: false, error: 'Столбец не найден' };
+  if (ref.column.locked) return { ok: false, error: 'Обязательный столбец переименовать нельзя' };
+
+  const clean = String(name == null ? '' : name).trim();
+  if (!clean) return { ok: false, error: 'Введите название столбца' };
+  const clash = ref.list.some(c => c.id !== columnId && String(c.name).trim().toLowerCase() === clean.toLowerCase());
+  if (clash) return { ok: false, error: 'Столбец с таким названием уже есть' };
+
+  ref.column.name = clean;
+  if (color && String(color).trim().startsWith('#')) ref.column.color = String(color).trim();
+  ref.scope === 'manager' ? saveTaskColumnsPerManager() : saveTaskColumns();
+  return { ok: true };
+}
+
+// Порядок столбца: -1 — влево, +1 — вправо.
+function moveTaskColumn(columnId, delta) {
+  const ref = columnScopeRef(columnId);
+  if (!ref) return { ok: false, error: 'Столбец не найден' };
+  const sorted = ref.list.slice().sort((a, b) => (a.order || 0) - (b.order || 0));
+  const idx = sorted.findIndex(c => c.id === columnId);
+  const swapIdx = idx + delta;
+  if (idx < 0 || swapIdx < 0 || swapIdx >= sorted.length) return { ok: false, error: 'Дальше двигать некуда' };
+
+  const tmp = sorted[idx];
+  sorted[idx] = sorted[swapIdx];
+  sorted[swapIdx] = tmp;
+  sorted.forEach((c, i) => { c.order = i; });
+  ref.scope === 'manager' ? saveTaskColumnsPerManager() : saveTaskColumns();
+  return { ok: true };
+}
+
+// Удалить столбец. Задачи из него переезжают в первый оставшийся столбец
+// той же области видимости — удалённый исчезает, задачи не теряются.
+function deleteTaskColumnScoped(columnId) {
+  const ref = columnScopeRef(columnId);
+  if (!ref) return { ok: false, error: 'Столбец не найден' };
+  if (ref.column.locked) return { ok: false, error: 'Обязательный столбец удалить нельзя' };
+
+  const remaining = ref.list
+    .filter(c => c.id !== columnId)
+    .sort((a, b) => (a.order || 0) - (b.order || 0));
+  // Задачи переносим в первый оставшийся столбец. У индивидуального набора
+  // он может быть пустым — тогда берём первый глобальный: он есть на доске
+  // этого менеджера, поэтому задачи остаются видимыми.
+  let target = remaining[0] || null;
+  if (!target && ref.scope === 'manager') target = globalTaskColumns()[0] || null;
+  const moved = tasks.filter(t => t.status === columnId).length;
+
+  if (!target) return { ok: false, error: 'Нельзя удалить последний столбец' };
+
+  tasks.forEach(t => { if (t.status === columnId) t.status = target.id; });
+  if (moved) saveTasks();
+
+  if (ref.scope === 'manager') {
+    const key = String(ref.ownerId);
+    taskColumnsPerManager[key] = (taskColumnsPerManager[key] || []).filter(c => c.id !== columnId);
+    saveTaskColumnsPerManager();
+  } else {
+    taskColumns = taskColumns.filter(c => c.id !== columnId);
+    saveTaskColumns();
+  }
+
+  // Привязка активности на удалённый столбец больше не работает — снимаем.
+  let bindingsCleared = 0;
+  Object.keys(activityToColumnMap || {}).forEach(type => {
+    if (activityToColumnMap[type] === columnId) { delete activityToColumnMap[type]; bindingsCleared++; }
+  });
+  if (bindingsCleared) saveActivityToColumnMap();
+
+  return { ok: true, moved: moved, target: target.name, bindingsCleared: bindingsCleared };
+}
+
+/* ===== Назначение задачи исполнителю =====
+   Назначать может администратор и руководитель — из главного меню «Задачи»
+   (в карточке задачи). Исполнитель видит задачу в столбце «Назначенные задачи»
+   и меняет статус назначения сам. */
+
+function canAssignTasks() {
+  return isAdmin() || isLead();
+}
+
+function assignmentCandidates() {
+  return users.filter(u => u && u.id !== (currentUser ? currentUser.id : null));
+}
+
+// Применить назначение к задаче: пусто — снять назначение.
+function applyTaskAssignment(task, assignedToId) {
+  if (!task) return { ok: false, error: 'Задача не найдена' };
+  const targetId = assignedToId ? parseInt(assignedToId, 10) : null;
+  const changed = targetId !== (task.assignedTo || null);
+
+  if (!targetId) {
+    task.assignedTo = null;
+    task.assignedBy = null;
+    task.assignedAt = null;
+    task.assignmentStatus = null;
+    return { ok: true, assigned: false, changed: changed };
+  }
+
+  const target = findUserById(targetId);
+  if (!target) return { ok: false, error: 'Пользователь не найден' };
+
+  task.assignedTo = target.id;
+  task.assignedBy = currentUser ? currentUser.id : null;
+  task.assignedAt = new Date().toISOString();
+  task.assignmentStatus = changed ? 'pending' : (task.assignmentStatus || 'pending');
+  return { ok: true, assigned: true, changed: changed, user: target };
+}
+
 function saveTasks() {
   localStorage.setItem('alvid_crm_tasks', JSON.stringify(tasks));
   queueServerSave();
@@ -133,28 +493,77 @@ function updateTasksMenuBadge() {
     `<span class="menu-badge-count menu-badge-overdue" title="Просрочено">${overdue}</span>`;
 }
 
-// Одиночный клик по стрелке — сдвиг на ширину колонки.
-function scrollTaskBoard(direction) {
-  const board = document.querySelector('.task-board');
-  if (!board) return;
-  board.scrollBy({ left: direction * 300, behavior: 'smooth' });
-}
-
 /* ===== Прокрутка доски стрелками =====
-   Короткое нажатие сдвигает доску на колонку, удержание — плавно
-   прокручивает непрерывно (кадр за кадром, без рывков). */
+   Всё движение считается в requestAnimationFrame: короткое нажатие — плавный
+   сдвиг на одну колонку с замедлением в конце (ease-out), удержание —
+   непрерывная прокрутка с разгоном. CSS-анимация (scroll-behavior) не
+   используется: на время движения она отключается, иначе браузер подмешивает
+   своё сглаживание и кадры «дрожат». */
 
 const ARROW_HOLD_DELAY = 260;   // через сколько мс после нажатия начинается «удержание»
-const ARROW_STEP_PX = 14;       // сдвиг за кадр при удержании
+const ARROW_STEP_START = 7;     // сдвиг за кадр в начале удержания
+const ARROW_STEP_MAX = 26;      // максимальный сдвиг за кадр после разгона
+const ARROW_RAMP_MS = 520;      // за сколько мс выходим на максимальную скорость
+const ARROW_CLICK_MS = 320;     // длительность плавного сдвига по клику
 
 let arrowHoldTimer = null;
 let arrowRafId = null;
 let arrowDirection = 0;
+let arrowStartedAt = 0;
+let boardClickRafId = null;
 
+// Плавный сдвиг доски на заданное расстояние: кадры считает rAF,
+// скорость гасится по кривой ease-out — движение заканчивается мягко.
+function animateBoardScroll(distance, duration) {
+  const board = document.querySelector('.task-board');
+  if (!board || !distance) return;
+  if (boardClickRafId) cancelAnimationFrame(boardClickRafId);
+
+  const startLeft = board.scrollLeft;
+  const startedAt = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  const total = duration || ARROW_CLICK_MS;
+  board.style.scrollBehavior = 'auto';
+
+  const frame = (now) => {
+    const stamp = typeof now === 'number' ? now : Date.now();
+    const progress = Math.min(1, (stamp - startedAt) / total);
+    const eased = 1 - Math.pow(1 - progress, 3);      // ease-out cubic
+    board.scrollLeft = startLeft + distance * eased;
+    if (progress < 1) {
+      boardClickRafId = requestAnimationFrame(frame);
+    } else {
+      boardClickRafId = null;
+      board.style.scrollBehavior = '';
+    }
+  };
+  boardClickRafId = requestAnimationFrame(frame);
+}
+
+// Ширина одной колонки со зазором — шаг прокрутки по клику.
+function boardStepWidth() {
+  const board = document.querySelector('.task-board');
+  if (!board) return 300;
+  const col = board.querySelector('.task-column');
+  if (!col) return 300;
+  const gap = 12;
+  return Math.round(col.getBoundingClientRect().width + gap);
+}
+
+// Одиночный клик по стрелке — плавный сдвиг на ширину колонки.
+function scrollTaskBoard(direction) {
+  animateBoardScroll(direction * boardStepWidth(), ARROW_CLICK_MS);
+}
+
+// Кадр непрерывной прокрутки при удержании: скорость растёт от ARROW_STEP_START
+// до ARROW_STEP_MAX, поэтому старт мягкий, а дальше доска «разгоняется».
 function arrowScrollFrame() {
   const board = document.querySelector('.task-board');
   if (!board) { stopBoardArrowScroll(); return; }
-  board.scrollLeft += arrowDirection * ARROW_STEP_PX;
+  const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  const elapsed = now - arrowStartedAt;
+  const ramp = Math.min(1, elapsed / ARROW_RAMP_MS);
+  const step = ARROW_STEP_START + (ARROW_STEP_MAX - ARROW_STEP_START) * ramp;
+  board.scrollLeft += arrowDirection * step;
   arrowRafId = requestAnimationFrame(arrowScrollFrame);
 }
 
@@ -167,6 +576,7 @@ function startBoardArrowScroll(direction) {
   if (board) board.style.scrollBehavior = 'auto';
   arrowHoldTimer = setTimeout(() => {
     arrowHoldTimer = null;
+    arrowStartedAt = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
     arrowRafId = requestAnimationFrame(arrowScrollFrame);
   }, ARROW_HOLD_DELAY);
 }
@@ -184,35 +594,501 @@ function stopBoardArrowScroll() {
   if (board) board.style.scrollBehavior = '';
 }
 
+/* ===== Задача-ссылка («Отработка ссылки») =====
+   Такую задачу нельзя закрыть, пока не отмечена галочка «Ссылка отработана»:
+   ни перетаскиванием в завершающий столбец, ни сохранением карточки. */
+
+const TASK_KINDS = [
+  { value: 'regular', name: 'Обычная' },
+  { value: 'link', name: 'Отработка ссылки' }
+];
+
+function taskKindName(task) {
+  const kind = TASK_KINDS.find(k => k.value === (task && task.kind));
+  return (kind || TASK_KINDS[0]).name;
+}
+
+function isLinkTask(task) {
+  return !!task && task.kind === 'link';
+}
+
+// Столбец считается завершающим (по нему задача закрывается).
+function isCompletedColumnId(columnId) {
+  return taskCompletedColumnIds().indexOf(columnId) > -1;
+}
+
+// Можно ли закрывать задачу: для «Отработки ссылки» нужна галочка.
+function taskCanBeClosed(task) {
+  return !isLinkTask(task) || !!task.linkWorkedOff;
+}
+
+function taskClosureBlockMessage(task) {
+  if (!isLinkTask(task)) return '';
+  return 'Задача «Отработка ссылки» закрывается только после отметки «Ссылка отработана».\n' +
+    'Поставьте галочку на карточке задачи — тогда её можно перевести в завершающий столбец.';
+}
+
+// Галочка «Ссылка отработана» на карточке задачи.
+function toggleLinkWorkedOff(taskId) {
+  const task = tasks.find(t => t.id === taskId);
+  if (!task) return { ok: false, error: 'Задача не найдена' };
+  task.linkWorkedOff = !task.linkWorkedOff;
+  task.linkWorkedOffAt = task.linkWorkedOff ? new Date().toISOString() : null;
+  saveTasks();
+  refreshAfterTaskChange();
+  return { ok: true, linkWorkedOff: task.linkWorkedOff };
+}
+
+/* ===== Календарь задач: пласты по периоду =====
+   Над доской — лента пластов: день (по часам), неделя (7 дней) или месяц
+   (дни месяца). В каждом пласте показано количество задач, попадающих в его
+   срок; клик по пласту оставляет на доске только задачи этого периода. */
+
+const TASK_CALENDAR_MODES = [
+  { id: 'day', name: 'День' },
+  { id: 'week', name: 'Неделя' },
+  { id: 'month', name: 'Месяц' }
+];
+
+const DOW_SHORT = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+const MONTH_NAMES = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь',
+  'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'];
+
+let taskCalendarMode = 'week';
+let taskCalendarAnchor = new Date();
+let taskCalendarPick = null;    // { key, from, to, label } — выбранный пласт
+
+function taskCalendarStartOfDay(d) {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+
+function taskCalendarAddDays(d, n) {
+  const x = new Date(d);
+  x.setDate(x.getDate() + n);
+  return x;
+}
+
+// Понедельник недели, в которую попадает дата.
+function taskCalendarStartOfWeek(d) {
+  const x = taskCalendarStartOfDay(d);
+  const dow = (x.getDay() + 6) % 7;
+  return taskCalendarAddDays(x, -dow);
+}
+
+function taskCalendarStartOfMonth(d) {
+  const x = taskCalendarStartOfDay(d);
+  x.setDate(1);
+  return x;
+}
+
+function taskCalendarEndOfMonth(d) {
+  const x = taskCalendarStartOfMonth(d);
+  x.setMonth(x.getMonth() + 1);
+  return x;
+}
+
+function taskCalendarPeriodRange(mode, anchor) {
+  const base = anchor || new Date();
+  if (mode === 'day') {
+    const from = taskCalendarStartOfDay(base);
+    return { from: from, to: taskCalendarAddDays(from, 1) };
+  }
+  if (mode === 'month') {
+    return { from: taskCalendarStartOfMonth(base), to: taskCalendarEndOfMonth(base) };
+  }
+  const from = taskCalendarStartOfWeek(base);
+  return { from: from, to: taskCalendarAddDays(from, 7) };
+}
+
+function taskCalendarLabel(mode, anchor) {
+  const d = taskCalendarStartOfDay(anchor || new Date());
+  if (mode === 'day') return d.toLocaleDateString('ru-RU', { day: '2-digit', month: 'long', year: 'numeric' });
+  if (mode === 'month') return MONTH_NAMES[d.getMonth()] + ' ' + d.getFullYear();
+  const from = taskCalendarStartOfWeek(d);
+  const to = taskCalendarAddDays(from, 6);
+  return from.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) +
+    ' — ' + to.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+}
+
+// Пласты выбранного масштаба: границы периода, короткая подпись и подсказка.
+function taskCalendarBands() {
+  const anchor = taskCalendarAnchor || new Date();
+  const bands = [];
+
+  if (taskCalendarMode === 'day') {
+    const day = taskCalendarStartOfDay(anchor);
+    for (let h = 0; h < 24; h++) {
+      const from = new Date(day); from.setHours(h);
+      const to = new Date(day); to.setHours(h + 1);
+      bands.push({ key: 'h' + h, label: String(h).padStart(2, '0'), hint: String(h).padStart(2, '0') + ':00', from: from, to: to });
+    }
+    return bands;
+  }
+
+  if (taskCalendarMode === 'month') {
+    const from = taskCalendarStartOfMonth(anchor);
+    const days = Math.round((taskCalendarEndOfMonth(anchor) - from) / 86400000);
+    for (let i = 0; i < days; i++) {
+      const d = taskCalendarAddDays(from, i);
+      bands.push({
+        key: 'd' + i,
+        label: String(d.getDate()),
+        hint: d.toLocaleDateString('ru-RU', { day: '2-digit', month: 'long' }),
+        from: d, to: taskCalendarAddDays(d, 1)
+      });
+    }
+    return bands;
+  }
+
+  const from = taskCalendarStartOfWeek(anchor);
+  for (let i = 0; i < 7; i++) {
+    const d = taskCalendarAddDays(from, i);
+    bands.push({
+      key: 'w' + i,
+      label: DOW_SHORT[i] + ' ' + String(d.getDate()).padStart(2, '0'),
+      hint: d.toLocaleDateString('ru-RU', { weekday: 'long', day: '2-digit', month: 'long' }),
+      from: d, to: taskCalendarAddDays(d, 1)
+    });
+  }
+  return bands;
+}
+
+function taskInRange(task, from, to) {
+  const dl = parseDeadline(task && task.deadline);
+  if (!dl) return false;
+  return dl >= from && dl < to;
+}
+
+function taskCalendarBandTasks(band, list) {
+  const source = list || visibleTasks();
+  return source.filter(t => taskInRange(t, band.from, band.to));
+}
+
+// Пласты с количеством задач (счётчики считаются по всем видимым задачам,
+// а не по уже отфильтрованным — иначе цифры «схлопывались» бы после клика).
+function taskCalendarBandsWithCounts() {
+  const source = visibleTasks();
+  return taskCalendarBands().map(band => {
+    const items = taskCalendarBandTasks(band, source);
+    return Object.assign({}, band, {
+      count: items.length,
+      overdue: items.filter(t => taskOverdue(t)).length
+    });
+  });
+}
+
+function setTaskCalendarMode(mode) {
+  taskCalendarMode = TASK_CALENDAR_MODES.some(m => m.id === mode) ? mode : 'week';
+  taskCalendarPick = null;
+  renderTasks();
+}
+
+function shiftTaskCalendar(delta) {
+  const anchor = new Date(taskCalendarAnchor || new Date());
+  if (taskCalendarMode === 'day') anchor.setDate(anchor.getDate() + delta);
+  else if (taskCalendarMode === 'month') anchor.setMonth(anchor.getMonth() + delta);
+  else anchor.setDate(anchor.getDate() + delta * 7);
+  taskCalendarAnchor = anchor;
+  taskCalendarPick = null;
+  renderTasks();
+}
+
+function taskCalendarToday() {
+  taskCalendarAnchor = new Date();
+  taskCalendarPick = null;
+  renderTasks();
+}
+
+// Клик по пласту: показать только его задачи (повторный клик — снять).
+function pickTaskCalendarBand(key) {
+  const band = taskCalendarBandsWithCounts().find(b => b.key === key);
+  if (!band) return;
+  if (taskCalendarPick && taskCalendarPick.key === key) {
+    taskCalendarPick = null;
+  } else {
+    taskCalendarPick = { key: band.key, from: band.from, to: band.to, label: band.hint };
+  }
+  renderTasks();
+}
+
+function clearTaskCalendarPick() {
+  taskCalendarPick = null;
+  renderTasks();
+}
+
+// Фильтр доски по выбранному пласту.
+function taskCalendarFilter(list) {
+  if (!taskCalendarPick) return list;
+  return list.filter(t => taskInRange(t, taskCalendarPick.from, taskCalendarPick.to));
+}
+
+function renderTaskCalendarHtml() {
+  const bands = taskCalendarBandsWithCounts();
+  const period = taskCalendarPeriodRange(taskCalendarMode, taskCalendarAnchor);
+  const all = visibleTasks();
+  const periodTasks = all.filter(t => taskInRange(t, period.from, period.to));
+  const withDeadline = all.filter(t => !!parseDeadline(t.deadline)).length;
+
+  return `
+    <div class="task-calendar">
+      <div class="task-calendar-head">
+        <div class="task-calendar-modes">
+          ${TASK_CALENDAR_MODES.map(m =>
+            `<button type="button" class="btn btn-sm ${taskCalendarMode === m.id ? '' : 'btn-secondary'}"
+                     onclick="setTaskCalendarMode('${m.id}')">${m.name}</button>`).join('')}
+        </div>
+        <button type="button" class="btn btn-sm btn-secondary" onclick="shiftTaskCalendar(-1)" title="Предыдущий период">‹</button>
+        <div class="task-calendar-title">
+          ${escapeHtml(taskCalendarLabel(taskCalendarMode, taskCalendarAnchor))}
+          <span class="task-calendar-total">задач в периоде: <strong>${periodTasks.length}</strong></span>
+        </div>
+        <button type="button" class="btn btn-sm btn-secondary" onclick="shiftTaskCalendar(1)" title="Следующий период">›</button>
+        <button type="button" class="btn btn-sm btn-secondary" onclick="taskCalendarToday()">Сегодня</button>
+        ${taskCalendarPick ? `<button type="button" class="btn btn-sm" onclick="clearTaskCalendarPick()">Показать все задачи</button>` : ''}
+      </div>
+      <div class="task-calendar-bands">
+        ${bands.map(b => `
+          <button type="button"
+                  class="task-calendar-band${b.count ? ' has-tasks' : ''}${b.overdue ? ' has-overdue' : ''}${taskCalendarPick && taskCalendarPick.key === b.key ? ' active' : ''}"
+                  onclick="pickTaskCalendarBand('${b.key}')"
+                  title="${escapeHtml(b.hint)}: задач ${b.count}${b.overdue ? ', просрочено ' + b.overdue : ''}">
+            <span class="task-calendar-count">${b.count}</span>
+            <span class="task-calendar-label">${escapeHtml(b.label)}</span>
+          </button>`).join('')}
+      </div>
+      ${withDeadline === 0
+        ? '<div class="task-calendar-hint">У задач не заполнены сроки — пласты пока пустые. Срок задаётся в карточке задачи.</div>'
+        : ''}
+      ${taskCalendarPick
+        ? `<div class="task-calendar-pick">На доске только задачи периода: <strong>${escapeHtml(taskCalendarPick.label)}</strong></div>`
+        : ''}
+    </div>
+  `;
+}
+
+/* ===== Отслеживание задач руководителем =====
+   Руководитель (или администратор) берёт сотрудника на отслеживание: попадает
+   в trackingBy всех его текущих задач, а новые задачи сотрудника получают его
+   автоматически. Раздел показывает прогресс: всего, в работе, завершено,
+   просрочено и по столбцам. */
+
+function isTaskTracker() {
+  return isLead() || isAdmin();
+}
+
+function trackedUserIds(trackerId) {
+  const me = trackerId != null ? trackerId : (currentUser ? currentUser.id : null);
+  return users.filter(u => (u.trackedBy || []).indexOf(me) > -1).map(u => u.id);
+}
+
+function trackedUsers(trackerId) {
+  const me = trackerId != null ? trackerId : (currentUser ? currentUser.id : null);
+  return users.filter(u => (u.trackedBy || []).indexOf(me) > -1);
+}
+
+// Кто следит за сотрудником — нужно при создании новых задач.
+// trackedBy хранится у сотрудника: это список руководителей, которые за ним
+// наблюдают, поэтому возвращаем именно их id.
+function trackersForUser(userId) {
+  const target = findUserById(userId);
+  if (!target || !Array.isArray(target.trackedBy)) return [];
+  return target.trackedBy.filter(id => !!findUserById(id));
+}
+
+function isUserTrackedBy(userId, trackerId) {
+  const me = trackerId != null ? trackerId : (currentUser ? currentUser.id : null);
+  const u = findUserById(userId);
+  return !!u && (u.trackedBy || []).indexOf(me) > -1;
+}
+
+// Добавить отслеживание: и в профиль сотрудника, и в его текущие задачи.
+function startTrackingUser(userId) {
+  if (!isTaskTracker()) return { ok: false, error: 'Отслеживание доступно руководителю' };
+  const target = findUserById(parseInt(userId, 10));
+  if (!target) return { ok: false, error: 'Пользователь не найден' };
+  const me = currentUser.id;
+  if (target.id === me) return { ok: false, error: 'Себя отслеживать не нужно' };
+
+  target.trackedBy = Array.isArray(target.trackedBy) ? target.trackedBy : [];
+  if (target.trackedBy.indexOf(me) === -1) target.trackedBy.push(me);
+
+  let touched = 0;
+  tasks.forEach(t => {
+    if (t.ownerId !== target.id && t.assignedTo !== target.id) return;
+    if (!Array.isArray(t.trackingBy)) t.trackingBy = [];
+    if (t.trackingBy.indexOf(me) === -1) { t.trackingBy.push(me); touched++; }
+  });
+
+  saveUsers();
+  saveTasks();
+  return { ok: true, tasks: touched };
+}
+
+// Снять отслеживание: убираем и из профиля, и из задач.
+function stopTrackingUser(userId) {
+  if (!isTaskTracker()) return { ok: false, error: 'Отслеживание доступно руководителю' };
+  const target = findUserById(parseInt(userId, 10));
+  if (!target) return { ok: false, error: 'Пользователь не найден' };
+  const me = currentUser.id;
+
+  target.trackedBy = (target.trackedBy || []).filter(id => id !== me);
+  tasks.forEach(t => {
+    if (!Array.isArray(t.trackingBy)) return;
+    t.trackingBy = t.trackingBy.filter(id => id !== me);
+  });
+
+  saveUsers();
+  saveTasks();
+  return { ok: true };
+}
+
+// Новая задача сотрудника: руководители, которые его отслеживают, попадают
+// в trackingBy автоматически.
+function syncTrackingForTask(task) {
+  if (!task) return task;
+  const ownerId = task.ownerId != null ? task.ownerId : (currentUser ? currentUser.id : null);
+  if (ownerId == null) return task;
+  const watchers = trackersForUser(ownerId);
+  if (!watchers.length) return task;
+  task.trackingBy = Array.isArray(task.trackingBy) ? task.trackingBy : [];
+  watchers.forEach(id => { if (task.trackingBy.indexOf(id) === -1) task.trackingBy.push(id); });
+  return task;
+}
+
+// Прогресс сотрудника по задачам: сводка и разбивка по столбцам.
+function userTaskProgress(userId) {
+  const uid = parseInt(userId, 10);
+  const list = tasks.filter(t => t.ownerId === uid || t.assignedTo === uid);
+  const done = list.filter(t => isTaskCompleted(t));
+  const active = list.filter(t => !isTaskCompleted(t));
+  const overdue = active.filter(t => taskOverdue(t));
+  const sortedCols = [...taskColumns].sort((a, b) => (a.order || 0) - (b.order || 0));
+
+  return {
+    total: list.length,
+    done: done.length,
+    active: active.length,
+    overdue: overdue.length,
+    percent: list.length ? Math.round(done.length / list.length * 100) : 0,
+    byColumn: sortedCols.map(col => ({
+      id: col.id,
+      name: col.name,
+      color: col.color,
+      count: list.filter(t => t.status === col.id).length
+    })).filter(c => c.count > 0),
+    tasks: list
+  };
+}
+
+function renderTracking() {
+  const main = document.getElementById('mainContent');
+  if (!main) return;
+
+  if (!isTaskTracker()) {
+    main.innerHTML = `<div class="placeholder"><h2>Доступ запрещён</h2><p>Отслеживание задач доступно руководителю и администратору</p></div>`;
+    return;
+  }
+
+  const tracked = trackedUsers();
+  const candidates = users.filter(u => u.id !== (currentUser ? currentUser.id : null) &&
+    (u.trackedBy || []).indexOf(currentUser.id) === -1);
+
+  const cardHtml = u => {
+    const p = userTaskProgress(u.id);
+    return `
+      <div class="tracking-card">
+        <div class="tracking-card-head">
+          <div>
+            <div class="tracking-name">${escapeHtml(u.name || u.login)}</div>
+            <div class="tracking-role">${escapeHtml(userPositionLabel(u))}</div>
+          </div>
+          <button type="button" class="btn btn-sm btn-secondary" onclick="stopTrackingFromUi(${u.id})">Снять отслеживание</button>
+        </div>
+        <div class="tracking-progress">
+          <div class="tracking-bar"><span style="width:${p.percent}%;"></span></div>
+          <div class="tracking-percent">выполнено ${p.done} из ${p.total} · ${p.percent}%</div>
+        </div>
+        <div class="tracking-stats">
+          <span>Всего: <strong>${p.total}</strong></span>
+          <span>В работе: <strong>${p.active}</strong></span>
+          <span class="${p.overdue ? 'tracking-overdue' : ''}">Просрочено: <strong>${p.overdue}</strong></span>
+        </div>
+        ${p.byColumn.length ? `<div class="tracking-columns">
+          ${p.byColumn.map(c => `<span class="tracking-column-chip" style="border-color:${c.color};"><i style="background:${c.color};"></i>${escapeHtml(c.name)}: <strong>${c.count}</strong></span>`).join('')}
+        </div>` : '<div class="field-hint">Задач у сотрудника пока нет.</div>'}
+      </div>`;
+  };
+
+  main.innerHTML = `
+    <div class="orders-page">
+      <div class="orders-head">
+        <h1>Отслеживание задач</h1>
+        <div class="tracking-add">
+          <select id="trackingUserSelect">
+            <option value="">— выберите сотрудника —</option>
+            ${candidates.map(u => `<option value="${u.id}">${escapeHtml(u.name || u.login)} (${escapeHtml(userPositionLabel(u))})</option>`).join('')}
+          </select>
+          <button type="button" class="btn" onclick="startTrackingFromUi()">Взять на отслеживание</button>
+        </div>
+      </div>
+      <p class="field-hint" style="margin-bottom:16px;">
+        Руководитель видит прогресс по сотруднику: сколько задач всего, что в работе
+        и что просрочено. Отслеживаемый сотрудник попадает в список наблюдателей
+        своих текущих и будущих задач.
+      </p>
+      ${tracked.length === 0 ? `
+        <div class="empty-state" style="padding:60px 20px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;">
+          <p>Пока никто не отслеживается.</p>
+          <p style="font-size:12px;color:#9ca3af;margin-top:6px;">Выберите сотрудника выше и нажмите «Взять на отслеживание».</p>
+        </div>
+      ` : tracked.map(cardHtml).join('')}
+    </div>
+  `;
+}
+
+function startTrackingFromUi() {
+  const select = document.getElementById('trackingUserSelect');
+  const userId = select ? select.value : '';
+  if (!userId) { alert('Выберите сотрудника'); return; }
+  const res = startTrackingUser(userId);
+  if (!res.ok) { alert(res.error); return; }
+  renderTracking();
+}
+
+function stopTrackingFromUi(userId) {
+  const res = stopTrackingUser(userId);
+  if (!res.ok) { alert(res.error); return; }
+  renderTracking();
+}
+
 function renderTasks() {
   const main = document.getElementById('mainContent');
-  const sortedColumns = [...taskColumns].sort((a, b) => a.order - b.order);
-  const boardTasks = visibleTasks();
-  const canManageBoard = isAdmin();
+  // Доска показывает глобальные столбцы плюс индивидуальные столбцы этого
+  // менеджера (их набор настраивает администратор).
+  const sortedColumns = columnsForCurrentUser();
+  // Доска показывает задачи с учётом выбранного пласта календаря: клик по
+  // периоду оставляет только задачи этого срока.
+  const boardTasks = taskCalendarFilter(visibleTasks());
 
   main.innerHTML = `
     <div style="padding:20px;height:100vh;width:100%;min-width:0;box-sizing:border-box;display:flex;flex-direction:column;background:linear-gradient(135deg,#e8edf6 0%,#dce3ef 100%);">
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:15px;flex-shrink:0;">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-shrink:0;">
         <h1 style="font-size:22px;font-weight:600;color:#1a3a5c;">Задачи</h1>
-        <button class="btn" onclick="openTaskModal()">+ Новая задача</button>
+        <button class="btn" onclick="openTaskModal()">Новая задача</button>
+        ${isTaskTracker() ? '<button class="btn btn-secondary" onclick="goToSection(\'tracking\')">Отслеживание задач</button>' : ''}
       </div>
+
+      ${renderTaskCalendarHtml()}
 
       <div style="position:relative;flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;">
         <div class="task-board" style="display:flex;gap:12px;flex:1;min-height:0;padding-bottom:10px;min-width:0;">
-          ${sortedColumns.map(col => renderTaskColumn(col, boardTasks, canManageBoard)).join('')}
+          ${sortedColumns.map(col => renderTaskColumn(col, boardTasks)).join('')}
 
           ${renderAssignedColumn(boardTasks)}
 
           ${renderCoopColumn(boardTasks)}
-
-          ${canManageBoard ? `
-            <div style="min-width:200px;flex-shrink:0;">
-              <div style="background:#f9fafb;border:2px dashed #d1d5db;border-radius:10px;padding:12px;height:100%;display:flex;flex-direction:column;">
-                <button onclick="addTaskColumn()" style="background:none;border:none;cursor:pointer;font-size:24px;color:#9ca3af;margin-bottom:8px;" title="Добавить столб">+</button>
-                <div style="font-size:12px;color:#9ca3af;">Добавить столб</div>
-              </div>
-            </div>
-          ` : ''}
         </div>
 
         <button class="board-scroll-btn left" type="button"
@@ -246,28 +1122,20 @@ function renderTasks() {
   updateTasksMenuBadge();
 }
 
-function renderTaskColumn(col, boardTasks, canManageBoard) {
+// Столбец доски. Доска одинакова для всех: управление столбцами —
+// в администрировании, поэтому кнопок правки здесь нет.
+function renderTaskColumn(col, boardTasks) {
   const colTasks = boardTasks.filter(t => t.status === col.id).sort((a, b) => (a.order || 0) - (b.order || 0));
-  const isLocked = !!col.locked;
-  const isDefault = DEFAULT_COLUMNS.find(dc => dc.id === col.id);
+  const individual = !!col.individual;
 
   return `
-    <div class="task-column" style="min-width:280px;max-width:280px;flex-shrink:0;display:flex;flex-direction:column;border-radius:10px;overflow:hidden;"
-         ondragover="handleColumnDragOver(event, '${col.id}')"
-         ondragleave="handleColumnDragLeave(event)"
-         ondrop="handleColumnDrop(event, '${col.id}')">
-      <div style="padding:12px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #e5e7eb;background:#fff;${canManageBoard && !isLocked ? 'cursor:grab;' : ''}"
-           ${canManageBoard && !isLocked ? `draggable="true" ondragstart="handleColumnDragStart(event, '${col.id}')" ondragend="handleColumnDragEnd(event)" title="Перетащите, чтобы изменить порядок"` : ''}>
+    <div class="task-column" style="min-width:280px;max-width:280px;flex-shrink:0;display:flex;flex-direction:column;border-radius:10px;overflow:hidden;">
+      <div style="padding:12px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #e5e7eb;background:#fff;"
+           ${individual ? 'title="Индивидуальный столбец — виден только вам"' : ''}>
         <div style="width:4px;height:20px;border-radius:2px;background:${col.color};flex-shrink:0;"></div>
         <div style="flex:1;font-weight:600;font-size:14px;color:#1a3a5c;">${escapeHtml(col.name)}</div>
         <div style="background:#e5e7eb;color:#6b7280;font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px;">${colTasks.length}</div>
         <button onclick="quickAddTask('${col.id}')" style="background:none;border:none;cursor:pointer;font-size:18px;color:#9ca3af;padding:0 4px;" title="Быстрое добавление">+</button>
-        ${canManageBoard && !isLocked && !isDefault ? `
-          <button onclick="editTaskColumn('${col.id}')" style="background:none;border:none;cursor:pointer;font-size:14px;color:#9ca3af;" title="Редактировать">✏️</button>
-        ` : ''}
-        ${canManageBoard && !isLocked ? `
-          <button onclick="deleteTaskColumn('${col.id}')" style="background:none;border:none;cursor:pointer;font-size:14px;color:#ef4444;" title="Удалить столб">×</button>
-        ` : ''}
       </div>
 
       <div style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:10px;display:flex;flex-direction:column;gap:10px;"
@@ -294,7 +1162,7 @@ function renderAssignedColumn(boardTasks) {
         <div style="width:4px;height:20px;border-radius:2px;background:#7c3aed;flex-shrink:0;"></div>
         <div style="flex:1;font-weight:600;font-size:14px;color:#1a3a5c;">Назначенные задачи</div>
         <div style="background:#ede9fe;color:#6d28d9;font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px;">${colTasks.length}</div>
-        <span title="Обязательный столбец — удалить нельзя" style="color:#c4b5fd;font-size:12px;">🔒</span>
+        <span title="Обязательный столбец — удалить нельзя" style="color:#c4b5fd;font-size:11px;">обязательный</span>
       </div>
 
       <div style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:10px;display:flex;flex-direction:column;gap:10px;">
@@ -327,7 +1195,7 @@ function renderCoopColumn(boardTasks) {
         <div style="width:4px;height:20px;border-radius:2px;background:#0ea5e9;flex-shrink:0;"></div>
         <div style="flex:1;font-weight:600;font-size:14px;color:#1a3a5c;">Совместные задачи</div>
         <div style="background:#e0f2fe;color:#075985;font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px;">${colTasks.length}</div>
-        <span title="Задачи, где вы соисполнитель" style="color:#7dd3fc;font-size:12px;">👥</span>
+        <span title="Задачи, где вы соисполнитель" style="color:#7dd3fc;font-size:11px;">совместные</span>
       </div>
 
       <div style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:10px;display:flex;flex-direction:column;gap:10px;">
@@ -356,6 +1224,13 @@ function canManageAssignment(task) {
 function taskOwnerName(task) {
   const u = task && task.ownerId ? findUserById(task.ownerId) : null;
   return u ? (u.name || u.login) : '—';
+}
+
+// Ссылка задачи: дописываем схему, чтобы ссылка открывалась из карточки.
+function normalizeTaskLink(url) {
+  const s = String(url || '').trim();
+  if (!s) return '';
+  return /^https?:\/\//i.test(s) ? s : 'https://' + s;
 }
 
 function renderTaskCard(task, col) {
@@ -397,6 +1272,24 @@ function renderTaskCard(task, col) {
         ${client ? `<span style="font-size:11px;color:#3b82f6;">${escapeHtml(client.orgName)}</span>` : ''}
         ${col.coop ? `<span style="font-size:11px;color:#0ea5e9;">от ${escapeHtml(taskOwnerName(task))}</span>` : ''}
       </div>
+
+      ${isLinkTask(task) ? `
+        <div class="task-link-block${task.linkWorkedOff ? ' done' : ''}">
+          <label class="task-link-check" onclick="event.stopPropagation()">
+            <input type="checkbox" ${task.linkWorkedOff ? 'checked' : ''}
+                   onclick="event.stopPropagation()"
+                   onchange="toggleLinkWorkedOff(${task.id})">
+            <span>Ссылка отработана</span>
+          </label>
+          ${task.linkUrl ? `<a href="${escapeHtml(normalizeTaskLink(task.linkUrl))}" target="_blank" rel="noopener"
+                                onclick="event.stopPropagation()">${escapeHtml(task.linkUrl)}</a>` : ''}
+          <div class="task-link-hint">
+            ${task.linkWorkedOff
+              ? 'Галочка стоит — задачу можно закрывать.'
+              : 'Тип «Отработка ссылки»: закрыть задачу можно только после галочки.'}
+          </div>
+        </div>
+      ` : ''}
 
       ${assignInfo ? `
         <div style="display:flex;align-items:center;gap:6px;margin-top:8px;padding-top:8px;border-top:1px dashed #e5e7eb;">
@@ -500,11 +1393,19 @@ function handleDrop(e, columnId) {
   const task = tasks.find(t => t.id === taskId);
   if (!task) return;
 
-  setTaskStatus(task, columnId);
+  // Задача-ссылка не закрывается, пока не отмечена галочка: перетаскивание
+  // в завершающий столбец отклоняем и объясняем причину.
+  const moved = setTaskStatus(task, columnId);
+  if (!moved.ok) {
+    alert(moved.error);
+    renderTasks();
+    return;
+  }
+
   const colTasks = tasks.filter(t => t.status === columnId && t.id !== taskId);
   task.order = colTasks.length;
 
-  if (columnId === 'completed') {
+  if (isCompletedColumnId(columnId)) {
     task.completedAt = new Date().toISOString();
   } else {
     task.completedAt = null;
@@ -514,103 +1415,12 @@ function handleDrop(e, columnId) {
   renderTasks();
 }
 
-function handleColumnDragStart(e, colId) {
-  draggedColumnId = colId;
-  draggedTaskId = null;
-  e.dataTransfer.effectAllowed = 'move';
-  e.dataTransfer.setData('text/plain', 'col:' + colId);
-  startBoardAutoScroll(e.clientX);
-}
-
-function handleColumnDragEnd(e) {
-  draggedColumnId = null;
-  stopBoardAutoScroll();
-  document.querySelectorAll('.task-column.drag-over').forEach(el => el.classList.remove('drag-over'));
-}
-
-function handleColumnDragOver(e, colId) {
-  if (!draggedColumnId || draggedColumnId === colId) return;
-  e.preventDefault();
-  e.dataTransfer.dropEffect = 'move';
-  e.currentTarget.classList.add('drag-over');
-}
-
-function handleColumnDragLeave(e) {
-  if (e.relatedTarget && e.currentTarget.contains(e.relatedTarget)) return;
-  e.currentTarget.classList.remove('drag-over');
-}
-
-function handleColumnDrop(e, colId) {
-  e.preventDefault();
-  e.currentTarget.classList.remove('drag-over');
-  if (!draggedColumnId || draggedColumnId === colId) return;
-
-  const sorted = [...taskColumns].sort((a, b) => a.order - b.order);
-  const fromIdx = sorted.findIndex(c => c.id === draggedColumnId);
-  const toIdx = sorted.findIndex(c => c.id === colId);
-  if (fromIdx === -1 || toIdx === -1) return;
-
-  const [moved] = sorted.splice(fromIdx, 1);
-  sorted.splice(toIdx, 0, moved);
-  sorted.forEach((c, i) => c.order = i);
-  saveTaskColumns();
-  renderTasks();
-}
-
-function addTaskColumn() {
-  const name = prompt('Название нового типа задач:');
-  if (!name || !name.trim()) return;
-
-  const colors = ['#3b82f6', '#f59e0b', '#10b981', '#8b5cf6', '#ef4444', '#ec4899', '#06b6d4', '#84cc16'];
-  const color = colors[taskColumns.length % colors.length];
-  const maxOrder = taskColumns.reduce((m, c) => Math.max(m, c.order), 0);
-
-  taskColumns.push({
-    id: 'col_' + Date.now(),
-    name: name.trim(),
-    color: color,
-    order: maxOrder + 1
-  });
-  saveTaskColumns();
-  renderTasks();
-}
-
-function editTaskColumn(colId) {
-  const col = taskColumns.find(c => c.id === colId);
-  if (!col || col.locked) return;
-
-  const name = prompt('Новое название:', col.name);
-  if (!name || !name.trim()) return;
-  col.name = name.trim();
-
-  const color = prompt('Цвет (hex, например #3b82f6):', col.color);
-  if (color && color.trim().startsWith('#')) col.color = color.trim();
-
-  saveTaskColumns();
-  renderTasks();
-}
-
-function deleteTaskColumn(colId) {
-  const col = taskColumns.find(c => c.id === colId);
-  if (!col || col.locked) return;
-
-  const colTasks = tasks.filter(t => t.status === colId);
-  const remaining = taskColumns.filter(c => c.id !== colId).sort((a, b) => a.order - b.order);
-  const target = remaining[0];
-
-  let msg = `Точно удалить столб «${col.name}»?`;
-  if (colTasks.length > 0) {
-    msg += `\nВ столбе ${colTasks.length} задач. Они будут перенесены в «${target ? target.name : 'Новые'}».`;
-  }
-  if (!confirm(msg)) return;
-
-  if (colTasks.length > 0) {
-    colTasks.forEach(t => { t.status = target ? target.id : 'new'; });
-    saveTasks();
-  }
-  taskColumns = taskColumns.filter(c => c.id !== colId);
-  saveTaskColumns();
-  renderTasks();
+// Поле ссылки показываем только для типа «Отработка ссылки».
+function onTaskKindChange() {
+  const kindEl = document.getElementById('taskKind');
+  const row = document.getElementById('taskLinkRow');
+  if (!row) return;
+  row.style.display = (kindEl && kindEl.value === 'link') ? '' : 'none';
 }
 
 function quickAddTask(columnId) {
@@ -630,6 +1440,32 @@ function openTaskModal(task = null, clientId = null, defaultColumn = null) {
   prioritySelect.innerHTML = TASK_PRIORITIES.map(p =>
     `<option value="${p.value}" ${task?.priority === p.value ? 'selected' : ''}>${p.name}</option>`
   ).join('');
+
+  // Тип задачи: обычная или «Отработка ссылки» (закрывается по галочке).
+  const kindSelect = document.getElementById('taskKind');
+  if (kindSelect) {
+    const kind = (task && task.kind) || 'regular';
+    kindSelect.innerHTML = TASK_KINDS.map(k =>
+      `<option value="${k.value}"${kind === k.value ? ' selected' : ''}>${escapeHtml(k.name)}</option>`).join('');
+  }
+  const linkInput = document.getElementById('taskLinkUrl');
+  if (linkInput) linkInput.value = (task && task.linkUrl) || '';
+  onTaskKindChange();
+
+  // Назначение исполнителю: поле видят только администратор и руководитель.
+  const assignRow = document.getElementById('taskAssignRow');
+  const assignSelect = document.getElementById('taskAssignTo');
+  if (assignRow && assignSelect) {
+    const canAssign = canAssignTasks();
+    assignRow.style.display = canAssign ? '' : 'none';
+    if (canAssign) {
+      assignSelect.innerHTML = '<option value="">— не назначать —</option>' +
+        assignmentCandidates().map(u =>
+          `<option value="${u.id}"${task && task.assignedTo === u.id ? ' selected' : ''}>` +
+          `${escapeHtml(u.name || u.login)} (${escapeHtml(userRoleLabel(u))})</option>`).join('');
+      assignSelect.value = (task && task.assignedTo) ? String(task.assignedTo) : '';
+    }
+  }
 
   const columnSelect = document.getElementById('taskColumn');
   const sortedCols = [...taskColumns].sort((a, b) => a.order - b.order);
@@ -780,6 +1616,9 @@ function saveTask(e) {
   const id = document.getElementById('taskId').value;
   const clientIdVal = document.getElementById('taskClientId').value;
   const contactIdVal = document.getElementById('taskContactSelect').value;
+  const kindEl = document.getElementById('taskKind');
+  const linkEl = document.getElementById('taskLinkUrl');
+  const kind = (kindEl && kindEl.value === 'link') ? 'link' : 'regular';
 
   const data = {
     title: document.getElementById('taskTitle').value.trim(),
@@ -789,8 +1628,21 @@ function saveTask(e) {
     status: document.getElementById('taskColumn').value,
     coAssignees: taskCoAssignees.slice(),
     clientId: clientIdVal ? parseInt(clientIdVal) : null,
-    contactId: contactIdVal ? parseInt(contactIdVal) : null
+    contactId: contactIdVal ? parseInt(contactIdVal) : null,
+    kind: kind,
+    linkUrl: kind === 'link' ? (linkEl ? linkEl.value.trim() : '') : ''
   };
+
+  // Задачу-ссылку нельзя закрыть, пока не отмечена галочка на карточке.
+  const current = id ? tasks.find(t => t.id === parseInt(id)) : null;
+  const linkWorkedOff = current ? !!current.linkWorkedOff : false;
+  if (kind === 'link' && isCompletedColumnId(data.status) && !linkWorkedOff) {
+    alert('Задача «Отработка ссылки» закрывается только после отметки «Ссылка отработана».\n' +
+      'Сохраните задачу в рабочий столбец и поставьте галочку на карточке.');
+    return;
+  }
+  data.linkWorkedOff = linkWorkedOff;
+  if (kind !== 'link') data.linkWorkedOff = false;
 
   let task = null;
   let previousCoAssignees = [];
@@ -802,7 +1654,7 @@ function saveTask(e) {
       if (!tasks[idx].ownerId) tasks[idx].ownerId = currentUser ? currentUser.id : null;
       if (tasks[idx].status !== data.status) data.statusUpdatedAt = new Date().toISOString();
       tasks[idx] = { ...tasks[idx], ...data };
-      task = tasks[idx];
+      task = syncTrackingForTask(tasks[idx]);
     }
   } else {
     const maxId = tasks.reduce((m, t) => Math.max(m, t.id || 0), 0);
@@ -812,7 +1664,25 @@ function saveTask(e) {
     data.ownerId = currentUser ? currentUser.id : null;
     data.order = tasks.filter(t => t.status === data.status).length;
     tasks.push(data);
-    task = data;
+    task = syncTrackingForTask(data);
+  }
+
+  // Назначение исполнителю — прямо из главного меню «Задачи».
+  if (task && canAssignTasks()) {
+    const assignEl = document.getElementById('taskAssignTo');
+    if (assignEl) {
+      const assigned = applyTaskAssignment(task, assignEl.value);
+      if (!assigned.ok) {
+        alert(assigned.error);
+      } else if (assigned.assigned && assigned.changed && assigned.user) {
+        notifyUser(
+          assigned.user.id,
+          'Назначена задача «' + task.title + '»',
+          'Задача появилась у вас в столбце «Назначенные задачи».',
+          task.id
+        );
+      }
+    }
   }
 
   // Новым соисполнителям уходит уведомление (себе — не отправляем).
@@ -892,13 +1762,18 @@ function taskOverdue(task) {
 }
 
 // Установка статуса задачи с фиксацией момента перехода (для аналитики по датам).
+// Задачу типа «Отработка ссылки» нельзя перевести в завершающий столбец, пока
+// не отмечена галочка «Ссылка отработана».
 function setTaskStatus(task, status) {
-  if (!task) return task;
+  if (!task) return { ok: false, error: 'Задача не найдена' };
+  if (task.status !== status && isCompletedColumnId(status) && !taskCanBeClosed(task)) {
+    return { ok: false, error: taskClosureBlockMessage(task) };
+  }
   if (task.status !== status) {
     task.status = status;
     task.statusUpdatedAt = new Date().toISOString();
   }
-  return task;
+  return { ok: true };
 }
 
 function formatDate(dateStr) {
