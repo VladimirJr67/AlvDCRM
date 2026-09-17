@@ -263,6 +263,9 @@ select[multiple] option:checked { background: #3b82f6; color: #fff; }
   transition: opacity .15s, background .15s;
 }
 .board-scroll-btn:hover, .board-scroll-btn:active { background: #f3f4f6; color: #3b82f6; opacity: 1; }
+/* Стрелки стоят ровно по центру рабочей зоны доски: у доски снизу есть запас
+   под горизонтальную полосу прокрутки, поэтому центр смещаем на его половину. */
+.board-scroll-btn { top: calc(50% - 5px); }
 .board-scroll-btn.left { left: 6px; }
 .board-scroll-btn.right { right: 6px; }
 
@@ -302,6 +305,9 @@ select[multiple] option:checked { background: #3b82f6; color: #fff; }
 
 /* Вкладки «Анализ» */
 .analysis-tabs { display: flex; gap: 8px; margin-bottom: 20px; }
+
+/* Вкладки разделов с двумя списками (например, «Заказы/Матрицы») */
+.section-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
 
 /* Обязательная колонка «Назначенные задачи» */
 .task-column.assigned-column { background: #faf5ff; }
@@ -751,7 +757,7 @@ select[multiple] option:checked { background: #3b82f6; color: #fff; }
 }
 .min-prices-history-btn:hover { border-color: #3b82f6; color: #1a3a5c; background: #eff6ff; }
 
-/* Раздел «Заказы»: фильтры и анализ продаж */
+/* Раздел «Заказы/Матрицы»: фильтры и анализ продаж */
 .orders-page { padding: 22px 24px 30px; width: 100%; box-sizing: border-box; }
 .orders-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
 .orders-head h1 { font-size: 22px; font-weight: 600; color: #1a3a5c; }
@@ -800,3 +806,265 @@ button:disabled {
 .btn-secondary:disabled,
 .btn-secondary[disabled] { background: #f9fafb; color: #b3b8c2; border-color: #e5e7eb; }
 .btn-icon-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+/* ============================================================
+   Чат менеджеров
+   ============================================================ */
+.chat-page { display: flex; flex-direction: column; height: 100%; padding: 22px 24px; box-sizing: border-box; }
+.chat-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.chat-head h1 { font-size: 22px; font-weight: 600; color: #1a3a5c; }
+.chat-badge { font-size: 11px; color: #6b7280; background: #f3f4f6; border-radius: 10px; padding: 3px 10px; }
+.chat-feed {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 14px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.chat-msg { max-width: 72%; background: #f3f4f6; border-radius: 10px; padding: 8px 12px; }
+.chat-msg.mine { align-self: flex-end; background: #dbeafe; }
+.chat-msg-head { display: flex; justify-content: space-between; gap: 12px; font-size: 11px; color: #6b7280; }
+.chat-msg-text { font-size: 13px; color: #111827; margin-top: 4px; white-space: pre-wrap; word-break: break-word; }
+.chat-empty { margin: auto; color: #9ca3af; }
+.chat-form { display: flex; gap: 10px; align-items: flex-end; margin-top: 12px; }
+.chat-form textarea {
+  flex: 1; padding: 9px 11px; border: 1px solid #d0d5dd; border-radius: 6px;
+  font-size: 13px; font-family: inherit; resize: vertical; outline: none;
+}
+.chat-form textarea:focus { border-color: #3b82f6; }
+
+/* ============================================================
+   Переносы клиентов
+   ============================================================ */
+.transfer-pending {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  background: #fef3c7; color: #92400e; border: 1px solid #fde68a;
+  border-radius: 8px; padding: 8px 12px; font-size: 12px; margin-bottom: 10px;
+}
+
+/* ============================================================
+   Тёмная тема (профиль → Тема оформления)
+
+   Слой переопределений поверх светлых стилей: цвета собраны в переменные,
+   а сами правила включаются классом theme-dark на <body> (его ставит
+   applyTheme() из js/profile.js). Часть разметки в разделах собирается
+   с inline-цветами, поэтому ниже есть блок правил по подстроке style="…" —
+   он временный и нужен только чтобы такие блоки не оставались белыми.
+   ============================================================ */
+:root {
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --surface-2: #f9fafb;
+  --surface-3: #ffffff;
+  --text: #222222;
+  --text-dim: #6b7280;
+  --border: #e5e7eb;
+  --border-strong: #d0d5dd;
+  --accent: #1a3a5c;
+  --accent-text: #ffffff;
+  --accent-soft: #dbeafe;
+}
+
+body.theme-dark {
+  --bg: #10141a;
+  --surface: #171d26;
+  --surface-2: #1d2632;
+  --surface-3: #212b39;
+  --text: #e6eaf0;
+  --text-dim: #98a3b3;
+  --border: #2a3441;
+  --border-strong: #3a4655;
+  --accent: #2f6fb5;
+  --accent-text: #f4f7fb;
+  --accent-soft: #22354d;
+}
+
+body.theme-dark { background: var(--bg); color: var(--text); }
+
+/* Каркас: сайдбар, меню, блоки в сайдбаре */
+body.theme-dark .sidebar { background: var(--surface); border-right-color: var(--border); }
+body.theme-dark .sidebar-logo span { color: var(--text); }
+body.theme-dark .menu-item { color: var(--text-dim); }
+body.theme-dark .menu-item:hover { background: var(--surface-2); color: var(--text); }
+body.theme-dark .menu-item.active { background: var(--surface-2); color: #7fb2e5; }
+body.theme-dark .submenu { background: var(--surface); }
+body.theme-dark .submenu-item { color: var(--text-dim); }
+body.theme-dark .submenu-item:hover { background: var(--surface-2); }
+body.theme-dark .submenu-item.active { color: #7fb2e5; }
+body.theme-dark .sidebar-rates { border-bottom-color: var(--border); }
+body.theme-dark .rate-item { background: var(--surface-2); border-color: var(--border); }
+body.theme-dark .rate-ccy, body.theme-dark .rate-val { color: var(--text); }
+body.theme-dark .min-prices { background: var(--surface-2); border-color: var(--border); }
+body.theme-dark .min-price-row { border-top-color: var(--border); }
+body.theme-dark .min-price-name { color: var(--text-dim); }
+body.theme-dark .min-price-value { color: var(--text); }
+body.theme-dark .min-prices-history-btn { background: var(--surface); color: var(--text-dim); border-color: var(--border); }
+body.theme-dark .min-prices-history-btn:hover { background: var(--surface-2); color: var(--text); }
+body.theme-dark .user-info { border-top-color: var(--border); }
+body.theme-dark .logout-btn { background: var(--surface-2); color: var(--text-dim); border-color: var(--border); }
+body.theme-dark .logout-btn:hover { background: var(--surface-3); color: var(--text); }
+
+/* Поверхности: карточки, модалки, таблицы, фильтры, попапы */
+body.theme-dark .modal,
+body.theme-dark .cc-block,
+body.theme-dark .client-card,
+body.theme-dark .stat-card,
+body.theme-dark .toast,
+body.theme-dark .login-card,
+body.theme-dark .orders-filters,
+body.theme-dark .integration-card,
+body.theme-dark .reminder-card,
+body.theme-dark .news-item,
+body.theme-dark .news-editor,
+body.theme-dark .notification-item,
+body.theme-dark .note-item,
+body.theme-dark .notes-list,
+body.theme-dark .chat-feed,
+body.theme-dark .scrollable-table,
+body.theme-dark .contact-list,
+body.theme-dark .tools-grid,
+body.theme-dark .reminders-calendar,
+body.theme-dark .manager-picker-dropdown,
+body.theme-dark .client-typeahead-dropdown {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text);
+}
+body.theme-dark .modal { box-shadow: 0 20px 60px rgba(0,0,0,.55); }
+body.theme-dark .modal-overlay { background: rgba(6,9,13,.65); }
+body.theme-dark .task-column { background: var(--surface-2); }
+body.theme-dark .task-column-header { background: var(--surface); border-color: var(--border); }
+body.theme-dark .placeholder { color: var(--text-dim); }
+body.theme-dark .empty-state { color: var(--text-dim); }
+
+/* Таблицы */
+body.theme-dark .admin-table th,
+body.theme-dark .contact-list thead th,
+body.theme-dark .scrollable-table th { background: var(--surface-2); color: var(--text-dim); border-bottom-color: var(--border); }
+body.theme-dark .admin-table td,
+body.theme-dark .scrollable-table td,
+body.theme-dark .contact-list td { border-bottom-color: var(--border); color: var(--text); }
+body.theme-dark .admin-table tr:hover td { background: #1b232f; }
+
+/* Поля ввода */
+body.theme-dark input:not([type="checkbox"]):not([type="radio"]),
+body.theme-dark select,
+body.theme-dark textarea {
+  background: var(--surface-3); color: var(--text); border-color: var(--border-strong);
+}
+body.theme-dark input::placeholder, body.theme-dark textarea::placeholder { color: #6f7b8b; }
+body.theme-dark .search-bar, body.theme-dark .clients-filter-select { background: var(--surface-3); color: var(--text); }
+body.theme-dark .form-group label, body.theme-dark .info-item label { color: var(--text-dim); }
+body.theme-dark .field-hint { color: var(--text-dim); }
+
+/* Кнопки и метки */
+body.theme-dark .btn { background: var(--accent); color: var(--accent-text); }
+body.theme-dark .btn-secondary { background: var(--surface-2); color: var(--text); border-color: var(--border-strong); }
+body.theme-dark .btn-secondary:hover { background: var(--surface-3); }
+body.theme-dark .btn:disabled, body.theme-dark button:disabled { background: #232a35; color: #6b7686; border-color: #2c3542; }
+body.theme-dark .badge { background: var(--accent-soft); color: #bcd6f2; }
+body.theme-dark .chat-msg { background: var(--surface-2); }
+body.theme-dark .chat-msg.mine { background: var(--accent-soft); }
+body.theme-dark .chat-msg-text { color: var(--text); }
+body.theme-dark .chat-head h1, body.theme-dark .orders-head h1 { color: var(--text); }
+body.theme-dark .chat-badge { background: var(--surface-2); color: var(--text-dim); }
+body.theme-dark .transfer-pending { background: #3b2f14; color: #f4d08a; border-color: #55411c; }
+body.theme-dark .comment-tag { filter: brightness(1.1); }
+
+/* Временно: разделы собирают разметку с inline-цветами. Пока они не переведены
+   на классы, перекрываем самые частые сочетания, чтобы блоки не оставались
+   белыми на тёмном фоне. */
+body.theme-dark [style*="background:#fff"],
+body.theme-dark [style*="background: #fff"],
+body.theme-dark [style*="background:#ffffff"] { background: var(--surface) !important; }
+body.theme-dark [style*="background:#f9fafb"],
+body.theme-dark [style*="background: #f9fafb"],
+body.theme-dark [style*="background:#f3f4f6"],
+body.theme-dark [style*="background:#f4f7fb"] { background: var(--surface-2) !important; }
+body.theme-dark [style*="border:1px solid #e5e7eb"],
+body.theme-dark [style*="border: 1px solid #e5e7eb"],
+body.theme-dark [style*="border:1px dashed #e5e7eb"] { border-color: var(--border) !important; }
+body.theme-dark [style*="color:#1a3a5c"],
+body.theme-dark [style*="color: #1a3a5c"],
+body.theme-dark [style*="color:#111"],
+body.theme-dark [style*="color:#111827"],
+body.theme-dark [style*="color:#374151"] { color: var(--text) !important; }
+body.theme-dark [style*="color:#4b5563"],
+body.theme-dark [style*="color:#6b7280"],
+body.theme-dark [style*="color:#9ca3af"] { color: var(--text-dim) !important; }
+body.theme-dark [style*="background:#e9ecf1"] { background: #232a35 !important; }
+
+/* ============================================================
+   Календарь задач: лента пластов над доской
+   ============================================================ */
+.task-calendar { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; flex-shrink: 0; }
+.task-calendar-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.task-calendar-modes { display: flex; gap: 6px; margin-right: 6px; }
+.task-calendar-title { font-size: 13px; font-weight: 600; color: #1a3a5c; }
+.task-calendar-total { font-size: 11px; color: #6b7280; font-weight: 400; margin-left: 8px; }
+.task-calendar-bands { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
+.task-calendar-band {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  min-width: 54px; padding: 6px 8px; border: 1px solid #e5e7eb; border-radius: 8px;
+  background: #f9fafb; color: #6b7280; cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+.task-calendar-band:hover { border-color: #3b82f6; }
+.task-calendar-band.has-tasks { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
+.task-calendar-band.has-overdue { background: #fef2f2; color: #b91c1c; border-color: #fecaca; }
+.task-calendar-band.active { border-color: #1a3a5c; box-shadow: 0 0 0 2px rgba(26,58,92,.15); }
+.task-calendar-count { font-size: 15px; font-weight: 700; line-height: 1; }
+.task-calendar-label { font-size: 10px; white-space: nowrap; }
+.task-calendar-hint, .task-calendar-pick { font-size: 11px; color: #6b7280; margin-top: 6px; }
+.task-calendar-pick { color: #1d4ed8; }
+
+/* ============================================================
+   Задача-ссылка («Отработка ссылки»)
+   ============================================================ */
+.task-link-block { margin-top: 8px; padding: 8px; border: 1px dashed #c7d2fe; border-radius: 8px; background: #f5f3ff; font-size: 11px; }
+.task-link-block.done { border-color: #bbf7d0; background: #f0fdf4; }
+.task-link-check { display: flex; align-items: center; gap: 6px; font-weight: 600; color: #3730a3; cursor: pointer; }
+.task-link-block.done .task-link-check { color: #166534; }
+.task-link-block a { display: block; margin-top: 4px; color: #1d4ed8; word-break: break-all; }
+.task-link-hint { margin-top: 4px; color: #6b7280; }
+
+/* ============================================================
+   Отслеживание задач руководителем
+   ============================================================ */
+.tracking-add { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.tracking-add select { padding: 7px 9px; border: 1px solid #d0d5dd; border-radius: 5px; font-size: 12.5px; background: #fff; color: #374151; }
+.tracking-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; }
+.tracking-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 10px; }
+.tracking-name { font-size: 15px; font-weight: 600; color: #1a3a5c; }
+.tracking-role { font-size: 11px; color: #6b7280; }
+.tracking-progress { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.tracking-bar { flex: 1; height: 8px; background: #eef1f5; border-radius: 5px; overflow: hidden; }
+.tracking-bar span { display: block; height: 100%; background: #10b981; }
+.tracking-percent { font-size: 11px; color: #6b7280; white-space: nowrap; }
+.tracking-stats { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: #4b5563; margin-bottom: 8px; }
+.tracking-overdue strong { color: #ef4444; }
+.tracking-columns { display: flex; gap: 8px; flex-wrap: wrap; }
+.tracking-column-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: #4b5563; border: 1px solid #e5e7eb; border-radius: 10px; padding: 2px 8px; }
+.tracking-column-chip i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+
+/* Тёмная тема для новых блоков */
+body.theme-dark .task-calendar,
+body.theme-dark .tracking-card { background: var(--surface); border-color: var(--border); }
+body.theme-dark .task-calendar-title,
+body.theme-dark .tracking-name { color: var(--text); }
+body.theme-dark .task-calendar-band { background: var(--surface-2); border-color: var(--border); color: var(--text-dim); }
+body.theme-dark .task-calendar-band.has-tasks { background: #1c2b40; color: #9ec5f0; border-color: #2b4a70; }
+body.theme-dark .task-calendar-band.has-overdue { background: #3a1f22; color: #f0a3a3; border-color: #5c2b2f; }
+body.theme-dark .task-calendar-band.active { border-color: #7fb2e5; }
+body.theme-dark .task-calendar-hint,
+body.theme-dark .task-calendar-pick,
+body.theme-dark .tracking-percent,
+body.theme-dark .tracking-role,
+body.theme-dark .task-link-hint { color: var(--text-dim); }
+body.theme-dark .tracking-stats,
+body.theme-dark .tracking-column-chip { color: var(--text-dim); }
+body.theme-dark .tracking-column-chip { border-color: var(--border); }
+body.theme-dark .tracking-bar { background: #232c39; }
+body.theme-dark .task-link-block { background: #1b2334; border-color: #38456a; }
+body.theme-dark .task-link-block.done { background: #16281f; border-color: #2f5a41; }
+body.theme-dark .task-link-check { color: #a9b8f0; }
+body.theme-dark .task-link-block.done .task-link-check { color: #86d9a8; }
+body.theme-dark .tracking-add select { background: var(--surface-3); color: var(--text); border-color: var(--border-strong); }

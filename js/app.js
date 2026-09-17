@@ -5,6 +5,14 @@
 
 let currentSection = 'clients';
 let pollingStarted = false;
+
+// Разделы, которые можно открыть ссылкой /?section=… (проверяются при старте).
+const STARTABLE_SECTIONS = [
+  'orders', 'clients', 'tasks', 'reminders', 'news', 'contacts',
+  'contacts-internal', 'contacts-mobile', 'notifications', 'chat', 'transfers', 'tracking',
+  'manager-tools', 'admin-analysis', 'admin-users', 'admin-task-columns',
+  'admin-interaction-types', 'admin-integrations'
+];
 let menuHandlerAttached = false;
 let clientsTopHeight = null;
 
@@ -29,6 +37,9 @@ const MENU_ICONS = {
   notifications: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg>',
   news: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 22h16a2 2 0 002-2V4a2 2 0 00-2-2H8a2 2 0 00-2 2v16a2 2 0 01-2 2zm0 0a2 2 0 01-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8M15 18h-5M10 6h8v4h-8z"/></svg>',
   'manager-tools': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a4 4 0 01-5.4 5.4L4 17v3h3l5.3-5.3a4 4 0 015.4-5.4l-2.6 2.6a1.4 1.4 0 002 2l2.6-2.6z"/></svg>',
+  chat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.4 8.4 0 01-9 8.4 9 9 0 01-4-.9L3 21l1.9-4.6A8.4 8.4 0 013 11.5 8.4 8.4 0 0112 3a8.4 8.4 0 019 8.5z"/></svg>',
+  transfers: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 4v12M7 16l-3-3M7 16l3-3M17 20V8M17 8l-3 3M17 8l3 3"/></svg>',
+  tracking: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>',
   admin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>'
 };
 
@@ -54,7 +65,7 @@ function buildSidebar() {
   };
 
   let html = '';
-  html += addItem('orders', 'Заказы');
+  html += addItem('orders', 'Заказы/Матрицы');
   html += addItem('clients', 'Клиенты');
   html += addItem('tasks', 'Задачи', { badge: 'tasksMenuBadge' });
   html += addItem('reminders', 'Напоминания');
@@ -68,11 +79,23 @@ function buildSidebar() {
   if (!admin) {
     html += addItem('manager-tools', 'Инструменты менеджера');
   }
+  // Чат менеджеров — изолированный раздел: только роль «менеджер по продажам».
+  // Ни администратор, ни руководитель его не видят (см. js/chat.js).
+  if (typeof canUseManagersChat === 'function' && canUseManagersChat()) {
+    html += addItem('chat', 'Чат менеджеров', { badge: 'chatMenuBadge' });
+  }
+  // Переносы клиентов: у менеджера — свои запросы, у администратора — все.
+  html += addItem('transfers', 'Переносы клиентов', { badge: 'transfersMenuBadge' });
+  // Отслеживание задач — раздел руководителя и администратора.
+  if (typeof isTaskTracker === 'function' && isTaskTracker()) {
+    html += addItem('tracking', 'Отслеживание задач');
+  }
   if (admin) {
     html += addItem('admin', 'Администрирование', { submenu: [
       { section: 'admin-analysis', label: 'Анализ' },
       { section: 'admin-users', label: 'Пользователи' },
-      { section: 'admin-assignments', label: 'Задачи' },
+      // Назначение задач живёт в главном меню «Задачи», в админке его нет.
+      { section: 'admin-task-columns', label: 'Столбцы задач' },
       { section: 'admin-interaction-types', label: 'Типы взаимодействий' },
       { section: 'admin-integrations', label: 'Интеграции' }
     ] });
@@ -179,6 +202,9 @@ async function enterApp() {
   migrateLegacyClientData();
   // Пополняем общие справочники значениями, введёнными до их появления.
   seedDictionariesFromData();
+  // Обязательные типы активностей («Отправил КП», «Заказ матриц», «Нерентабелен»)
+  // дописываются, если база создавалась до их появления.
+  ensureInteractionTypes();
 
   ensureRequiredTaskColumns();
   injectModals();
@@ -188,7 +214,13 @@ async function enterApp() {
   updateTasksMenuBadge();
   updateNotificationBadge();
   updateNewsMenuBadge();
+  updateChatMenuBadge();
+  updateTransfersMenuBadge();
   renderMinPricesBlock();
+
+  // Тема оформления из профиля и системные уведомления (Service Worker).
+  applyTheme();
+  initNativeNotifications();
   applyNotifyPosition();
 
   initRates();
@@ -365,10 +397,45 @@ function injectModals() {
             <div class="form-row"><div class="form-group"><label>Комментарий *</label><textarea id="historyComment" rows="4" required></textarea></div></div>
             <div class="form-row">
               <div class="form-group">
+                <label>Следующая активность *</label>
+                <input type="datetime-local" id="historyNextActivity">
+                <div class="field-hint" id="historyNextActivityHint">
+                  Без следующей даты активность не закрывается — она же становится сроком задачи.
+                </div>
+              </div>
+            </div>
+            <div class="form-row" id="historyColleagueRow" style="display:none;">
+              <div class="form-group">
+                <label>Коллега на встречу</label>
+                <select id="historyColleague"></select>
+                <div class="field-hint">Коллега получит такую же задачу «Встреча» и уведомление.</div>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
                 <label>Отметки</label>
                 <div class="tag-picker">
                   <label class="tag-option"><input type="checkbox" id="historyTagSelf"> <span>Для себя</span></label>
                   <label class="tag-option"><input type="checkbox" id="historyTagReport"> <span>Для отчёта</span></label>
+                </div>
+              </div>
+            </div>
+            <div id="matrixFormSection" style="display:none;">
+              <div class="form-section" style="margin-top:10px;padding-top:12px;border-top:1px dashed #e5e7eb;">
+                <h3>Заказ матриц</h3>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label>Шифры *</label>
+                    <textarea id="matrixCiphers" rows="3" placeholder="По одному в строке или через запятую: ШФ-101, ШФ-102"></textarea>
+                  </div>
+                  <div class="form-group">
+                    <label>Покрытие</label>
+                    <select id="matrixCoating"></select>
+                  </div>
+                </div>
+                <div class="field-hint">
+                  Каждый шифр попадёт в «Заказы матриц» со статусом «Поступила», задача встанет
+                  в столбец, привязанный к активности, а комментарий уйдёт в отчёт.
                 </div>
               </div>
             </div>
@@ -491,7 +558,29 @@ function injectModals() {
               <div class="form-group"><label>Приоритет</label><select id="taskPriority"></select></div>
             </div>
             <div class="form-row">
-              <div class="form-group"><label>Тип задачи (колонка)</label><select id="taskColumn"></select></div>
+              <div class="form-group"><label>Вид задачи</label>
+                <select id="taskKind" onchange="onTaskKindChange()"></select>
+              </div>
+              <div class="form-group"><label>Колонка</label><select id="taskColumn"></select></div>
+            </div>
+            <div class="form-row" id="taskLinkRow" style="display:none;">
+              <div class="form-group">
+                <label>Ссылка для отработки</label>
+                <input type="text" id="taskLinkUrl" placeholder="https://...">
+                <div class="field-hint">
+                  Задача «Отработка ссылки» закроется только после галочки «Ссылка отработана» на карточке.
+                </div>
+              </div>
+            </div>
+            <div class="form-row" id="taskAssignRow" style="display:none;">
+              <div class="form-group">
+                <label>Назначить исполнителю</label>
+                <select id="taskAssignTo"></select>
+                <div class="field-hint">
+                  Исполнитель увидит задачу в своём столбце «Назначенные задачи» и подтвердит её.
+                  Пустое значение — задача остаётся вашей.
+                </div>
+              </div>
             </div>
             <div class="linked-client-line" id="taskClientFixed" style="display:none;"></div>
             <div class="form-row">
@@ -611,6 +700,13 @@ function injectModals() {
 
         <div class="note-form" id="noteForm">
           <textarea id="noteText" rows="3" placeholder="Текст отметки по клиенту…"></textarea>
+          <div class="note-form-row" style="margin-bottom:8px;">
+            <input type="datetime-local" id="noteNextActivity" title="Следующая активность"
+                   style="flex:1;padding:8px 10px;border:1px solid #d0d5dd;border-radius:6px;font-size:13px;">
+            <span class="field-hint" style="max-width:260px;">
+              Активность закрывается только со следующей датой. Исключение — «Нерентабелен».
+            </span>
+          </div>
           <div class="note-form-row">
             <select id="noteType" title="Тип взаимодействия"></select>
             <div class="tag-picker">
@@ -658,6 +754,11 @@ function injectModals() {
           </div>
           <div class="form-row">
             <div class="form-group"><label>Должность</label><input type="text" id="profileJob"></div>
+            <div class="form-group">
+              <label>Тема оформления</label>
+              <select id="profileTheme" onchange="setThemeFromProfile(this.value)"></select>
+              <div class="field-hint">Тёмная тема применяется сразу и хранится в профиле.</div>
+            </div>
           </div>
         </div>
 
@@ -673,9 +774,22 @@ function injectModals() {
             </div>
             <div class="form-group"><label>Позиция окон</label><select id="profilePosition"></select></div>
           </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Системные уведомления поверх всех окон</label>
+              <label class="tag-option" style="margin-bottom:6px;">
+                <input type="checkbox" id="profileNative"> <span>Показывать попапы Windows при новых событиях</span>
+              </label>
+              <div class="field-hint" id="profileNativeStatus">Проверяем разрешение…</div>
+              <button type="button" class="btn btn-sm btn-secondary" id="profileNativeBtn"
+                      onclick="enableNativeNotifications()">Включить системные уведомления</button>
+            </div>
+          </div>
           <div class="field-hint">
-            Пока уведомления показываются внутри окна CRM. Системные уведомления Windows
-            включим отдельно — для них нужен запуск по localhost или HTTPS.
+            Системные попапы видны поверх любых окон, даже когда CRM свёрнута, —
+            их показывает браузер через Service Worker. Для этого страница должна быть
+            открыта по localhost или HTTPS: по адресу в локальной сети (http://192.168.x.x)
+            браузер такие уведомления запрещает, и остаются попапы внутри страницы.
           </div>
         </div>
 
@@ -685,6 +799,36 @@ function injectModals() {
           <button type="button" class="btn btn-secondary" onclick="closeModal('profileModal')">Отмена</button>
           <button type="button" class="btn" onclick="saveProfile()">Сохранить</button>
         </div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="matrixModal" onclick="if(event.target===this)closeModal('matrixModal')">
+      <div class="modal" style="width:520px;max-width:94vw;">
+        <div class="modal-head">
+          <h2 id="matrixModalTitle">Новая матрица</h2>
+          <button type="button" class="modal-close-icon" onclick="closeModal('matrixModal')" title="Закрыть" aria-label="Закрыть">✕</button>
+        </div>
+        <form onsubmit="saveMatrixFromModal(event)">
+          <input type="hidden" id="matrixId">
+          <div class="form-section">
+            <div class="form-row">
+              <div class="form-group"><label>Шифр *</label><input type="text" id="matrixCipher" placeholder="Например, ШФ-101" required></div>
+              <div class="form-group"><label>Дата</label><input type="date" id="matrixDate"></div>
+            </div>
+            <div class="form-row">
+              <div class="form-group"><label>Клиент</label><select id="matrixClient"></select></div>
+              <div class="form-group"><label>Покрытие</label><select id="matrixCoatingInput"></select></div>
+            </div>
+            <div class="form-row">
+              <div class="form-group"><label>Статус</label><select id="matrixStatus"></select></div>
+            </div>
+            <div class="form-row"><div class="form-group"><label>Комментарий</label><textarea id="matrixComment" rows="3"></textarea></div></div>
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('matrixModal')">Отмена</button>
+            <button type="submit" class="btn">Сохранить</button>
+          </div>
+        </form>
       </div>
     </div>
 
@@ -790,6 +934,12 @@ function renderSection(section) {
     renderNotifications();
   } else if (section === 'news') {
     renderNews();
+  } else if (section === 'chat') {
+    renderChat();
+  } else if (section === 'transfers') {
+    renderTransfers();
+  } else if (section === 'tracking') {
+    renderTracking();
   } else if (section === 'manager-tools') {
     renderManagerTools();
   } else if (section.startsWith('admin')) {
@@ -871,7 +1021,7 @@ function onTaskClientChange() {
   if (!client) return;
 
   clientLink.style.display = 'block';
-  clientLink.innerHTML = ` 🏢 <strong>${escapeHtml(client.orgName)}</strong> <button type="button" onclick="unlinkTaskFromClient()" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:12px;margin-left:6px;">✕ убрать</button>`;
+  clientLink.innerHTML = ` <strong>${escapeHtml(client.orgName)}</strong> <button type="button" onclick="unlinkTaskFromClient()" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:12px;margin-left:6px;">убрать</button>`;
 
   if (client.contacts && client.contacts.length > 0) {
     contactRow.style.display = 'block';
@@ -946,7 +1096,7 @@ function updateReminderClientLink() {
     return;
   }
   link.style.display = 'block';
-  link.innerHTML = `🏢 <strong>${escapeHtml(client.orgName)}</strong> <button type="button" onclick="unlinkReminderFromClient()" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:12px;margin-left:6px;">✕ убрать</button>`;
+  link.innerHTML = `<strong>${escapeHtml(client.orgName)}</strong> <button type="button" onclick="unlinkReminderFromClient()" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:12px;margin-left:6px;">убрать</button>`;
 }
 
 // Глобальный делегированный клик по выпадающим спискам typeahead (компании).
@@ -962,8 +1112,6 @@ document.addEventListener('click', (e) => {
     selectTaskClient(id, name);
   } else if (searchInput && searchInput.id === 'reminderClientSearch') {
     selectReminderClient(id, name);
-  } else if (searchInput && searchInput.id === 'adminTaskClientSearch') {
-    selectAdminTaskClient(id, name);
   }
 });
 
@@ -1027,14 +1175,24 @@ function startPolling() {
     updateTasksMenuBadge();
     updateNotificationBadge();
     updateNewsMenuBadge();
+    updateChatMenuBadge();
+    updateTransfersMenuBadge();
     renderMinPricesBlock();
+    applyTheme();
     renderSection(currentSection);
   }, 5000);
 }
 
 /* ===== Загрузка приложения ===== */
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+  // Стартовый раздел можно задать ссылкой: /?section=chat — удобно для закладок
+  // и для проверок. Неизвестное значение игнорируем.
+  try {
+    const fromUrl = new URLSearchParams(window.location.search).get('section');
+    if (fromUrl && STARTABLE_SECTIONS.indexOf(fromUrl) > -1) currentSection = fromUrl;
+  } catch (e) { /* нет URLSearchParams — остаёмся на разделе по умолчанию */ }
+
   const data = loadData();
   clients = data.clients;
   contacts = data.contacts;
@@ -1047,10 +1205,15 @@ document.addEventListener('DOMContentLoaded', () => {
   loadReminders();
   loadNotifications();
   loadOrders();
+  loadMatrices();
   loadNews();
   loadMinPrices();
 
-  if (restoreSession()) {
-    enterApp();
+  // Сессия: основная — серверная (httpOnly cookie), запасная — локальная
+  // (режим file://). Перезагрузка страницы не разлогинивает: сервер
+  // подтверждает вход по refresh-токену и обновляет access-токен сам.
+  if (await restoreSession()) {
+    await enterApp();
+    startSessionKeepAlive();
   }
 });

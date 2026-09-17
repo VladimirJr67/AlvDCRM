@@ -135,8 +135,8 @@ function renderNews() {
           </div>
           ${admin ? `
             <div class="news-item-actions">
-              <button class="btn-icon-btn" onclick="openNewsEditor(${item.id})" title="Редактировать">✏️</button>
-              <button class="btn-icon-btn" onclick="deleteNewsItem(${item.id})" title="Удалить">🗑</button>
+              <button class="btn-icon-btn" onclick="openNewsEditor(${item.id})" title="Редактировать">Изменить</button>
+              <button class="btn-icon-btn" onclick="deleteNewsItem(${item.id})" title="Удалить">Удалить</button>
             </div>` : ''}
         </div>
         <div class="news-item-meta">

@@ -12,9 +12,13 @@
   <div class="login-card">
     <img src="https://avatars.mds.yandex.net/i?id=59709a441721a5e380612fdd93e30472_l-5098586-images-thumbs&n=13" alt="Алвид">
     <h2>Алвид CRM</h2>
-    <input type="text" id="loginInput" placeholder="Логин" autocomplete="off" autocapitalize="off" spellcheck="false">
-    <input type="password" id="passwordInput" placeholder="Пароль" autocomplete="new-password">
-    <button onclick="doLogin()">Войти</button>
+    <!-- Форма всегда пустая: поля не подставляются ни браузером, ни приложением
+         (autocomplete="off" + очистка при загрузке и при возврате из кэша). -->
+    <form id="loginForm" autocomplete="off" onsubmit="event.preventDefault(); doLogin();">
+      <input type="text" id="loginInput" placeholder="Логин" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <input type="password" id="passwordInput" placeholder="Пароль" autocomplete="off">
+      <button type="submit">Войти</button>
+    </form>
     <div class="login-error" id="loginError">Неверный логин или пароль</div>
   </div>
 </div>
@@ -68,9 +72,12 @@
 <script src="js/reminders.js"></script>
 <script src="js/tasks.js"></script>
 <script src="js/orders.js"></script>
+<script src="js/matrices.js"></script>
 <script src="js/news.js"></script>
 <script src="js/managerTools.js"></script>
 <script src="js/notifications.js"></script>
+<script src="js/chat.js"></script>
+<script src="js/transfers.js"></script>
 <script src="js/admin.js"></script>
 <script src="js/app.js"></script>
 
