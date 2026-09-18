@@ -19,6 +19,17 @@ let orders = [];
 
 const ORDERS_KEY = 'alvid_crm_orders';
 
+// Ключ сопоставления заказа со срезом готовности: номер СП без пробелов
+// в верхнем регистре. Точки и дефисы сохраняются («СП2125.1», «Б/С-2»).
+function normalizeSpecificationKey(value) {
+  return String(value == null ? '' : value).replace(/\s+/g, '').toUpperCase();
+}
+
+function orderSpecificationKey(order) {
+  if (!order) return '';
+  return normalizeSpecificationKey(order.specificationKey || order.specification);
+}
+
 // Состояние фильтров раздела.
 let ordersClientFilter = '';        // id клиента или ''
 let ordersCoverageFilter = '';      // состояние поставки (покрытие) или ''
@@ -72,11 +83,40 @@ function addOrder(data) {
     cost: data.cost !== undefined && data.cost !== null && data.cost !== '' ? Number(data.cost) : null,
     date: data.date || new Date().toISOString(),
     createdBy: data.createdBy !== undefined ? data.createdBy : (currentUser ? currentUser.id : null),
-    comment: (data.comment || '').trim()
+    comment: (data.comment || '').trim(),
+    // Номер спецификации (СП) — по нему заказ сопоставляется со срезом готовности.
+    specification: (data.specification || '').trim(),
+    specificationKey: normalizeSpecificationKey(data.specification)
   };
   orders.push(order);
   saveOrders();
   return order;
+}
+
+// Проставить или изменить номер СП у существующего заказа (админ или автор).
+function setOrderSpecification(orderId, value) {
+  const order = orders.find(o => o.id === orderId);
+  if (!order) return { ok: false, error: 'Заказ не найден' };
+  if (!isAdmin() && (!currentUser || order.createdBy !== currentUser.id)) {
+    return { ok: false, error: 'Менять номер СП чужого заказа может только администратор' };
+  }
+  order.specification = String(value == null ? '' : value).trim();
+  order.specificationKey = normalizeSpecificationKey(order.specification);
+  saveOrders();
+  if (typeof refreshReadinessForVisibleOrders === 'function') refreshReadinessForVisibleOrders();
+  return { ok: true, specification: order.specification, key: order.specificationKey };
+}
+
+// Правка номера СП прямо в таблице заказов.
+function editOrderSpecification(orderId) {
+  const order = orders.find(o => o.id === orderId);
+  if (!order) return;
+  const current = order.specification || '';
+  const value = prompt('Номер спецификации (СП) для заказа:', current);
+  if (value === null) return;
+  const res = setOrderSpecification(orderId, value);
+  if (!res.ok) { alert(res.error); return; }
+  renderOrdersTab();
 }
 
 /* ===== Права и фильтры ===== */
@@ -252,6 +292,11 @@ function renderOrdersTab() {
       </div>
 
       <h3 class="orders-analysis-title">Анализ продаж${periodSet ? ' за период' : ''}</h3>
+      <div class="readiness-snapshot">
+        ${typeof readinessAvailable === 'function' && readinessAvailable()
+          ? `Готовность: ${escapeHtml(readinessAsOfText())} · спецификаций в срезе: ${readinessStatus.count}`
+          : 'Готовность: срез не загружен — администратор загружает утренний файл в разделе «Администрирование → Готовность»'}
+      </div>
       <div class="orders-stats">
         <div class="stat-card"><div class="stat-value" style="color:#1a3a5c">${list.length}</div><div class="stat-label">Всего заказов</div></div>
         <div class="stat-card"><div class="stat-value" style="color:#3b82f6">${fmtKg(totalKg)}</div><div class="stat-label">Суммарный вес, кг</div></div>
@@ -270,7 +315,7 @@ function renderOrdersTab() {
           <div class="table-body" style="max-height:calc(100vh - 430px);">
             <table class="admin-table">
               <thead><tr>
-                <th>Дата заказа</th><th>Клиент</th><th>Кол-во кг</th><th>Состояние</th>${isAdmin() ? '<th>Менеджер</th>' : ''}<th>Стоимость за кг</th><th>Стоимость заказа</th><th style="text-align:right;">Действия</th>
+                <th>Дата заказа</th><th>Клиент</th><th>Кол-во кг</th><th>Состояние</th>${isAdmin() ? '<th>Менеджер</th>' : ''}<th>Стоимость за кг</th><th>Стоимость заказа</th><th>СП</th><th>Готовность</th><th style="text-align:right;">Действия</th>
               </tr></thead>
               <tbody>
                 ${sorted.map(o => {
@@ -279,6 +324,7 @@ function renderOrdersTab() {
                     : escapeHtml(o.clientName || '—');
                   const owner = o.createdBy ? findUserById(o.createdBy) : null;
                   const canDelete = isAdmin() || (currentUser && o.createdBy === currentUser.id);
+                  const canEditSpec = isAdmin() || (currentUser && o.createdBy === currentUser.id);
                   return `<tr style="cursor:default;">
                     <td>${formatDateAdmin2(o.date)}</td>
                     <td>${clientLink}</td>
@@ -287,6 +333,8 @@ function renderOrdersTab() {
                     ${isAdmin() ? `<td>${escapeHtml(owner ? (owner.name || owner.login) : '—')}</td>` : ''}
                     <td>${fmtMoney(o.avgPrice)}</td>
                     <td><strong>${fmtMoney(o.cost)}</strong></td>
+                    <td>${orderSpecificationCellHtml(o, canEditSpec)}</td>
+                    <td>${orderReadinessCellHtml(o)}</td>
                     <td style="text-align:right;white-space:nowrap;">
                       ${canDelete ? `<button class="btn-icon-btn" onclick="deleteOrder(${o.id})" title="Удалить заказ">Удалить</button>` : ''}
                     </td>
@@ -298,6 +346,9 @@ function renderOrdersTab() {
         </div>
       `}
   `;
+
+  // Готовность подтягивается отдельным запросом: только по СП видимых заказов.
+  if (typeof refreshReadinessForVisibleOrders === 'function') refreshReadinessForVisibleOrders();
 }
 
 function formatDateAdmin2(value) {
@@ -332,6 +383,7 @@ function exportOrdersExcel() {
   const list = filteredOrders().sort((a, b) => new Date(b.date) - new Date(a.date));
   const rows = list.map(o => {
     const owner = o.createdBy ? findUserById(o.createdBy) : null;
+    const readiness = typeof readinessForOrder === 'function' ? readinessForOrder(o) : null;
     return {
       'Дата заказа': formatDateAdmin2(o.date),
       'Клиент': o.clientName || '—',
@@ -339,7 +391,11 @@ function exportOrdersExcel() {
       'Состояние': o.condition || '—',
       'Менеджер': owner ? (owner.name || owner.login) : '—',
       'Стоимость за кг': o.avgPrice !== null && o.avgPrice !== undefined ? o.avgPrice : '—',
-      'Стоимость заказа': o.cost !== null && o.cost !== undefined ? o.cost : '—'
+      'Стоимость заказа': o.cost !== null && o.cost !== undefined ? o.cost : '—',
+      'СП': o.specification || '—',
+      'Готовность, %': readiness && readiness.readiness != null ? readiness.readiness : '—',
+      'Статус готовности': readiness ? readiness.status : 'нет данных',
+      'Плановая дата готовности': readiness ? (readiness.planReadyDate || '—') : '—'
     };
   });
   const ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{}]);

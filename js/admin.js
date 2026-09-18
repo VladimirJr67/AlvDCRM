@@ -489,6 +489,172 @@ function deleteInteractionTypeFromAdmin(index) {
   renderAdminInteractionTypes();
 }
 
+/* ===================== Готовность (интеграция с 1С) =====================
+   Администратор каждое утро загружает сюда JSON-документ из инструмента
+   «Готовность». Сервер заменяет срез целиком, сопоставляет его с заказами CRM
+   по номеру СП и возвращает отчёт: что сопоставилось, чего нет в базе и по
+   каким заказам данных не хватает. Менеджеры видят готовность в «Заказах». */
+
+let readinessUploadReport = null;   // отчёт последней загрузки
+let readinessUploadError = '';
+
+function renderAdminReadiness() {
+  const main = document.getElementById('mainContent');
+  if (!main) return;
+
+  const status = readinessStatus || {};
+  const report = readinessUploadReport;
+  const totals = status.totals || null;
+
+  main.innerHTML = `
+    <div style="padding:25px;max-width:900px;margin:0 auto;height:100%;box-sizing:border-box;overflow-y:auto;">
+      <h1 style="font-size:22px;font-weight:600;color:#1a3a5c;margin-bottom:16px;">Готовность по спецификациям</h1>
+
+      <p style="font-size:12px;color:#9ca3af;margin-bottom:18px;">
+        Утренний файл из 1С превращается инструментом «Готовность» в JSON — загрузите его здесь,
+        и все менеджеры сразу увидят готовность по своим СП в разделе «Заказы». Каждая загрузка
+        заменяет предыдущий срез целиком; заказы в CRM не создаются и не меняются — им только
+        дописывается блок готовности по номеру СП.
+      </p>
+
+      <div class="integration-card" style="margin-bottom:20px;">
+        <div class="integration-status">
+          <span class="integration-dot ${status.available ? 'on' : 'off'}"></span>
+          <span>${status.available
+            ? 'Срез загружен: ' + escapeHtml(readinessAsOfText()) + ' · спецификаций: ' + status.count +
+              (status.sourceFile ? ' · файл: ' + escapeHtml(status.sourceFile) : '')
+            : 'Срез готовности не загружен'}</span>
+        </div>
+        ${status.uploadedAt ? `<div class="field-hint">Загружено: ${escapeHtml(formatDateAdmin2(status.uploadedAt))}${status.ageDays > 1 ? ' · данные устарели на ' + status.ageDays + ' дн.' : ''}</div>` : ''}
+        ${totals ? `<div class="field-hint">
+          Итоги среза: заказов ${escapeHtml(readinessNumberText(totals.orders))},
+          позиций ${escapeHtml(readinessNumberText(totals.positions))},
+          план ${escapeHtml(readinessNumberText(totals.planQty))} ·
+          на складе ${escapeHtml(readinessNumberText(totals.stockQty))} ·
+          отгружено ${escapeHtml(readinessNumberText(totals.shippedQty))} ·
+          готовность ${escapeHtml(readinessPercentText(totals.readiness))}
+        </div>` : ''}
+        ${(status.warnings || []).length ? `<div class="field-hint" style="color:#b45309;">
+          Предупреждения при разборе файла: ${status.warnings.map(w => escapeHtml(w)).join('; ')}
+        </div>` : ''}
+      </div>
+
+      <h3 class="orders-analysis-title">Загрузка нового среза</h3>
+      <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:16px;margin-bottom:20px;">
+        <div class="form-row">
+          <div class="form-group">
+            <label>Файл готовности (JSON из инструмента)</label>
+            <input type="file" id="readinessFile" accept=".json,application/json">
+            <div class="field-hint">
+              Формат — Спецификация_формата_для_CRM.md, схема v1. Файл разбирает сервер,
+              браузер ничего не считает: он только отправляет документ и показывает отчёт.
+            </div>
+          </div>
+        </div>
+        <div class="modal-actions" style="margin-top:8px;">
+          ${status.available ? '<button type="button" class="btn btn-secondary" onclick="clearReadinessSnapshot()">Очистить срез</button>' : ''}
+          <button type="button" class="btn" onclick="uploadReadinessFile()">Загрузить файл</button>
+        </div>
+        ${readinessUploadError ? `<div class="integration-msg err">${escapeHtml(readinessUploadError)}</div>` : ''}
+      </div>
+
+      ${report ? `
+        <h3 class="orders-analysis-title">Отчёт последней загрузки</h3>
+        <div class="readiness-report">
+          <div class="readiness-report-row"><span>Файл и дата данных</span><strong>${escapeHtml(status.sourceFile || '—')} · ${escapeHtml(formatReadinessDate(status.asOfDate))}</strong></div>
+          <div class="readiness-report-row"><span>Сопоставлено с заказами CRM</span><strong style="color:#10b981;">${escapeHtml(readinessNumberText(report.matched))}</strong></div>
+          <div class="readiness-report-row"><span>Не найдено в CRM</span><strong style="color:${report.missingCount ? '#b45309' : '#6b7280'};">${escapeHtml(readinessNumberText(report.missingCount))}</strong></div>
+          <div class="readiness-report-row"><span>Заказов без номера СП</span><strong style="color:${report.ordersWithoutSpecCount ? '#b45309' : '#6b7280'};">${escapeHtml(readinessNumberText(report.ordersWithoutSpecCount))}</strong></div>
+          <div class="readiness-report-row"><span>Заказов без свежих данных</span><strong style="color:${report.ordersWithoutDataCount ? '#b45309' : '#6b7280'};">${escapeHtml(readinessNumberText(report.ordersWithoutDataCount))}</strong></div>
+        </div>
+        ${report.missingCount ? `
+          <div class="field-hint" style="margin-top:8px;">
+            СП из файла, которых нет среди заказов CRM (${report.missing.length} из ${report.missingCount}):
+            ${report.missing.map(k => escapeHtml(k)).join(', ')}
+          </div>` : ''}
+        ${report.ordersWithoutSpecCount ? `
+          <div class="field-hint" style="margin-top:8px;">
+            Заказы без СП — их нужно дополнить, иначе готовность по ним не подтянется:
+            ${report.ordersWithoutSpec.map(o => '№' + o.id + (o.clientName ? ' (' + escapeHtml(o.clientName) + ')' : '')).join(', ')}
+          </div>` : ''}
+        ${report.ordersWithoutDataCount ? `
+          <div class="field-hint" style="margin-top:8px;">
+            Заказы с СП, которых нет в срезе (${report.ordersWithoutData.length} из ${report.ordersWithoutDataCount}):
+            ${report.ordersWithoutData.map(o => escapeHtml(o.specification)).join(', ')}
+          </div>` : ''}
+      ` : ''}
+    </div>
+  `;
+
+  // Статус среза мог измениться на сервере — подтягиваем и перерисовываем один раз.
+  if (!readinessUploadReport) {
+    fetchReadinessStatus().then(() => {
+      if (currentSection === 'admin-readiness' && !readinessUploadReport) renderAdminReadiness();
+    });
+  }
+}
+
+// Загрузка файла: читаем выбранный JSON и отправляем его на сервер.
+function uploadReadinessFile() {
+  const input = document.getElementById('readinessFile');
+  const file = input && input.files && input.files[0];
+  readinessUploadError = '';
+  if (!file) {
+    readinessUploadError = 'Выберите файл готовности (JSON)';
+    renderAdminReadiness();
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = async () => {
+    try {
+      const doc = JSON.parse(String(reader.result));
+      const res = await fetch('/api/readiness', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(doc)
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data || !data.ok) {
+        readinessUploadError = (data && data.error) || ('Сервер отклонил файл: HTTP ' + res.status);
+        renderAdminReadiness();
+        return;
+      }
+      readinessStatus = data.status || null;
+      readinessUploadReport = data.report || null;
+      readinessLookupKey = '';
+      readinessByKey = {};
+      renderAdminReadiness();
+    } catch (e) {
+      readinessUploadError = 'Не удалось разобрать файл: ' + e.message;
+      renderAdminReadiness();
+    }
+  };
+  reader.onerror = () => {
+    readinessUploadError = 'Не удалось прочитать файл';
+    renderAdminReadiness();
+  };
+  reader.readAsText(file);
+}
+
+// Очистка среза: заказы остаются, готовность пропадает до следующей загрузки.
+function clearReadinessSnapshot() {
+  if (!confirm('Очистить срез готовности? У заказов пропадёт блок готовности до новой загрузки.')) return;
+  fetch('/api/readiness', { method: 'DELETE' })
+    .then(res => res.json().catch(() => null))
+    .then(data => {
+      if (data && data.status) readinessStatus = data.status;
+      readinessUploadReport = null;
+      readinessLookupKey = '';
+      readinessByKey = {};
+      renderAdminReadiness();
+    })
+    .catch(err => {
+      readinessUploadError = 'Не удалось очистить срез: ' + err.message;
+      renderAdminReadiness();
+    });
+}
+
 /* ===================== Анализ ===================== */
 
 let adminAnalysisTab = 'stats';   // 'stats' | 'comments'

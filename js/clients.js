@@ -1097,6 +1097,8 @@ function openHistoryModal(clientId, editIdx) {
         document.getElementById('orderKg').value = entry.order.kg === null || entry.order.kg === undefined ? '' : entry.order.kg;
         document.getElementById('orderCost').value = entry.order.cost === null || entry.order.cost === undefined ? '' : entry.order.cost;
         renderOrderConditions(entry.order.condition);
+        const specEl = document.getElementById('orderSpecification');
+        if (specEl) specEl.value = entry.order.specification || '';
       }
       if (title) title.textContent = 'Редактирование комментария';
       if (submitBtn) submitBtn.textContent = 'Сохранить';
@@ -1291,9 +1293,11 @@ function resetOrderForm() {
   const kg = document.getElementById('orderKg');
   const cost = document.getElementById('orderCost');
   const price = document.getElementById('orderPricePerKg');
+  const spec = document.getElementById('orderSpecification');
   if (kg) kg.value = '';
   if (cost) cost.value = '';
   if (price) price.value = '';
+  if (spec) spec.value = '';
   renderOrderConditions('');
   // Поля заказа матриц сбрасываются вместе с заказом.
   const ciphers = document.getElementById('matrixCiphers');
@@ -1398,13 +1402,15 @@ function saveHistory(e) {
     const conditionEl = document.getElementById('orderCondition');
     const kgRaw = document.getElementById('orderKg').value;
     const costRaw = document.getElementById('orderCost').value;
+    const specEl = document.getElementById('orderSpecification');
 
     const kg = kgRaw === '' ? null : Number(kgRaw);
     const cost = costRaw === '' ? null : Number(costRaw);
     const condition = conditionEl ? conditionEl.value.trim() : '';
+    const specification = specEl ? specEl.value.trim() : '';
     const avgPrice = orderPricePerKg(kg, cost);
 
-    orderData = { kg, condition, avgPrice, cost };
+    orderData = { kg, condition, avgPrice, cost, specification };
 
     const parts = [
       'Кол-во кг — ' + (kg === null ? '—' : fmtKg(kg)),
@@ -1412,6 +1418,7 @@ function saveHistory(e) {
       'Общая стоимость — ' + (cost === null ? '—' : fmtMoney(cost)),
       'Стоимость за кг — ' + (avgPrice === null ? '—' : fmtMoney(avgPrice))
     ];
+    if (specification) parts.push('СП — ' + specification);
     const autoComment = type + ': ' + parts.join(', ');
     comment = comment || autoComment;
   }
@@ -1509,10 +1516,13 @@ function saveHistory(e) {
       condition: orderData.condition,
       avgPrice: orderData.avgPrice,
       cost: orderData.cost,
+      specification: orderData.specification || '',
       date: new Date().toISOString(),
       createdBy: currentUser ? currentUser.id : null,
       comment: comment
     });
+    // Номер СП мог появиться — сразу подтягиваем готовность по нему.
+    if (typeof refreshReadinessForVisibleOrders === 'function') refreshReadinessForVisibleOrders();
   }
 
   closeModal('historyModal');

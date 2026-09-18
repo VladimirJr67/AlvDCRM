@@ -11,7 +11,7 @@ const STARTABLE_SECTIONS = [
   'orders', 'clients', 'tasks', 'reminders', 'news', 'contacts',
   'contacts-internal', 'contacts-mobile', 'notifications', 'chat', 'transfers', 'tracking',
   'manager-tools', 'admin-analysis', 'admin-users', 'admin-task-columns',
-  'admin-interaction-types', 'admin-integrations'
+  'admin-readiness', 'admin-interaction-types', 'admin-integrations'
 ];
 let menuHandlerAttached = false;
 let clientsTopHeight = null;
@@ -96,6 +96,7 @@ function buildSidebar() {
       { section: 'admin-users', label: 'Пользователи' },
       // Назначение задач живёт в главном меню «Задачи», в админке его нет.
       { section: 'admin-task-columns', label: 'Столбцы задач' },
+      { section: 'admin-readiness', label: 'Готовность' },
       { section: 'admin-interaction-types', label: 'Типы взаимодействий' },
       { section: 'admin-integrations', label: 'Интеграции' }
     ] });
@@ -445,6 +446,13 @@ function injectModals() {
                 <div class="form-row">
                   <div class="form-group"><label>Кол-во кг</label><input type="number" id="orderKg" min="0" step="0.01" oninput="recalcOrderCost()"></div>
                   <div class="form-group"><label>Состояние поставки</label><select id="orderCondition"></select></div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label>Номер СП</label>
+                    <input type="text" id="orderSpecification" placeholder="Например, СП43191" autocomplete="off">
+                    <div class="field-hint">По номеру СП заказ сопоставляется с утренней готовностью.</div>
+                  </div>
                 </div>
                 <div class="form-row">
                   <div class="form-group"><label>Общая стоимость заказа</label><input type="number" id="orderCost" min="0" step="0.01" oninput="recalcOrderCost()"></div>
@@ -832,6 +840,16 @@ function injectModals() {
       </div>
     </div>
 
+    <div class="modal-overlay" id="readinessModal" onclick="if(event.target===this)closeModal('readinessModal')">
+      <div class="modal" style="width:960px;max-width:96vw;">
+        <div class="modal-head">
+          <h2 id="readinessCardTitle">Готовность по СП</h2>
+          <button type="button" class="modal-close-icon" onclick="closeModal('readinessModal')" title="Закрыть" aria-label="Закрыть">✕</button>
+        </div>
+        <div id="readinessCardBody"></div>
+      </div>
+    </div>
+
     <div class="modal-overlay" id="minPricesModal" onclick="if(event.target===this)closeModal('minPricesModal')">
       <div class="modal" style="width:480px;max-width:94vw;">
         <div class="modal-head">
@@ -940,6 +958,12 @@ function renderSection(section) {
     renderTransfers();
   } else if (section === 'tracking') {
     renderTracking();
+  } else if (section === 'admin-readiness') {
+    if (!isAdmin()) {
+      main.innerHTML = `<div class="placeholder"><h2>Доступ запрещён</h2><p>Загружать готовность может только администратор</p></div>`;
+      return;
+    }
+    renderAdminReadiness();
   } else if (section === 'manager-tools') {
     renderManagerTools();
   } else if (section.startsWith('admin')) {

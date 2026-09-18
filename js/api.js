@@ -134,7 +134,14 @@ function connectSse() {
   try {
     sseSource = new EventSource('/api/events');
     let lastRefresh = 0;
-    sseSource.onmessage = () => {
+    sseSource.onmessage = (event) => {
+      const kind = event && event.data ? String(event.data).trim() : 'changed';
+      // Срез готовности сервер обновляет отдельно от базы: перечитываем его
+      // и перерисовываем заказы, не дёргая полный снапшот базы.
+      if (kind === 'readiness') {
+        if (typeof onReadinessUpdated === 'function') onReadinessUpdated();
+        return;
+      }
       const now = Date.now();
       if (now - lastRefresh < 500) return; // защита от лавины событий
       lastRefresh = now;

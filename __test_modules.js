@@ -59,7 +59,9 @@ const needed = ['renderTasks', 'renderTaskCalendarHtml', 'taskCalendarBandsWithC
   'shiftTaskCalendar', 'setTaskCalendarMode', 'renderTracking', 'startTrackingUser', 'stopTrackingUser',
   'userTaskProgress', 'trackersForUser', 'toggleLinkWorkedOff', 'taskCanBeClosed', 'setTaskStatus',
   'animateBoardScroll', 'scrollTaskBoard', 'showReminderPopup', 'unlinkReminderFromClient',
-  'renderChat', 'renderTransfers', 'renderOrders', 'renderMatricesTab', 'applyTheme', 'showNativeNotification'];
+  'renderChat', 'renderTransfers', 'renderOrders', 'renderMatricesTab', 'applyTheme', 'showNativeNotification',
+  'readinessForOrder', 'orderReadinessCellHtml', 'orderSpecificationCellHtml', 'openReadinessCard',
+  'refreshReadinessForVisibleOrders', 'normalizeSpecificationKey', 'renderAdminReadiness', 'uploadReadinessFile'];
 const missing = needed.filter(f => typeof context[f] !== 'function');
 console.log('ключевые функции: ' + (missing.length ? 'НЕТ — ' + missing.join(', ') : 'все на месте (' + needed.length + ')'));
 process.exitCode = (errors || missing.length) ? 1 : 0;

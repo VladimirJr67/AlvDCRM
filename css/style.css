@@ -1068,3 +1068,46 @@ body.theme-dark .task-link-block.done { background: #16281f; border-color: #2f5a
 body.theme-dark .task-link-check { color: #a9b8f0; }
 body.theme-dark .task-link-block.done .task-link-check { color: #86d9a8; }
 body.theme-dark .tracking-add select { background: var(--surface-3); color: var(--text); border-color: var(--border-strong); }
+
+/* ============================================================
+   Готовность по спецификациям (интеграция с 1С)
+   ============================================================ */
+.readiness-snapshot { font-size: 11px; color: #6b7280; margin: -8px 0 14px; }
+.readiness-cell {
+  display: flex; flex-direction: column; gap: 3px; min-width: 160px;
+  background: none; border: none; padding: 0; cursor: pointer; text-align: left; font: inherit;
+}
+.readiness-cell:hover strong { color: #1d4ed8; }
+.readiness-top { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.readiness-bar { display: inline-block; width: 64px; height: 6px; border-radius: 4px; background: #eef1f5; overflow: hidden; }
+.readiness-bar i { display: block; height: 100%; }
+.readiness-sub { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.readiness-date { font-size: 10px; color: #9ca3af; }
+.readiness-stale { font-size: 10px; color: #b45309; }
+
+.readiness-card-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 10px; }
+.readiness-card-spec { font-size: 18px; font-weight: 600; color: #1a3a5c; }
+.readiness-card-client { font-size: 12px; color: #6b7280; }
+.readiness-meta { font-size: 12px; color: #6b7280; margin-bottom: 4px; }
+.readiness-asof { color: #9ca3af; margin-bottom: 12px; }
+.readiness-totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.readiness-total { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px 12px; }
+.readiness-total span { display: block; font-size: 11px; color: #6b7280; }
+.readiness-total strong { font-size: 15px; color: #1a3a5c; }
+
+.readiness-report { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px 14px; }
+.readiness-report-row { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; padding: 4px 0; border-bottom: 1px solid #f0f0f0; }
+.readiness-report-row:last-child { border-bottom: none; }
+.readiness-report-row span { color: #6b7280; }
+
+body.theme-dark .readiness-report,
+body.theme-dark .readiness-total { background: var(--surface); border-color: var(--border); }
+body.theme-dark .readiness-report-row { border-bottom-color: var(--border); }
+body.theme-dark .readiness-report-row span,
+body.theme-dark .readiness-snapshot,
+body.theme-dark .readiness-card-client,
+body.theme-dark .readiness-meta,
+body.theme-dark .readiness-date { color: var(--text-dim); }
+body.theme-dark .readiness-card-spec,
+body.theme-dark .readiness-total strong { color: var(--text); }
+body.theme-dark .readiness-bar { background: #232c39; }

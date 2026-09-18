@@ -24,6 +24,14 @@ const TMP_DB_PATH = path.join(ROOT, 'db.json.tmp');
 const SESSIONS_PATH = path.join(ROOT, 'sessions.json');
 const SESSIONS_TMP_PATH = path.join(ROOT, 'sessions.json.tmp');
 
+// Срез готовности по спецификациям (интеграция с выгрузкой 1С). Данные общие
+// для всех менеджеров и обновляются целиком при каждой загрузке, поэтому живут
+// отдельным файлом: в db.json они бы раздували каждый снапшот из браузера.
+const READINESS_PATH = path.join(ROOT, 'readiness.json');
+const READINESS_TMP_PATH = path.join(ROOT, 'readiness.json.tmp');
+const READINESS_SCHEMA_VERSION = 1;
+const READINESS_BODY_LIMIT = 64 * 1024 * 1024;   // документ на 1100+ СП — до 64 МБ
+
 // ===== Локальная конфигурация интеграций =====
 // В этом файле хранятся API-ключи внешних сервисов. Он внесён в .gitignore
 // и никогда не отдаётся как статика. Переменные окружения имеют приоритет
@@ -34,7 +42,8 @@ const CONFIG_TMP_PATH = path.join(ROOT, 'config.local.json.tmp');
 // Файлы, которые сервер не отдаёт клиенту ни при каких условиях.
 const NEVER_SERVE = new Set([
   'config.local.json', 'config.local.json.tmp', 'db.json.tmp',
-  'sessions.json', 'sessions.json.tmp'
+  'sessions.json', 'sessions.json.tmp',
+  'readiness.json', 'readiness.json.tmp'
 ]);
 
 const DADATA_URL = 'https://suggestions.dadata.ru/suggestions/api/4_1/rs';
@@ -482,6 +491,13 @@ function normalizeDb(db) {
     if (typeof t.linkUrl !== 'string') t.linkUrl = '';
   });
 
+  // --- Заказы: номер спецификации (СП) для сопоставления с готовностью ---
+  d.orders.forEach(o => {
+    if (!o || typeof o !== 'object') return;
+    if (typeof o.specification !== 'string') o.specification = '';
+    o.specificationKey = normalizeSpecificationKey(o.specification);
+  });
+
   // --- Уведомления: где показывать и со звуком ---
   d.notifications.forEach(n => {
     if (!n || typeof n !== 'object') return;
@@ -583,12 +599,271 @@ function saveDb(db) {
 // ===== Серверные события (SSE): мгновенная синхронизация клиентов =====
 // При каждом сохранении БД всем подключённым браузерам отправляется сигнал,
 // по которому они обновляют данные без ручной перезагрузки страницы.
+// ===== Интеграция «Готовность»: срез по спецификациям =====
+// Администратор каждое утро загружает через CRM JSON-документ из инструмента
+// «Готовность» (формат — Спецификация_формата_для_CRM.md, схема v1). Документ
+// заменяет предыдущий срез целиком и сопоставляется с размещёнными заказами по
+// specificationKey: заказы не создаются, им только дописывается блок готовности.
+
+// Ключ сопоставления: тот же номер без пробелов в верхнем регистре. Точки и
+// дефисы сохраняются — «СП2125.1» и «Б/С-2» это разные спецификации.
+function normalizeSpecificationKey(value) {
+  return String(value == null ? '' : value).replace(/\s+/g, '').toUpperCase();
+}
+
+const READINESS_STATUSES = {
+  shipped: { label: 'Отгружено', color: '#10b981' },
+  ready: { label: 'Готово к отгрузке', color: '#22c55e' },
+  in_progress: { label: 'В работе', color: '#f59e0b' },
+  not_started: { label: 'Не начато', color: '#9ca3af' },
+  no_plan: { label: 'Без плана', color: '#6b7280' }
+};
+
+function toNumber(value, fallback) {
+  const n = Number(value);
+  return isFinite(n) ? n : (fallback === undefined ? 0 : fallback);
+}
+
+// Сколько дней срезу (0 — данные на сегодня). Для пометки «данные устарели».
+function readinessAgeDays(asOfDate) {
+  const asOf = String(asOfDate || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(asOf)) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  const diff = Math.round((new Date(today + 'T00:00:00Z') - new Date(asOf + 'T00:00:00Z')) / 86400000);
+  return isFinite(diff) ? diff : null;
+}
+
+function emptyReadinessStore() {
+  return { schemaVersion: READINESS_SCHEMA_VERSION, uploadedAt: null, meta: null, orders: {} };
+}
+
+function loadReadiness() {
+  try {
+    const raw = readJsonFile(READINESS_PATH);
+    const store = {
+      schemaVersion: toNumber(raw.schemaVersion, READINESS_SCHEMA_VERSION),
+      uploadedAt: raw.uploadedAt || null,
+      meta: (raw.meta && typeof raw.meta === 'object') ? raw.meta : null,
+      orders: (raw.orders && typeof raw.orders === 'object' && !Array.isArray(raw.orders)) ? raw.orders : {}
+    };
+    return store;
+  } catch (err) {
+    return emptyReadinessStore();
+  }
+}
+
+function saveReadiness(store) {
+  fs.writeFileSync(READINESS_TMP_PATH, JSON.stringify(store), 'utf8');
+  fs.renameSync(READINESS_TMP_PATH, READINESS_PATH);
+}
+
+// Проверка документа до записи: версия схемы, наличие заказов и ключей.
+function validateReadinessDocument(doc) {
+  if (!doc || typeof doc !== 'object' || Array.isArray(doc)) {
+    return { ok: false, error: 'Файл не похож на документ готовности: ожидается JSON-объект' };
+  }
+  const version = toNumber(doc.schemaVersion, NaN);
+  if (version !== READINESS_SCHEMA_VERSION) {
+    return {
+      ok: false,
+      error: 'Версия формата ' + (isNaN(version) ? 'не указана' : version) +
+        ', CRM понимает ' + READINESS_SCHEMA_VERSION + '. Обновите инструмент «Готовность».'
+    };
+  }
+  if (!Array.isArray(doc.orders)) {
+    return { ok: false, error: 'В документе нет массива orders' };
+  }
+  if (!doc.orders.length) {
+    return { ok: false, error: 'В документе нет ни одного заказа' };
+  }
+  const withoutKey = doc.orders.filter(o => !normalizeSpecificationKey(o && (o.specificationKey || o.specification))).length;
+  if (withoutKey) {
+    return { ok: false, error: 'У ' + withoutKey + ' записей нет номера спецификации — сопоставить нельзя' };
+  }
+  return { ok: true };
+}
+
+// Документ → компактное хранилище: { КЛЮЧ: заказ } + метаданные.
+// Заодно пересчитываем итоги и сверяем их с заявленными в файле: расхождение
+// означает, что выгрузка побилась, и об этом стоит предупредить администратора.
+function buildReadinessStore(doc) {
+  const orders = {};
+  let duplicates = 0;
+  let positions = 0;
+  let planQty = 0, stockQty = 0, shippedQty = 0, planWeight = 0, stockWeight = 0;
+
+  doc.orders.forEach(raw => {
+    const key = normalizeSpecificationKey(raw.specificationKey || raw.specification);
+    if (!key) return;
+    if (orders[key]) { duplicates++; return; }
+
+    const list = Array.isArray(raw.positions) ? raw.positions : [];
+    const record = {
+      specification: raw.specification || key,
+      specificationKey: key,
+      client: raw.client || '',
+      orderDate: raw.orderDate || null,
+      planReadyDate: raw.planReadyDate || null,
+      workDays: raw.workDays != null ? toNumber(raw.workDays, null) : null,
+      planQty: toNumber(raw.planQty),
+      stockQty: toNumber(raw.stockQty),
+      shippedQty: toNumber(raw.shippedQty),
+      notReadyQty: toNumber(raw.notReadyQty),
+      planWeight: toNumber(raw.planWeight),
+      stockWeight: toNumber(raw.stockWeight),
+      shippedWeight: toNumber(raw.shippedWeight),
+      readiness: raw.readiness == null ? null : toNumber(raw.readiness, null),
+      status: raw.status || '',
+      statusCode: READINESS_STATUSES[raw.statusCode] ? raw.statusCode : 'no_plan',
+      overdueDays: toNumber(raw.overdueDays),
+      positionCount: toNumber(raw.positionCount, list.length),
+      positions: list.map(p => ({
+        cipher: p.cipher || '',
+        name: p.name || '',
+        length: p.length == null ? '' : String(p.length),
+        coating: p.coating || '',
+        planQty: toNumber(p.planQty),
+        stockQty: toNumber(p.stockQty),
+        shippedQty: toNumber(p.shippedQty),
+        notReadyQty: toNumber(p.notReadyQty),
+        planWeight: toNumber(p.planWeight),
+        stockWeight: toNumber(p.stockWeight),
+        readiness: p.readiness == null ? null : toNumber(p.readiness, null),
+        status: p.status || '',
+        statusCode: READINESS_STATUSES[p.statusCode] ? p.statusCode : 'no_plan'
+      }))
+    };
+
+    orders[key] = record;
+    positions += record.positions.length;
+    planQty += record.planQty;
+    stockQty += record.stockQty;
+    shippedQty += record.shippedQty;
+    planWeight += record.planWeight;
+    stockWeight += record.stockWeight;
+  });
+
+  const computed = {
+    orders: Object.keys(orders).length,
+    positions: positions,
+    planQty: Math.round(planQty * 1000) / 1000,
+    stockQty: Math.round(stockQty * 1000) / 1000,
+    shippedQty: Math.round(shippedQty * 1000) / 1000,
+    planWeight: Math.round(planWeight * 1000) / 1000,
+    stockWeight: Math.round(stockWeight * 1000) / 1000,
+    readiness: planQty > 0 ? Math.round((stockQty + shippedQty) / planQty * 1000) / 10 : null
+  };
+
+  const declared = (doc.totals && typeof doc.totals === 'object') ? doc.totals : null;
+  const warnings = [];
+  if (declared) {
+    ['orders', 'positions', 'planQty', 'stockQty', 'shippedQty'].forEach(field => {
+      if (declared[field] == null) return;
+      const diff = Math.abs(toNumber(declared[field]) - computed[field]);
+      if (diff > 0.5) {
+        warnings.push('Итог «' + field + '» в файле ' + toNumber(declared[field]) +
+          ', а по заказам ' + computed[field]);
+      }
+    });
+  }
+  if (duplicates) warnings.push('Повторяющихся номеров СП в файле: ' + duplicates + ' (оставлена первая запись)');
+
+  const meta = {
+    schemaVersion: READINESS_SCHEMA_VERSION,
+    asOfDate: String(doc.asOfDate || '').slice(0, 10) || null,
+    generatedAt: doc.generatedAt || null,
+    sourceFile: doc.sourceFile || null,
+    sheet: doc.sheet || null,
+    declaredTotals: declared,
+    totals: computed,
+    warnings: warnings
+  };
+
+  return { store: { schemaVersion: READINESS_SCHEMA_VERSION, uploadedAt: new Date().toISOString(), meta: meta, orders: orders }, warnings: warnings };
+}
+
+// Сопоставление среза с заказами CRM: что нашли, чего нет в базе, где нет данных.
+function readinessReport(store, db) {
+  const orders = asArray(db && db.orders);
+  const snapshotKeys = Object.keys(store.orders || {});
+
+  const missing = snapshotKeys.filter(key =>
+    !orders.some(o => normalizeSpecificationKey(o.specificationKey || o.specification) === key));
+
+  const withoutSpec = [];
+  const withoutData = [];
+  orders.forEach(o => {
+    const key = normalizeSpecificationKey(o.specificationKey || o.specification);
+    if (!key) { withoutSpec.push({ id: o.id, clientName: o.clientName || '' }); return; }
+    if (!store.orders[key]) withoutData.push({ id: o.id, specification: o.specification || key, clientName: o.clientName || '' });
+  });
+
+  return {
+    snapshotOrders: snapshotKeys.length,
+    matched: snapshotKeys.length - missing.length,
+    missingCount: missing.length,
+    missing: missing.slice(0, 300),
+    ordersWithoutSpecCount: withoutSpec.length,
+    ordersWithoutSpec: withoutSpec.slice(0, 300),
+    ordersWithoutDataCount: withoutData.length,
+    ordersWithoutData: withoutData.slice(0, 300)
+  };
+}
+
+// Публичное состояние среза — то, что нужно менеджерам для подписи «данные на …».
+function readinessStatus(store) {
+  const meta = store.meta || null;
+  const count = Object.keys(store.orders || {}).length;
+  return {
+    available: count > 0,
+    asOfDate: meta ? meta.asOfDate : null,
+    uploadedAt: store.uploadedAt || null,
+    generatedAt: meta ? meta.generatedAt : null,
+    sourceFile: meta ? meta.sourceFile : null,
+    totals: meta ? meta.totals : null,
+    warnings: meta ? (meta.warnings || []) : [],
+    count: count,
+    ageDays: meta ? readinessAgeDays(meta.asOfDate) : null
+  };
+}
+
+// Кто загрузил — только администратор. API базы у нас открыт, но операцию
+// с общим срезом закрываем ролью: иначе любой в сети мог бы подменить данные.
+function requireAdminSession(req) {
+  const session = resolveSession(req);
+  if (!session) return { ok: false, code: 401, error: 'Загрузка доступна из CRM под учётной записью администратора' };
+  const db = loadDb();
+  const user = asArray(db.users).find(u => u.id === session.userId);
+  if (!user) return { ok: false, code: 401, error: 'Сессия не найдена — войдите заново' };
+  if (normalizeRole(user.role) !== ROLES.ADMIN) {
+    return { ok: false, code: 403, error: 'Загружать готовность может только администратор' };
+  }
+  return { ok: true, user: user };
+}
+
+// Тело запроса до 64 МБ — документ готовности заметно больше обычных запросов.
+function readLargeJsonBody(req, cb) {
+  let body = '';
+  req.on('data', chunk => {
+    body += chunk;
+    if (body.length > READINESS_BODY_LIMIT) req.destroy();
+  });
+  req.on('end', () => {
+    try {
+      cb(null, JSON.parse(body || '{}'));
+    } catch (err) {
+      cb(err);
+    }
+  });
+}
+
 const sseClients = new Set();
 
-function broadcastSse() {
-  const payload = 'data: changed\n\n';
+// payload: 'changed' — изменилась база, 'readiness' — обновился срез готовности.
+function broadcastSse(payload) {
+  const data = 'data: ' + (payload || 'changed') + '\n\n';
   sseClients.forEach(res => {
-    try { res.write(payload); } catch (e) { sseClients.delete(res); }
+    try { res.write(data); } catch (e) { sseClients.delete(res); }
   });
 }
 
@@ -993,6 +1268,99 @@ const server = http.createServer((req, res) => {
   if (pathname === '/api/db/hash') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ hash: dbFingerprint() }));
+    return;
+  }
+
+  // ---- Готовность: срез по спецификациям (загрузка админом, чтение всем) ----
+  if (pathname === '/api/readiness') {
+    if (req.method === 'GET') {
+      sendJson(res, 200, { ok: true, status: readinessStatus(loadReadiness()) });
+      return;
+    }
+
+    if (req.method === 'POST') {
+      const access = requireAdminSession(req);
+      if (!access.ok) {
+        sendJson(res, access.code, { ok: false, error: access.error });
+        return;
+      }
+      readLargeJsonBody(req, (err, doc) => {
+        if (err) {
+          sendJson(res, 400, { ok: false, error: 'Не удалось прочитать JSON: ' + err.message });
+          return;
+        }
+        const valid = validateReadinessDocument(doc);
+        if (!valid.ok) {
+          sendJson(res, 400, { ok: false, error: valid.error });
+          return;
+        }
+        const built = buildReadinessStore(doc);
+        try {
+          saveReadiness(built.store);
+        } catch (e) {
+          sendJson(res, 500, { ok: false, error: 'Не удалось сохранить срез: ' + e.message });
+          return;
+        }
+        const report = readinessReport(built.store, loadDb());
+        broadcastSse('readiness');   // менеджерам: срез обновился
+        sendJson(res, 200, {
+          ok: true,
+          status: readinessStatus(built.store),
+          report: report,
+          warnings: built.warnings
+        });
+      });
+      return;
+    }
+
+    if (req.method === 'DELETE') {
+      const access = requireAdminSession(req);
+      if (!access.ok) {
+        sendJson(res, access.code, { ok: false, error: access.error });
+        return;
+      }
+      try {
+        saveReadiness(emptyReadinessStore());
+      } catch (e) {
+        sendJson(res, 500, { ok: false, error: 'Не удалось очистить срез: ' + e.message });
+        return;
+      }
+      broadcastSse('readiness');
+      sendJson(res, 200, { ok: true, status: readinessStatus(emptyReadinessStore()) });
+      return;
+    }
+
+    sendJson(res, 405, { ok: false, error: 'Method not allowed' });
+    return;
+  }
+
+  // Точечная выборка: браузер запрашивает только те СП, которые есть в его
+  // списке заказов, — весь срез на 1100+ заказов в него не гоняем.
+  if (pathname === '/api/readiness/lookup') {
+    if (req.method !== 'POST') {
+      sendJson(res, 405, { ok: false, error: 'Method not allowed' });
+      return;
+    }
+    readJsonBody(req, (err, body) => {
+      if (err) {
+        sendJson(res, 400, { ok: false, error: 'Некорректный JSON' });
+        return;
+      }
+      const store = loadReadiness();
+      const keys = asArray(body && body.keys).map(normalizeSpecificationKey).filter(Boolean);
+      const orders = {};
+      const missing = [];
+      keys.forEach(key => {
+        if (store.orders[key]) orders[key] = store.orders[key];
+        else missing.push(key);
+      });
+      sendJson(res, 200, {
+        ok: true,
+        status: readinessStatus(store),
+        orders: orders,
+        missing: missing
+      });
+    });
     return;
   }
 
