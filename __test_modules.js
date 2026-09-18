@@ -25,6 +25,7 @@ const sandbox = {
   requestAnimationFrame: () => 0, cancelAnimationFrame: () => {},
   performance: { now: () => 0 },
   Notification: FakeNotification,
+  TextDecoder, TextEncoder,
   localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
   document: {
     getElementById: el, querySelector: () => null, querySelectorAll: () => [],

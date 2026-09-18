@@ -1,16 +1,40 @@
 /* ============================================================
    js/readiness.js — «Готовность» по спецификациям (СП).
 
-   Администратор каждое утро загружает в CRM JSON-документ из инструмента
-   «Готовность» (формат — Спецификация_формата_для_CRM.md, схема v1). Сервер
-   хранит срез целиком и отдаёт его по запросу; браузер забирает только те СП,
-   которые есть в его списке заказов, и рисует рядом с заказом колонку
-   готовности, а по клику — карточку с позициями.
+   Администратор каждое утро загружает в CRM выгрузку 1С: прямо .xlsx, либо
+   готовый JSON из инструмента «Готовность» (формат —
+   Спецификация_формата_для_CRM.md, схема v1). Движок разбора xlsx — копия
+   src/engine.js из инструмента (js/lib/gotovnost-engine.js), поэтому отдельный
+   шаг конвертации не нужен. Сервер хранит срез целиком и отдаёт его по запросу;
+   браузер забирает только те СП, которые есть в его списке заказов, и рисует
+   рядом с заказом колонку готовности, а по клику — карточку с позициями.
 
    Сопоставление — по specificationKey заказа (номер СП без пробелов в верхнем
    регистре). Новые заказы из готовности не создаются: срез только дополняет
    уже размещённые заказы, поэтому права менеджеров остаются прежними.
    ============================================================ */
+
+// Превращает байты xlsx-выгрузки 1С в документ готовности (та же схема, что
+// отдаёт инструмент). Возвращает { ok, doc, sheet } либо { ok:false, error }.
+function readinessDocumentFromXlsx(buffer, fileName) {
+  if (typeof ENGINE === 'undefined') {
+    return { ok: false, error: 'Движок разбора не загружен (нет js/lib/gotovnost-engine.js)' };
+  }
+  try {
+    const wb = ENGINE.readXlsx(new Uint8Array(buffer));
+    const sheets = (wb && wb.sheets) || [];
+    if (!sheets.length) return { ok: false, error: 'В файле не найдены листы Excel' };
+    let sheetIdx = sheets.findIndex(s => s && /TDSheet/i.test(s.name || ''));
+    if (sheetIdx < 0) sheetIdx = 0;
+
+    const report = ENGINE.analyzeSheet(wb, sheetIdx, new Date());
+    const result = ENGINE.buildResult(report, {});
+    const doc = JSON.parse(ENGINE.toJson(result, { sourceFile: fileName }));
+    return { ok: true, doc: doc, sheet: sheets[sheetIdx] ? sheets[sheetIdx].name : '' };
+  } catch (e) {
+    return { ok: false, error: 'Не удалось разобрать xlsx: ' + (e && e.message ? e.message : e) };
+  }
+}
 
 let readinessStatus = null;      // состояние среза: дата, файл, счётчики
 let readinessByKey = {};         // { КЛЮЧ: заказ из среза }

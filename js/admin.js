@@ -511,9 +511,9 @@ function renderAdminReadiness() {
       <h1 style="font-size:22px;font-weight:600;color:#1a3a5c;margin-bottom:16px;">Готовность по спецификациям</h1>
 
       <p style="font-size:12px;color:#9ca3af;margin-bottom:18px;">
-        Утренний файл из 1С превращается инструментом «Готовность» в JSON — загрузите его здесь,
-        и все менеджеры сразу увидят готовность по своим СП в разделе «Заказы». Каждая загрузка
-        заменяет предыдущий срез целиком; заказы в CRM не создаются и не меняются — им только
+        Утренний файл из 1С загружается прямо сюда — CRM сама разберёт его и все менеджеры
+        сразу увидят готовность по своим СП в разделе «Заказы». Каждая загрузка заменяет
+        предыдущий срез целиком; заказы в CRM при этом не создаются и не меняются — им только
         дописывается блок готовности по номеру СП.
       </p>
 
@@ -543,11 +543,11 @@ function renderAdminReadiness() {
       <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:16px;margin-bottom:20px;">
         <div class="form-row">
           <div class="form-group">
-            <label>Файл готовности (JSON из инструмента)</label>
-            <input type="file" id="readinessFile" accept=".json,application/json">
+            <label>Файл готовности из 1С (.xlsx) или готовый JSON</label>
+            <input type="file" id="readinessFile" accept=".xlsx,.xls,.json,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
             <div class="field-hint">
-              Формат — Спецификация_формата_для_CRM.md, схема v1. Файл разбирает сервер,
-              браузер ничего не считает: он только отправляет документ и показывает отчёт.
+              Можно выбрать прямо утренний .xlsx — CRM разберёт его сама (движок инструмента
+              «Готовность»). JSON принимается на случай, если файл уже подготовлен заранее.
             </div>
           </div>
         </div>
@@ -594,47 +594,79 @@ function renderAdminReadiness() {
   }
 }
 
-// Загрузка файла: читаем выбранный JSON и отправляем его на сервер.
+// Загрузка файла: принимаем и готовый JSON, и сам .xlsx/.xls из 1С.
+// xlsx разбирается прямо в браузере движком инструмента «Готовность»
+// (js/lib/gotovnost-engine.js), затем документ отправляется на сервер.
+async function uploadReadinessDocument(doc) {
+  const res = await fetch('/api/readiness', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(doc)
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data || !data.ok) {
+    readinessUploadError = (data && data.error) || ('Сервер отклонил файл: HTTP ' + res.status);
+    renderAdminReadiness();
+    return;
+  }
+  readinessStatus = data.status || null;
+  readinessUploadReport = data.report || null;
+  readinessLookupKey = '';
+  readinessByKey = {};
+  renderAdminReadiness();
+}
+
 function uploadReadinessFile() {
   const input = document.getElementById('readinessFile');
   const file = input && input.files && input.files[0];
   readinessUploadError = '';
   if (!file) {
-    readinessUploadError = 'Выберите файл готовности (JSON)';
+    readinessUploadError = 'Выберите файл готовности (.xlsx или .json)';
+    renderAdminReadiness();
+    return;
+  }
+
+  const name = String(file.name || '').toLowerCase();
+  const isExcel = /\.(xlsx|xls)$/.test(name);
+  const isJson = /\.json$/.test(name);
+
+  if (!isExcel && !isJson) {
+    readinessUploadError = 'Поддерживаются .xlsx, .xls и .json. Выбран: ' + (file.name || 'файл');
     renderAdminReadiness();
     return;
   }
 
   const reader = new FileReader();
-  reader.onload = async () => {
-    try {
-      const doc = JSON.parse(String(reader.result));
-      const res = await fetch('/api/readiness', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(doc)
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok || !data || !data.ok) {
-        readinessUploadError = (data && data.error) || ('Сервер отклонил файл: HTTP ' + res.status);
-        renderAdminReadiness();
-        return;
-      }
-      readinessStatus = data.status || null;
-      readinessUploadReport = data.report || null;
-      readinessLookupKey = '';
-      readinessByKey = {};
-      renderAdminReadiness();
-    } catch (e) {
-      readinessUploadError = 'Не удалось разобрать файл: ' + e.message;
-      renderAdminReadiness();
-    }
-  };
   reader.onerror = () => {
     readinessUploadError = 'Не удалось прочитать файл';
     renderAdminReadiness();
   };
-  reader.readAsText(file);
+
+  if (isJson) {
+    reader.onload = () => {
+      try {
+        uploadReadinessDocument(JSON.parse(String(reader.result)));
+      } catch (e) {
+        readinessUploadError = 'Не удалось разобрать JSON: ' + e.message;
+        renderAdminReadiness();
+      }
+    };
+    reader.readAsText(file);
+    return;
+  }
+
+  // xlsx: разбор движком инструмента, затем обычная отправка документа.
+  reader.onload = () => {
+    const parsed = readinessDocumentFromXlsx(reader.result, file.name);
+    if (!parsed.ok) {
+      readinessUploadError = parsed.error;
+      renderAdminReadiness();
+      return;
+    }
+    readinessUploadError = '';
+    uploadReadinessDocument(parsed.doc);
+  };
+  reader.readAsArrayBuffer(file);
 }
 
 // Очистка среза: заказы остаются, готовность пропадает до следующей загрузки.
