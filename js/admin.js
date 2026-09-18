@@ -497,6 +497,7 @@ function deleteInteractionTypeFromAdmin(index) {
 
 let readinessUploadReport = null;   // отчёт последней загрузки
 let readinessUploadError = '';
+let readinessStatusFetching = false; // защита от повторных запросов статуса
 
 function renderAdminReadiness() {
   const main = document.getElementById('mainContent');
@@ -586,10 +587,16 @@ function renderAdminReadiness() {
     </div>
   `;
 
-  // Статус среза мог измениться на сервере — подтягиваем и перерисовываем один раз.
-  if (!readinessUploadReport) {
-    fetchReadinessStatus().then(() => {
-      if (currentSection === 'admin-readiness' && !readinessUploadReport) renderAdminReadiness();
+  // Статус среза подтягиваем один раз при открытии. Перерисовываем только если
+  // данные действительно изменились — иначе раздел перерисовывался бы в цикле и
+  // инпут выбора файла постоянно заменялся, из-за чего клик по нему «не работал».
+  const shownKey = JSON.stringify(readinessStatus || {});
+  if (!readinessUploadReport && !readinessStatusFetching) {
+    readinessStatusFetching = true;
+    fetchReadinessStatus().then(st => {
+      readinessStatusFetching = false;
+      if (currentSection !== 'admin-readiness') return;
+      if (JSON.stringify(st || {}) !== shownKey) renderAdminReadiness();
     });
   }
 }
