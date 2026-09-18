@@ -54,9 +54,42 @@ body { background: #f5f6f8; color: #222; font-size: 13px; overflow: hidden; }
 .submenu-item { padding: 8px 0; cursor: pointer; color: #6b7280; }
 .submenu-item:hover { color: #1a3a5c; }
 .submenu-item.active { color: #1a3a5c; font-weight: 500; }
-.user-info { padding: 15px 20px; border-top: 1px solid #e5e7eb; display: flex; align-items: center; gap: 10px; }
-.user-avatar { width: 32px; height: 32px; border-radius: 50%; background: #1a3a5c; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 500; }
-.logout-btn { margin-left: auto; background: none; border: none; color: #9ca3af; cursor: pointer; font-size: 12px; }
+.user-info {
+  padding: 12px 20px;
+  border-top: 1px solid #e5e7eb;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 54px;      /* нижний блок не схлопывается */
+  flex-shrink: 0;        /* не уезжает при длинном имени */
+}
+.user-avatar {
+  width: 32px; height: 32px; border-radius: 50%;
+  background: #1a3a5c; color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 500;
+  flex-shrink: 0;        /* аватар не сжимается */
+}
+.user-info-name {
+  flex: 1 1 auto;
+  min-width: 0;          /* без этого многоточие во flex не срабатывает */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;   /* длинное ФИО — в одну строку с многоточием */
+  font-size: 13px;
+  color: #1a3a5c;
+  font-weight: 500;
+}
+.logout-btn {
+  flex-shrink: 0;        /* кнопки не сжимаются */
+  white-space: nowrap;
+  background: none;
+  border: none;
+  color: #9ca3af;
+  cursor: pointer;
+  font-size: 12px;
+}
+.logout-btn:first-of-type { margin-left: auto; } /* «Профиль» и «Выйти» прижаты вправо */
 
 .main { flex: 1; overflow: hidden; display: flex; }
 #mainContent { min-width: 0; flex: 1; width: 100%; }
