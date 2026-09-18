@@ -200,6 +200,48 @@
       "color": "#84cc16",
       "order": 5,
       "locked": true
+    },
+    {
+      "id": "in_progress_1789763918665",
+      "name": "В работе",
+      "color": "#f59e0b",
+      "order": 6,
+      "locked": true
+    },
+    {
+      "id": "problem_1789763918665",
+      "name": "Проблема",
+      "color": "#ef4444",
+      "order": 7,
+      "locked": true
+    },
+    {
+      "id": "drawings_1789763918665",
+      "name": "Работа с чертежами",
+      "color": "#8b5cf6",
+      "order": 8,
+      "locked": true
+    },
+    {
+      "id": "invoiced_1789763918665",
+      "name": "Выставлен счет",
+      "color": "#10b981",
+      "order": 9,
+      "locked": true
+    },
+    {
+      "id": "invoice_approval_1789763918665",
+      "name": "Счет на согласование",
+      "color": "#06b6d4",
+      "order": 10,
+      "locked": true
+    },
+    {
+      "id": "order_placed_1789763918665",
+      "name": "Размещен заказ",
+      "color": "#84cc16",
+      "order": 11,
+      "locked": true
     }
   ],
   "taskColumnsPerManager": {},
@@ -245,7 +287,7 @@
       "id": 1,
       "userId": 1,
       "title": "???????????: ????????",
-      "message": "2323? � 09:00",
+      "message": "2323? · 09:00",
       "taskId": null,
       "read": false,
       "createdAt": "2026-09-15T19:26:21.479Z",
@@ -256,7 +298,7 @@
       "id": 2,
       "userId": 1,
       "title": "???????????: 1",
-      "message": "2 � 22:29",
+      "message": "2 · 22:29",
       "taskId": null,
       "read": false,
       "createdAt": "2026-09-16T19:29:13.460Z",
@@ -290,8 +332,8 @@
       "date": "2026-09-15T19:28:47.752Z",
       "createdBy": 1,
       "comment": "????? ?????",
-      "specification": "",
-      "specificationKey": ""
+      "specification": "СП43525",
+      "specificationKey": "СП43525"
     }
   ],
   "orgTypes": [

@@ -115,7 +115,7 @@ function queueServerSave() {
     if (key === serverKey) return; // на сервере уже актуальные данные
     fetch('/api/db', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
       body: key
     }).then(res => {
       if (res.ok) {

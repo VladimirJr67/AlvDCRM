@@ -95,17 +95,34 @@ function sendJson(res, code, obj) {
   res.end(JSON.stringify(obj));
 }
 
-function readJsonBody(req, cb) {
-  let body = '';
+// Чтение тела запроса как UTF-8 без потери многобайтовых символов.
+// Критично: собирать чанки в буфер и декодировать в конце, а не делать
+// «body += chunk». Последнее превращает каждый Buffer в строку по частям,
+// и буква, разрезанная границей пакета, превращается в U+FFFD (�) — так
+// в базе портились отдельные символы.
+function readUtf8Body(req, limitBytes, cb) {
+  const chunks = [];
+  let size = 0;
   req.on('data', chunk => {
-    body += chunk;
-    if (body.length > 1024 * 1024) req.destroy(); // лимит 1 МБ
+    size += chunk.length;
+    if (size > limitBytes) {
+      req.destroy();
+      return;
+    }
+    chunks.push(chunk);
   });
   req.on('end', () => {
+    cb(null, Buffer.concat(chunks).toString('utf8'));
+  });
+}
+
+function readJsonBody(req, cb) {
+  readUtf8Body(req, 1024 * 1024, (err, body) => {
+    if (err) return cb(err);
     try {
       cb(null, JSON.parse(body || '{}'));
-    } catch (err) {
-      cb(err);
+    } catch (parseErr) {
+      cb(parseErr);
     }
   });
 }
@@ -843,16 +860,12 @@ function requireAdminSession(req) {
 
 // Тело запроса до 64 МБ — документ готовности заметно больше обычных запросов.
 function readLargeJsonBody(req, cb) {
-  let body = '';
-  req.on('data', chunk => {
-    body += chunk;
-    if (body.length > READINESS_BODY_LIMIT) req.destroy();
-  });
-  req.on('end', () => {
+  readUtf8Body(req, READINESS_BODY_LIMIT, (err, body) => {
+    if (err) return cb(err);
     try {
       cb(null, JSON.parse(body || '{}'));
-    } catch (err) {
-      cb(err);
+    } catch (parseErr) {
+      cb(parseErr);
     }
   });
 }
@@ -1240,21 +1253,21 @@ const server = http.createServer((req, res) => {
       return;
     }
     if (req.method === 'POST') {
-      let body = '';
-      req.on('data', chunk => {
-        body += chunk;
-        if (body.length > 100 * 1024 * 1024) req.destroy(); // лимит 100 МБ
-      });
-      req.on('end', () => {
+      readUtf8Body(req, 100 * 1024 * 1024, (err, body) => {
+        if (err) {
+          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ ok: false, error: 'Слишком большой запрос' }));
+          return;
+        }
         try {
           const db = JSON.parse(body);
           saveDb(db);
           broadcastSse(); // мгновенно уведомить остальные окна/пользователей
           res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
           res.end(JSON.stringify({ ok: true }));
-        } catch (err) {
+        } catch (parseErr) {
           res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-          res.end(JSON.stringify({ ok: false, error: err.message }));
+          res.end(JSON.stringify({ ok: false, error: parseErr.message }));
         }
       });
       return;
@@ -1513,6 +1526,20 @@ function runStartupMigration() {
   }
 
   const res = migrateDb(raw);
+
+  // Проверка на артефакты повреждённой кодировки. U+FFFD (�) появляется, если
+  // многобайтный символ когда-то декодировался по частям; исходный символ уже
+  // не восстановить, но мы обязаны хотя бы сообщить о нём при старте.
+  try {
+    const rawText = fs.readFileSync(DB_PATH, 'utf8');
+    const bad = (rawText.match(/\uFFFD/g) || []).length;
+    if (bad > 0) {
+      console.log('  ВНИМАНИЕ: в базе найдены повреждённые символы U+FFFD (�): ' + bad + ' шт.');
+      console.log('  Это след прежних сохранений. Автоматически не чинится — верните значения');
+      console.log('  из резервной копии (db.json.v*.bak) или исправьте вручную.');
+    }
+  } catch (e) { /* файл не читается — не критично */ }
+
   if (!res.changed) {
     console.log('  Схема базы: v' + res.stats.toVersion + ' — миграция не требуется');
     return res;

@@ -92,7 +92,10 @@ function snapshotChecks(doc) {
       return keys.size === p.length;
     })());
     check('имя исходного файла передано', doc.sourceFile === 'Пример.xlsx', 'получено: ' + doc.sourceFile);
-    check('дата среза берётся из имени файла', doc.asOfDate === '2026-09-18', 'получено: ' + doc.asOfDate);
+    // В имени макета нет даты, поэтому движок берёт локальное «сегодня».
+    const d = new Date();
+    const todayLocal = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    check('дата среза: из имени файла или сегодня', doc.asOfDate === todayLocal, 'получено: ' + doc.asOfDate);
   }
 
   // Неподходящий файл: ошибка объясняет причину, а не падает.
