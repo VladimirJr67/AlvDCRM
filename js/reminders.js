@@ -420,6 +420,15 @@ function saveReminder(e) {
   const clientIdVal = document.getElementById('reminderClientId').value;
   const clientId = (scope === 'client' && clientIdVal) ? parseInt(clientIdVal) : null;
 
+  // Напоминание по клиенту — только владелец или администратор.
+  if (clientId) {
+    const client = clients.find(c => c.id === clientId);
+    if (client && typeof canWriteToClient === 'function' && !canWriteToClient(client)) {
+      alert('Недостаточно прав для изменения этого клиента.');
+      return;
+    }
+  }
+
   if (scope === 'client' && !clientId) {
     alert('Выберите клиента или переключите тип на «Для себя».');
     return;

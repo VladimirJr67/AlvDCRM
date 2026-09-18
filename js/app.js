@@ -9,7 +9,7 @@ let pollingStarted = false;
 // Разделы, которые можно открыть ссылкой /?section=… (проверяются при старте).
 const STARTABLE_SECTIONS = [
   'orders', 'clients', 'tasks', 'reminders', 'news', 'contacts',
-  'contacts-internal', 'contacts-mobile', 'notifications', 'chat', 'transfers', 'tracking',
+  'contacts-internal', 'contacts-mobile', 'notifications', 'chat', 'tracking',
   'manager-tools', 'admin-analysis', 'admin-users', 'admin-task-columns',
   'admin-readiness', 'admin-interaction-types', 'admin-integrations'
 ];
@@ -84,8 +84,7 @@ function buildSidebar() {
   if (typeof canUseManagersChat === 'function' && canUseManagersChat()) {
     html += addItem('chat', 'Чат менеджеров', { badge: 'chatMenuBadge' });
   }
-  // Переносы клиентов: у менеджера — свои запросы, у администратора — все.
-  html += addItem('transfers', 'Переносы клиентов', { badge: 'transfersMenuBadge' });
+  // Перенос клиента теперь делается из карточки клиента, отдельного пункта нет.
   // Отслеживание задач — раздел руководителя и администратора.
   if (typeof isTaskTracker === 'function' && isTaskTracker()) {
     html += addItem('tracking', 'Отслеживание задач');
@@ -850,6 +849,39 @@ function injectModals() {
       </div>
     </div>
 
+    <div class="modal-overlay" id="transferRequestModal" onclick="if(event.target===this)closeModal('transferRequestModal')">
+      <div class="modal" style="width:480px;max-width:94vw;">
+        <div class="modal-head">
+          <h2>Запрос на перенос клиента</h2>
+          <button type="button" class="modal-close-icon" onclick="closeModal('transferRequestModal')" title="Закрыть" aria-label="Закрыть">✕</button>
+        </div>
+        <form onsubmit="sendTransferRequestFromModal(event)">
+          <input type="hidden" id="transferRequestClientId">
+          <div class="form-section">
+            <div class="form-row">
+              <div class="form-group">
+                <label>Кому передать клиента</label>
+                <select id="transferRequestManager"></select>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Комментарий (необязательно)</label>
+                <textarea id="transferRequestComment" rows="3"></textarea>
+              </div>
+            </div>
+            <div class="field-hint">
+              Клиент перейдёт к выбранному менеджеру только после того, как он подтвердит запрос.
+            </div>
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('transferRequestModal')">Отмена</button>
+            <button type="submit" class="btn">Отправить запрос</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <div class="modal-overlay" id="minPricesModal" onclick="if(event.target===this)closeModal('minPricesModal')">
       <div class="modal" style="width:480px;max-width:94vw;">
         <div class="modal-head">
@@ -954,8 +986,6 @@ function renderSection(section) {
     renderNews();
   } else if (section === 'chat') {
     renderChat();
-  } else if (section === 'transfers') {
-    renderTransfers();
   } else if (section === 'tracking') {
     renderTracking();
   } else if (section === 'admin-readiness') {

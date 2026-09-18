@@ -1616,6 +1616,17 @@ function saveTask(e) {
   const id = document.getElementById('taskId').value;
   const clientIdVal = document.getElementById('taskClientId').value;
   const contactIdVal = document.getElementById('taskContactSelect').value;
+
+  // Задачу, привязанную к клиенту, может сохранять только владелец или админ.
+  // Задача без клиента — личная, она остаётся доступной всем.
+  if (clientIdVal) {
+    const client = clients.find(c => c.id === parseInt(clientIdVal));
+    if (client && typeof canWriteToClient === 'function' && !canWriteToClient(client)) {
+      alert('Недостаточно прав для изменения этого клиента.');
+      return;
+    }
+  }
+
   const kindEl = document.getElementById('taskKind');
   const linkEl = document.getElementById('taskLinkUrl');
   const kind = (kindEl && kindEl.value === 'link') ? 'link' : 'regular';

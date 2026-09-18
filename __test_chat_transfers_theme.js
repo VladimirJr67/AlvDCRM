@@ -186,55 +186,75 @@ function asUser(login) {
     run('sendChatMessage("я".repeat(3000))').ok === false);
 
   /* ================= 2. Перенос клиента через запрос ================= */
-  asUser('manager');
-  res = run('createClientTransferRequest(1, 3, "Передаю клиента, уезжаю в отпуск")');
+  // Новые правила: менеджер/руководитель запрашивает перенос только по
+  // чужому клиенту; решение принимает адресат (toManagerId), после
+  // подтверждения клиент закрепляется за ним.
+
+  // Владелец не может запросить перенос собственного клиента.
+  asUser('manager'); // id 2 — владелец клиента 1
+  res = run('createClientTransferRequest(1, 3, "отдаю своего клиента")');
+  check('нельзя запросить перенос своего клиента', res.ok === false, res.error || '');
+
+  // Менеджер запрашивает перенос чужого клиента (клиент 2 владеет id 3) — адресат id 4.
+  res = run('createClientTransferRequest(2, 4, "Передаю клиента руководителю, уезжаю в отпуск")');
   const req = run('clientTransferRequests[0]');
   check('запрос на перенос создан', res.ok === true && !!req && req.status === 'pending');
   check('клиент остаётся у прежнего менеджера до решения',
-    run('clients[0].createdBy') === 2, 'владелец: ' + run('clients[0].createdBy'));
-  check('в запросе зафиксированы обе стороны', req.fromManagerId === 2 && req.toManagerId === 3);
+    run('clients[1].createdBy') === 3, 'владелец: ' + run('clients[1].createdBy'));
+  check('в запросе зафиксированы обе стороны', req.fromManagerId === 2 && req.toManagerId === 4);
   check('комментарий сохранён', /отпуск/.test(req.comment));
-  check('получатель уведомлён', run('notifications').some(n => n.userId === 3 && /перенос/i.test(n.title)));
+  check('адресат уведомлён', run('notifications').some(n => n.userId === 4 && /перенос/i.test(n.title)));
 
-  res = run('createClientTransferRequest(1, 3, "дубль")');
+  res = run('createClientTransferRequest(2, 4, "дубль")');
   check('повторный запрос по клиенту отклонён', res.ok === false, res.error || '');
-  res = run('createClientTransferRequest(2, 3, "чужой клиент")');
-  check('нельзя запросить чужого клиента', res.ok === false, res.error || '');
 
-  // Решение принимает тот, кому передают клиента
-  asUser('lead');
+  // Плашка в карточке клиента по активному запросу.
+  asUser('manager'); // автор запроса
+  const authorPlaque = run('pendingTransferHtml(clients[1])');
+  check('автор видит «Отменить» в плашке',
+    /Отменить/.test(authorPlaque) && /cancelTransferFromCard\(1\)/.test(authorPlaque));
+  asUser('manager2'); // id 3 — посторонний (не автор и не адресат)
+  const thirdPlaque = run('pendingTransferHtml(clients[1])');
+  check('посторонний видит только статус ожидания',
+    /ожидает решения/.test(thirdPlaque) && !/Подтвердить/.test(thirdPlaque) && !/Отменить/.test(thirdPlaque));
+
+  // Решение принимает адресат (toManagerId).
+  asUser('manager2'); // id 3 — не адресат
   res = run('acceptTransferRequest(1)');
-  check('посторонний не может принять запрос', res.ok === false && run('clients[0].createdBy') === 2);
+  check('посторонний не может принять запрос', res.ok === false && run('clients[1].createdBy') === 3);
 
-  asUser('manager2');
-  check('у получателя запрос виден как входящий', run('incomingTransferRequests().length') === 1);
-  run('renderTransfers()');
-  check('в разделе есть кнопки «Принять» и «Отклонить»',
-    /Принять/.test(html('mainContent')) && /Отклонить/.test(html('mainContent')));
+  asUser('lead'); // id 4 — адресат
+  check('у адресата запрос виден как входящий', run('incomingTransferRequests().length') === 1);
+  const deciderPlaque = run('pendingTransferHtml(clients[1])');
+  check('адресат видит «Подтвердить / Отклонить»',
+    /Подтвердить/.test(deciderPlaque) && /Отклонить/.test(deciderPlaque) &&
+    /decideTransferFromCard\(1, true\)/.test(deciderPlaque));
 
   res = run('acceptTransferRequest(1)');
   check('запрос принят', res.ok === true && run('clientTransferRequests[0].status') === 'approved');
-  check('клиент перешёл к принявшему менеджеру', run('clients[0].createdBy') === 3);
-  check('ответственный менеджер синхронизирован', run('clients[0].responsibleManagerId') === 3);
+  check('клиент перешёл к адресату', run('clients[1].createdBy') === 4);
+  check('ответственный менеджер синхронизирован', run('clients[1].responsibleManagerId') === 4);
   check('автор запроса уведомлён о принятии',
     run('notifications').some(n => n.userId === 2 && /принят/i.test(n.title)));
-  check('у получателя входящих запросов больше нет', run('incomingTransferRequests().length') === 0);
+  check('адресат уведомлён о закреплении',
+    run('notifications').some(n => n.userId === 4 && /передан вам/i.test(n.title)));
+  check('у адресата входящих запросов больше нет', run('incomingTransferRequests().length') === 0);
 
-  // Отклонение: клиент остаётся у прежнего менеджера
-  asUser('manager2');
-  res = run('createClientTransferRequest(2, 2, "верните обратно")');
-  check('обратный запрос создан', res.ok === true && run('clientTransferRequests').length === 2);
-  asUser('manager');
+  // Отклонение: клиент остаётся у прежнего менеджера.
+  asUser('lead'); // id 4 — запрашивает перенос клиента 1 (владелец id 2) адресату id 3
+  res = run('createClientTransferRequest(1, 3, "верните клиента себе")');
+  check('запрос руководителя создан', res.ok === true && run('clientTransferRequests').length === 2);
+  asUser('manager2'); // id 3 — адресат
   res = run('rejectTransferRequest(2)');
   check('запрос отклонён', res.ok === true && run('clientTransferRequests[1].status') === 'rejected');
-  check('после отказа клиент остаётся на месте', run('clients[1].createdBy') === 3);
+  check('после отказа клиент остаётся на месте', run('clients[0].createdBy') === 2);
   check('автор уведомлён об отказе',
-    run('notifications').some(n => n.userId === 3 && /отклон/i.test(n.title)));
+    run('notifications').some(n => n.userId === 4 && /отклон/i.test(n.title)));
 
-  // Отмена своего запроса (клиент 1 после принятия принадлежит manager2)
+  // Отмена своего запроса: клиент 2 теперь у руководителя (id 4), manager2 (id 3) — чужой.
   asUser('manager2');
-  res = run('createClientTransferRequest(1, 2, "забираю назад")');
-  check('запрос от нового владельца создан', res.ok === true, res.error || '');
+  res = run('createClientTransferRequest(2, 2, "забираю назад")');
+  check('запрос от нового автора создан', res.ok === true, res.error || '');
   const cancelId = run('clientTransferRequests[clientTransferRequests.length - 1].id');
   res = run(`cancelTransferRequest(${cancelId})`);
   check('автор может отменить свой запрос', res.ok === true &&

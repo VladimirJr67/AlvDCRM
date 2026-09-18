@@ -52,10 +52,16 @@ function normalizeSite(s) {
 
 // Права на редактирование самой карточки компании: владелец (создатель)
 // плюс администратор. Остальные — только чтение.
-function canEditClient(client) {
+function canWriteToClient(client) {
   if (!currentUser) return false;
   if (isAdmin()) return true;
   return !!client && client.createdBy === currentUser.id;
+}
+
+// Синоним: раньше по коду использовалось canEditClient, теперь единая
+// точка входа — canWriteToClient.
+function canEditClient(client) {
+  return canWriteToClient(client);
 }
 
 // Контактные лица — полная зона менеджера: добавление, правка и удаление
@@ -346,11 +352,11 @@ function renderClientContacts(id) {
   if (!client) return;
 
   const contacts = client.contacts || [];
-  // Добавлять контактные лица может любой менеджер, править и удалять —
-  // только администратор; комментарии доступны всем.
-  const canAdd = canAddContact();
+  // Добавлять контактные лица может только владелец клиента или администратор;
+  // правка и удаление — как раньше (см. canManageContacts).
+  const canAdd = canWriteToClient(client);
   const canManage = canManageContacts();
-  const editable = canEditClient(client);
+  const editable = canWriteToClient(client);
   // Индекс мог устареть, если контактное лицо удалили.
   if (selectedContactIdx !== null && !contacts[selectedContactIdx]) selectedContactIdx = null;
   if (countEl) countEl.textContent = contacts.length ? `(${contacts.length})` : '';
@@ -538,7 +544,7 @@ function renderHistoryBlock(client, editable) {
         <h3>История взаимодействий (${history.length}${person ? ' из ' + all.length : ''})</h3>
         <div class="history-actions">
           <button class="btn btn-sm btn-secondary" onclick="openAllHistoryModal(${client.id})">Вся история взаимодействий</button>
-          <button class="btn btn-sm" onclick="openHistoryModal(${client.id})">+ Добавить</button>
+          ${editable ? `<button class="btn btn-sm" onclick="openHistoryModal(${client.id})">+ Добавить</button>` : ''}
         </div>
       </div>
       ${filterHint}
@@ -633,6 +639,7 @@ function renderClientCard(id) {
   const emails = (client.orgEmails || '').split(',').map(e => e.trim()).filter(Boolean);
   const site = normalizeSite(client.orgWebsite);
   const editable = canEditClient(client);
+  const canWrite = canWriteToClient(client);
   const st = clientStatusInfo(client);
   const managerName = clientManagerName(client);
   const country = countryName(client.orgCountry) || countryName(DEFAULT_COUNTRY);
@@ -662,11 +669,12 @@ function renderClientCard(id) {
               ${clientReminderBadgeHtml(client.id)}
             </div>
           </div>
+          ${canWrite ? `
           <div class="cc-actions">
             <button class="btn btn-sm btn-secondary" onclick="openTaskModalWithClient(${client.id})">+ Задача</button>
             <button class="btn btn-sm btn-secondary" onclick="openCardReminderModal(${client.id})">+ Напоминание</button>
             <button class="btn btn-sm btn-secondary" onclick="openClientNotes(${client.id})">Особые отметки</button>
-          </div>
+          </div>` : ''}
         </div>
       </div>
 
@@ -689,24 +697,24 @@ function renderClientCard(id) {
         </div>
       </div>
 
-      ${(isAdmin() || canEditClient(client)) ? `
+      ${(isAdmin() || (!canWrite && isManagerRole(currentUser))) ? `
       <div class="cc-block">
         <div class="cc-block-head"><h3>Ответственный менеджер</h3></div>
         <div class="cc-block-body">
           ${pendingTransferHtml(client)}
           <div class="card-transfer">
-            <select id="cardOwnerSelect" title="Менеджер, которому передаём клиента">${clientOwnerOptions(client.createdBy)}</select>
-            <input type="text" id="cardTransferComment" placeholder="Комментарий менеджеру (необязательно)">
             ${isAdmin()
-              ? `<button type="button" class="btn btn-sm btn-secondary" onclick="requestClientTransferFromCard()">Отправить запрос</button>
+              ? `<select id="cardOwnerSelect" title="Менеджер, которому передаём клиента">${clientOwnerOptions(client.createdBy)}</select>
+                 <input type="text" id="cardTransferComment" placeholder="Комментарий менеджеру (необязательно)">
+                 <button type="button" class="btn btn-sm btn-secondary" onclick="requestClientTransferFromCard()">Отправить запрос</button>
                  <button type="button" class="btn btn-sm" onclick="applyClientTransfer()">Передать сразу</button>`
-              : `<button type="button" class="btn btn-sm" onclick="requestClientTransferFromCard()">Отправить запрос на перенос</button>`}
+              : `<button type="button" class="btn btn-sm" onclick="openTransferRequestModal(${client.id})">Запрос на перенос</button>`}
           </div>
           <div class="field-hint">
             Сейчас: <strong>${escapeHtml(managerName)}</strong>.
             ${isAdmin()
               ? '«Передать сразу» меняет ответственного без подтверждения, «Отправить запрос» — ждёт решения менеджера.'
-              : 'Клиент перейдёт к коллеге только после того, как он примет запрос; отклонить его тоже можно.'}
+              : 'Отправьте запрос — клиент перейдёт к выбранному менеджеру только после того, как он подтвердит.'}
           </div>
         </div>
       </div>` : ''}
@@ -731,7 +739,7 @@ function renderClientCard(id) {
               <option value="all" ${historyFilter === 'all' ? 'selected' : ''}>Все контакты</option>
               ${historyContacts(client).map(ct => `<option value="${escapeHtml(ct)}" ${historyFilter === ct ? 'selected' : ''}>${escapeHtml(ct)}</option>`).join('')}
             </select>
-            ${editable ? `<button class="btn btn-sm" onclick="openHistoryModal(${client.id})">+ Добавить</button>` : ''}
+            ${canWrite ? `<button class="btn btn-sm" onclick="openHistoryModal(${client.id})">+ Добавить</button>` : ''}
           </div>
         </div>
         <div class="cc-block-body flush">
@@ -988,8 +996,8 @@ function saveContact(e) {
   const client = clients.find(c => c.id === clientId);
   if (!client) return;
 
-  // Контактные лица доступны всем: и добавление, и правка, и удаление.
-  if (!canManageContacts()) { alert('Сначала войдите в систему.'); return; }
+  // Контактное лицо меняет данные клиента — только владелец или администратор.
+  if (!canWriteToClient(client)) { alert('Недостаточно прав для изменения этого клиента.'); return; }
   if (!client.contacts) client.contacts = [];
   
   const contactData = {
@@ -1368,8 +1376,9 @@ function saveHistory(e) {
   const clientId = parseInt(document.getElementById('historyClientId').value);
   const client = clients.find(c => c.id === clientId);
   if (!client) return;
-  // Комментарии может добавлять любой пользователь; правку существующей
-  // записи разрешаем автору и администратору (проверяется ниже).
+  // Чужого клиента менеджер не редактирует: только владелец или администратор.
+  if (!canWriteToClient(client)) { alert('Недостаточно прав для изменения этого клиента.'); return; }
+  // Правку существующей записи разрешаем автору и администратору (ниже).
   if (!client.history) client.history = [];
 
   const type = document.getElementById('historyType').value;
@@ -1605,8 +1614,9 @@ function applyClientTransfer() {
   if (typeof updateTransfersMenuBadge === 'function') updateTransfersMenuBadge();
 }
 
-// Запрос на перенос клиента из карточки: клиент уйдёт коллеге только после
-// того, как он примет запрос в разделе «Переносы клиентов».
+// Запрос на перенос клиента из карточки (путь администратора: свой селект
+// менеджера и комментарий). У менеджеров перенос идёт через модалку
+// transferRequestModal (js/transfers.js).
 function requestClientTransferFromCard() {
   const id = cardClientId || selectedClientId;
   const client = clients.find(c => c.id === id);
@@ -1629,19 +1639,7 @@ function requestClientTransferFromCard() {
   if (typeof updateTransfersMenuBadge === 'function') updateTransfersMenuBadge();
 }
 
-// Строка о текущем запросе на перенос в карточке клиента.
-function pendingTransferHtml(client) {
-  if (typeof pendingTransferForClient !== 'function') return '';
-  const r = pendingTransferForClient(client.id);
-  if (!r) return '';
-  const canCancel = currentUser && (r.fromManagerId === currentUser.id || isAdmin());
-  return `
-    <div class="transfer-pending">
-      <span>Запрос на перенос: <strong>${escapeHtml(transferManagerName(r.fromManagerId))}</strong> →
-        <strong>${escapeHtml(transferManagerName(r.toManagerId))}</strong> · ожидает решения</span>
-      ${canCancel ? `<button type="button" class="btn-icon-btn" onclick="cancelTransferFromCard(${r.id})" title="Отменить запрос">✕</button>` : ''}
-    </div>`;
-}
+// Плашка с решением по запросу — см. js/transfers.js (pendingTransferHtml).
 
 function cancelTransferFromCard(requestId) {
   const res = cancelTransferRequest(requestId);
@@ -1797,6 +1795,7 @@ function saveClientNote() {
   const clientId = parseInt(document.getElementById('notesClientId').value, 10);
   const client = clients.find(c => c.id === clientId);
   if (!client) return;
+  if (!canWriteToClient(client)) { alert('Недостаточно прав для изменения этого клиента.'); return; }
   if (!client.history) client.history = [];
 
   const textEl = document.getElementById('noteText');

@@ -87,11 +87,13 @@ function updateTransfersMenuBadge() {
 /* ===== Создание запроса ===== */
 
 // Кто может инициировать перенос: администратор — любого клиента,
-// менеджер — только своего (карточка закреплена за ним).
+// менеджер/руководитель — любого чужого клиента. Свой клиент менеджер
+// не «отдаёт» запросом — передачу делает администратор или коллега,
+// а решение принимает адресат (тот, кому клиента передают).
 function canRequestClientTransfer(client) {
   if (!currentUser || !client) return false;
   if (isAdmin()) return true;
-  return client.createdBy === currentUser.id;
+  return isManagerRole(currentUser) && client.createdBy !== currentUser.id;
 }
 
 function createClientTransferRequest(clientId, toManagerId, comment) {
@@ -99,7 +101,7 @@ function createClientTransferRequest(clientId, toManagerId, comment) {
   const client = clients.find(c => c.id === clientId);
   if (!client) return { ok: false, error: 'Клиент не найден' };
   if (!canRequestClientTransfer(client)) {
-    return { ok: false, error: 'Запросить перенос можно только по своему клиенту' };
+    return { ok: false, error: 'Запросить перенос можно только по чужому клиенту' };
   }
 
   const targetId = parseInt(toManagerId, 10);
@@ -167,10 +169,18 @@ function acceptTransferRequest(id) {
   r.decidedBy = currentUser.id;
   saveClientTransferRequests();
 
+  // Обе стороны получают уведомление: инициатор — что перенос принят,
+  // новый владелец — что клиент теперь закреплён за ним.
   notifyUser(
     r.fromManagerId,
     'Перенос клиента принят',
     'Клиент «' + r.clientName + '» передан менеджеру ' + transferManagerName(r.toManagerId),
+    null
+  );
+  notifyUser(
+    r.toManagerId,
+    'Клиент передан вам',
+    '«' + r.clientName + '» теперь закреплён за вами',
     null
   );
   updateTransfersMenuBadge();
@@ -218,11 +228,97 @@ function cancelTransferRequest(id) {
   return { ok: true };
 }
 
-// Перерисовать открытый раздел и карточку клиента после решения по запросу.
+// Перерисовать карточку клиента после решения по запросу (раздела «Переносы»
+// больше нет — решение принимается прямо в карточке).
 function refreshAfterTransfer() {
-  if (typeof currentSection === 'string' && currentSection === 'transfers') renderTransfers();
-  if (typeof cardClientId !== 'undefined' && cardClientId) renderClientCard(cardClientId);
+  const target = (typeof cardClientId !== 'undefined' && cardClientId) || selectedClientId;
+  if (typeof renderClientCard === 'function' && target) renderClientCard(target);
+  if (typeof renderClientContacts === 'function' && selectedClientId) renderClientContacts(selectedClientId);
   if (typeof renderClientsTable === 'function') renderClientsTable();
+}
+
+/* ===== Перенос прямо из карточки клиента ===== */
+
+// Плашка в карточке клиента по активному запросу: адресат видит кнопки
+// «Подтвердить / Отклонить», инициатор — «Отменить», остальные — статус.
+function pendingTransferHtml(client) {
+  const r = pendingTransferForClient(client.id);
+  if (!r) return '';
+  const me = currentUser ? currentUser.id : null;
+  const canDecide = canDecideTransfer(r);
+  const canCancel = me && (r.fromManagerId === me || isAdmin());
+
+  if (canDecide) {
+    return `
+      <div class="transfer-pending">
+        <span>Запрос на перенос: <strong>${escapeHtml(transferManagerName(r.fromManagerId))}</strong> → <strong>вам</strong> · требуется ваше решение</span>
+        <span style="white-space:nowrap;">
+          <button type="button" class="btn btn-sm" onclick="decideTransferFromCard(${r.id}, true)">Подтвердить</button>
+          <button type="button" class="btn btn-sm btn-secondary" onclick="decideTransferFromCard(${r.id}, false)">Отклонить</button>
+        </span>
+      </div>`;
+  }
+
+  if (canCancel) {
+    return `
+      <div class="transfer-pending">
+        <span>Запрос на перенос: <strong>${escapeHtml(transferManagerName(r.fromManagerId))}</strong> → <strong>${escapeHtml(transferManagerName(r.toManagerId))}</strong> · ожидает решения</span>
+        <button type="button" class="btn-icon-btn" onclick="cancelTransferFromCard(${r.id})" title="Отменить запрос">Отменить</button>
+      </div>`;
+  }
+
+  return `
+    <div class="transfer-pending">
+      <span>Запрос на перенос: <strong>${escapeHtml(transferManagerName(r.fromManagerId))}</strong> → <strong>${escapeHtml(transferManagerName(r.toManagerId))}</strong> · ожидает решения</span>
+    </div>`;
+}
+
+// Открыть модалку запроса: выбираем, кому передать чужого клиента.
+function openTransferRequestModal(clientId) {
+  const client = clients.find(c => c.id === clientId);
+  if (!client) return;
+  if (!canRequestClientTransfer(client)) {
+    alert('Запросить перенос можно только по чужому клиенту');
+    return;
+  }
+
+  document.getElementById('transferRequestClientId').value = clientId;
+  const select = document.getElementById('transferRequestManager');
+  select.innerHTML = users
+    .filter(u => isManagerRole(u) && u.id !== (currentUser ? currentUser.id : null) && u.id !== client.createdBy)
+    .map(u => `<option value="${u.id}">${escapeHtml(u.name || u.login)} (${escapeHtml(userPositionLabel(u))})</option>`)
+    .join('');
+  if (!select.options || !select.options.length) {
+    alert('Нет менеджеров, которым можно передать клиента');
+    return;
+  }
+
+  const comment = document.getElementById('transferRequestComment');
+  if (comment) comment.value = '';
+  document.getElementById('transferRequestModal').classList.add('active');
+}
+
+function sendTransferRequestFromModal(e) {
+  if (e && e.preventDefault) e.preventDefault();
+  const clientId = parseInt(document.getElementById('transferRequestClientId').value, 10);
+  const targetId = document.getElementById('transferRequestManager').value;
+  const comment = document.getElementById('transferRequestComment').value.trim();
+  if (!targetId) { alert('Выберите менеджера'); return; }
+
+  const res = createClientTransferRequest(clientId, targetId, comment);
+  if (!res.ok) { alert(res.error); return; }
+
+  closeModal('transferRequestModal');
+  alert('Запрос отправлен: ' + transferManagerName(parseInt(targetId, 10)) +
+    ' получит уведомление и подтвердит перенос.');
+  const id = (typeof cardClientId !== 'undefined' && cardClientId) || selectedClientId;
+  if (id) renderClientCard(id);
+}
+
+// «Подтвердить» / «Отклонить» из карточки клиента.
+function decideTransferFromCard(requestId, accept) {
+  const res = accept ? acceptTransferRequest(requestId) : rejectTransferRequest(requestId);
+  if (!res.ok) { alert(res.error); }
 }
 
 /* ===== Раздел «Переносы клиентов» ===== */

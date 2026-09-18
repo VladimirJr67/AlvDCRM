@@ -102,7 +102,7 @@ run(`
   ];
   currentUser = users[1];
   interactionTypes = ['Звонок', 'Информация', 'Встреча', 'Письмо', 'Размещение заказа', 'Отправил КП', 'Заказ матриц', 'Нерентабелен'];
-  clients = [{ id: 1, orgName: 'ООО Ромашка', orgInn: '402509882511', contacts: [], history: [] }];
+  clients = [{ id: 1, orgName: 'ООО Ромашка', orgInn: '402509882511', createdBy: 2, responsibleManagerId: 2, contacts: [], history: [] }];
   taskColumns = [];
   activityToColumnMap = {};
   tasks = [];
