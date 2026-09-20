@@ -843,7 +843,7 @@ button:disabled {
 /* ============================================================
    Чат менеджеров
    ============================================================ */
-.chat-page { display: flex; flex-direction: column; height: 100%; padding: 22px 24px; box-sizing: border-box; }
+.chat-page { display: flex; flex-direction: column; height: 100vh; width: 100%; min-width: 0; padding: 22px 24px; box-sizing: border-box; }
 .chat-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
 .chat-head h1 { font-size: 22px; font-weight: 600; color: #1a3a5c; }
 .chat-badge { font-size: 11px; color: #6b7280; background: #f3f4f6; border-radius: 10px; padding: 3px 10px; }

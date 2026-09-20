@@ -72,7 +72,8 @@ function markChatRead() {
 }
 
 // Отправка сообщения. Доступна только менеджерам; остальным — отказ.
-// Остальные менеджеры получают уведомление (и системный попап у себя).
+// Уведомления в раздел «Уведомления» НЕ создаются: коллеги видят новое
+// сообщение по общему счётчику непрочитанных в меню (chatMenuBadge).
 function sendChatMessage(text) {
   if (!canUseManagersChat()) {
     return { ok: false, error: 'Чат менеджеров доступен только менеджерам по продажам' };
@@ -94,13 +95,6 @@ function sendChatMessage(text) {
     readBy: [me]
   });
   saveChatManagers();
-
-  // Уведомляем остальных менеджеров: у каждого появится запись в «Уведомлениях»,
-  // а если окно свёрнуто — системный попап.
-  const author = currentUser.name || currentUser.login || 'Менеджер';
-  users.filter(u => u && u.id !== me && normalizeRole(u.role) === CHAT_MANAGERS_ROLE).forEach(u => {
-    notifyUser(u.id, 'Чат менеджеров: ' + author, clean.slice(0, 140), null);
-  });
 
   updateChatMenuBadge();
   return { ok: true };

@@ -165,9 +165,9 @@ function asUser(login) {
   check('автор сразу считается прочитавшим', JSON.stringify(run('chatManagers[0].readBy')) === '[2]');
 
   const notifFor = id => run(`notifications.filter(n => n.userId === ${id}).length`);
-  check('второй менеджер получил уведомление о сообщении', notifFor(3) === 1, 'уведомлений: ' + notifFor(3));
-  check('администратор уведомление о чате не получил', notifFor(1) === 0);
-  check('руководитель уведомление о чате не получил', notifFor(4) === 0);
+  check('чат не создаёт уведомлений в разделе «Уведомления»',
+    notifFor(1) === 0 && notifFor(3) === 0 && notifFor(4) === 0,
+    'уведомлений: ' + notifFor(1) + '/' + notifFor(3) + '/' + notifFor(4));
 
   asUser('manager2');
   check('у второго менеджера сообщение непрочитано', run('unreadChatCount()') === 1);
