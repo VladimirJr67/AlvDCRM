@@ -206,7 +206,6 @@ async function enterApp() {
   // дописываются, если база создавалась до их появления.
   ensureInteractionTypes();
 
-  ensureRequiredTaskColumns();
   injectModals();
   attachMenuHandler();
   buildSidebar();

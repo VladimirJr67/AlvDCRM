@@ -2,8 +2,9 @@
    js/tasks.js — канбан-доска задач, статусы, назначение задач.
    Глобальный массив задач общий; пользователь с ролью «user»
    видит только свои задачи (автор или назначенный исполнитель),
-   администратор — все. Колонка «Назначенные задачи» обязательная
-   и неудаляемая. 4 бизнес-статуса дашборда гарантируются.
+   администратор — все. Столбцами управляет только администратор:
+   любые столбцы можно переименовать, перекрасить, переставить и
+   удалить — «обязательных» столбцов больше нет.
    ============================================================ */
 
 let tasks = [];
@@ -17,16 +18,6 @@ const DEFAULT_COLUMNS = [
   { id: 'in_progress', name: 'В работе', color: '#f59e0b' },
   { id: 'review', name: 'На проверке', color: '#8b5cf6' },
   { id: 'completed', name: 'Завершены', color: '#10b981' }
-];
-
-// Статусы, которые обязаны быть на доске (для дашборда администратора).
-const REQUIRED_COLUMNS = [
-  { name: 'В работе', fallbackId: 'in_progress', color: '#f59e0b' },
-  { name: 'Проблема', fallbackId: 'problem', color: '#ef4444' },
-  { name: 'Работа с чертежами', fallbackId: 'drawings', color: '#8b5cf6' },
-  { name: 'Выставлен счет', fallbackId: 'invoiced', color: '#10b981' },
-  { name: 'Счет на согласование', fallbackId: 'invoice_approval', color: '#06b6d4' },
-  { name: 'Размещен заказ', fallbackId: 'order_placed', color: '#84cc16' }
 ];
 
 const TASK_PRIORITIES = [
@@ -55,27 +46,6 @@ function loadTasks() {
     taskColumns = DEFAULT_COLUMNS.map((c, i) => ({ ...c, order: i }));
     saveTaskColumns();
   }
-
-  ensureRequiredTaskColumns();
-}
-
-// Гарантировать наличие 4 бизнес-статусов. Недостающие добавляются,
-// существующие помечаются locked (не удаляются и не переименовываются).
-function ensureRequiredTaskColumns() {
-  let changed = false;
-  REQUIRED_COLUMNS.forEach(req => {
-    const existing = taskColumns.find(c => c.name === req.name);
-    if (existing) {
-      if (!existing.locked) { existing.locked = true; changed = true; }
-    } else {
-      let id = req.fallbackId;
-      if (taskColumns.find(c => c.id === id)) id = req.fallbackId + '_' + Date.now();
-      const maxOrder = taskColumns.reduce((m, c) => Math.max(m, c.order || 0), -1);
-      taskColumns.push({ id, name: req.name, color: req.color, order: maxOrder + 1, locked: true });
-      changed = true;
-    }
-  });
-  if (changed) saveTaskColumns();
 }
 
 /* ===== Привязка активностей к столбцам =====
@@ -151,8 +121,7 @@ function addTaskColumnByName(name, color) {
     id: 'activity_' + Date.now() + '_' + taskColumns.length,
     name: clean,
     color: color || '#6b7280',
-    order: maxOrder + 1,
-    locked: false
+    order: maxOrder + 1
   };
   taskColumns.push(col);
   saveTaskColumns();
@@ -330,7 +299,6 @@ function columnScopeRef(columnId) {
 function renameTaskColumn(columnId, name, color) {
   const ref = columnScopeRef(columnId);
   if (!ref) return { ok: false, error: 'Столбец не найден' };
-  if (ref.column.locked) return { ok: false, error: 'Обязательный столбец переименовать нельзя' };
 
   const clean = String(name == null ? '' : name).trim();
   if (!clean) return { ok: false, error: 'Введите название столбца' };
@@ -360,12 +328,36 @@ function moveTaskColumn(columnId, delta) {
   return { ok: true };
 }
 
+// Переставить столбец перед targetColumnId (drag-and-drop в админке).
+// Работает только внутри одной области видимости — глобальной или набора
+// конкретного менеджера.
+function reorderTaskColumn(columnId, targetColumnId) {
+  const ref = columnScopeRef(columnId);
+  if (!ref) return { ok: false, error: 'Столбец не найден' };
+  const targetRef = columnScopeRef(targetColumnId);
+  if (!targetRef || targetRef.scope !== ref.scope) {
+    return { ok: false, error: 'Нельзя переместить столбец между областями' };
+  }
+
+  const sorted = ref.list.slice().sort((a, b) => (a.order || 0) - (b.order || 0));
+  const fromIdx = sorted.findIndex(c => c.id === columnId);
+  if (fromIdx < 0) return { ok: false, error: 'Столбец не найден' };
+  if (columnId === targetColumnId) return { ok: true };
+
+  const [moved] = sorted.splice(fromIdx, 1);
+  const insertIdx = sorted.findIndex(c => c.id === targetColumnId);
+  if (insertIdx < 0) { sorted.splice(fromIdx, 0, moved); return { ok: false, error: 'Целевой столбец не найден' }; }
+  sorted.splice(insertIdx, 0, moved);
+  sorted.forEach((c, i) => { c.order = i; });
+  ref.scope === 'manager' ? saveTaskColumnsPerManager() : saveTaskColumns();
+  return { ok: true };
+}
+
 // Удалить столбец. Задачи из него переезжают в первый оставшийся столбец
 // той же области видимости — удалённый исчезает, задачи не теряются.
 function deleteTaskColumnScoped(columnId) {
   const ref = columnScopeRef(columnId);
   if (!ref) return { ok: false, error: 'Столбец не найден' };
-  if (ref.column.locked) return { ok: false, error: 'Обязательный столбец удалить нельзя' };
 
   const remaining = ref.list
     .filter(c => c.id !== columnId)

@@ -222,8 +222,10 @@ function asUser(login) {
     run(`taskColumnById('${callsId}').name`) === 'Звонки клиентам');
   check('переименование в занятое имя отклонено',
     run(`renameTaskColumn('${callsId}', 'В работе')`).ok === false);
-  check('обязательный столбец переименовать нельзя',
-    run(`renameTaskColumn('in_progress', 'Другое')`).ok === false);
+  check('бывший «обязательный» столбец теперь можно переименовать',
+    run(`renameTaskColumn('in_progress', 'Работа', '#111827')`).ok === true &&
+    run(`taskColumnById('in_progress').name`) === 'Работа');
+  run(`renameTaskColumn('in_progress', 'В работе', '#f59e0b')`);
 
   const beforeOrder = run('globalTaskColumns().map(c => c.name)');
   run(`moveTaskColumn('${callsId}', -1)`);
@@ -241,7 +243,7 @@ function asUser(login) {
     run('tasks.find(t => t.id === 1).status') === run('globalTaskColumns()[0].id'),
     'перенос: ' + deleted.moved + ' → ' + deleted.target);
   check('привязка на удалённый столбец снята', !run("activityToColumnMap['Звонок']"));
-  check('обязательный столбец удалить нельзя', run("deleteTaskColumnScoped('completed')").ok === false);
+  check('бывший «обязательный» столбец теперь можно удалить', run("deleteTaskColumnScoped('completed')").ok === true);
 
   // Удаление индивидуального столбца менеджера
   const personalId = run('managerTaskColumns(2).find(c => c.name === "Мои КП").id');

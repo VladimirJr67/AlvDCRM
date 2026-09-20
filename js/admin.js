@@ -7,8 +7,6 @@
      дедлайном и статусами «Принято / Не принято / В работе / Выполнено».
    ============================================================ */
 
-const ADMIN_STATUS_NAMES = ['В работе', 'Проблема', 'Работа с чертежами', 'Выставлен счет', 'Счет на согласование', 'Размещен заказ'];
-
 // Менеджер задачи: назначенный исполнитель → автор → администратор.
 function taskManager(task) {
   if (task.assignedTo) {
@@ -20,11 +18,6 @@ function taskManager(task) {
     if (u) return u;
   }
   return users.find(u => normalizeRole(u.role) === ROLE_ADMIN) || { id: null, login: 'Admin', name: 'Администратор' };
-}
-
-function requiredColumnId(name) {
-  const c = taskColumns.find(col => col.name === name);
-  return c ? c.id : null;
 }
 
 function renderAdminSection(section) {
@@ -255,24 +248,29 @@ function bindingColumnOptionsHtml(selectedId) {
 
 function columnRowHtml(col) {
   const used = tasks.filter(t => t.status === col.id).length;
-  const disabled = col.locked ? 'disabled' : '';
   const owner = taskColumnOwner(col.id);
   return `
-    <tr style="cursor:default;">
+    <tr style="cursor:default;" ondragover="columnDragOver(event)" ondrop="columnDrop(event, '${col.id}')">
       <td>
-        <input type="text" id="colName_${col.id}" value="${escapeHtml(col.name)}" ${disabled}
-               style="width:100%;padding:5px 7px;border:1px solid ${col.locked ? '#e5e7eb' : '#d0d5dd'};border-radius:5px;font-size:12.5px;">
-        ${col.locked ? '<div class="field-hint">Обязательный столбец: переименовать и удалить нельзя</div>' : ''}
-        ${owner ? `<div class="field-hint">Только для: ${escapeHtml(columnsOwnerLabel(Number(owner)))}</div>` : ''}
+        <div style="display:flex;align-items:flex-start;gap:6px;">
+          <span draggable="true" class="col-drag-handle" title="Перетащите для изменения порядка"
+                ondragstart="columnDragStart(event, '${col.id}')" ondragend="columnDragEnd()"
+                style="cursor:grab;color:#9ca3af;user-select:none;line-height:26px;font-weight:700;">⋮⋮</span>
+          <div style="flex:1;min-width:0;">
+            <input type="text" id="colName_${col.id}" value="${escapeHtml(col.name)}"
+                   style="width:100%;padding:5px 7px;border:1px solid #d0d5dd;border-radius:5px;font-size:12.5px;">
+            ${owner ? `<div class="field-hint">Только для: ${escapeHtml(columnsOwnerLabel(Number(owner)))}</div>` : ''}
+          </div>
+        </div>
       </td>
-      <td><input type="color" id="colColor_${col.id}" value="${escapeHtml(col.color || '#6b7280')}" ${disabled}
+      <td><input type="color" id="colColor_${col.id}" value="${escapeHtml(col.color || '#6b7280')}"
                  style="width:44px;height:28px;padding:0;border:1px solid #d0d5dd;border-radius:5px;background:#fff;"></td>
       <td style="text-align:center;">${used}</td>
       <td style="text-align:right;white-space:nowrap;">
-        <button class="btn-icon-btn" onclick="moveColumnFromAdmin('${col.id}', -1)" title="Переместить влево" ${disabled}>‹</button>
-        <button class="btn-icon-btn" onclick="moveColumnFromAdmin('${col.id}', 1)" title="Переместить вправо" ${disabled}>›</button>
-        <button class="btn-icon-btn" onclick="saveColumnFromAdmin('${col.id}')" title="Сохранить название и цвет" ${disabled}>Сохранить</button>
-        <button class="btn-icon-btn" onclick="deleteColumnFromAdmin('${col.id}')" title="Удалить столбец" ${disabled}>Удалить</button>
+        <button class="btn-icon-btn" onclick="moveColumnFromAdmin('${col.id}', -1)" title="Переместить влево">‹</button>
+        <button class="btn-icon-btn" onclick="moveColumnFromAdmin('${col.id}', 1)" title="Переместить вправо">›</button>
+        <button class="btn-icon-btn" onclick="saveColumnFromAdmin('${col.id}')" title="Сохранить название и цвет">Сохранить</button>
+        <button class="btn-icon-btn" onclick="deleteColumnFromAdmin('${col.id}')" title="Удалить столбец">Удалить</button>
       </td>
     </tr>`;
 }
@@ -307,8 +305,8 @@ function renderAdminTaskColumns() {
       <p style="font-size:12px;color:#9ca3af;margin-bottom:20px;">
         Глобальные столбцы появляются у всех менеджеров, индивидуальные — только на доске
         выбранного менеджера. Удалённый столбец исчезает с доски, а его задачи переезжают
-        в первый оставшийся. Обязательные столбцы (В работе, Завершены и другие статусы
-        дашборда) переименовать и удалить нельзя.
+        в первый оставшийся. Любой столбец можно переименовать, перекрасить, переставить
+        (перетаскиванием за ⋮⋮ или стрелками) и удалить.
       </p>
 
       <h3 class="orders-analysis-title">Глобальные столбцы (${globalList.length}, задач: ${globalUsed})</h3>
@@ -420,10 +418,40 @@ function moveColumnFromAdmin(colId, delta) {
   renderAdminTaskColumns();
 }
 
+/* Drag-and-drop порядка столбцов в админке (за ручку ⋮⋮). */
+let adminDragColumnId = null;
+
+function columnDragStart(event, colId) {
+  adminDragColumnId = colId;
+  if (event && event.dataTransfer) {
+    event.dataTransfer.setData('text/plain', colId);
+    event.dataTransfer.effectAllowed = 'move';
+  }
+}
+
+function columnDragOver(event) {
+  if (event && event.preventDefault) event.preventDefault();
+  if (event && event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+}
+
+function columnDrop(event, targetColId) {
+  if (event && event.preventDefault) event.preventDefault();
+  if (event && event.stopPropagation) event.stopPropagation();
+  const dragged = (event && event.dataTransfer && event.dataTransfer.getData('text/plain')) || adminDragColumnId;
+  adminDragColumnId = null;
+  if (!dragged || dragged === targetColId) return;
+  const res = reorderTaskColumn(dragged, targetColId);
+  if (!res.ok) { alert(res.error); return; }
+  renderAdminTaskColumns();
+}
+
+function columnDragEnd() {
+  adminDragColumnId = null;
+}
+
 function deleteColumnFromAdmin(colId) {
   const ref = columnScopeRef(colId);
   if (!ref) return;
-  if (ref.column.locked) { alert('Обязательный столбец удалить нельзя'); return; }
 
   const used = tasks.filter(t => t.status === colId).length;
   let msg = 'Удалить столбец «' + ref.column.name + '»?';
@@ -790,7 +818,9 @@ function renderAdminStats() {
   const total = all.length;
   const overdue = all.filter(t => taskOverdue(t)).length;
 
-  const statusCols = ADMIN_STATUS_NAMES.map(name => ({ name, id: requiredColumnId(name) }));
+  // Столбцы берём из актуального набора глобальных столбцов (по порядку).
+  // Удалённых нет, новые появляются сразу — без жёсткого списка статусов.
+  const statusCols = globalTaskColumns();
 
   const managerRows = users.map(u => {
     const managed = all.filter(t => taskManager(t).id === u.id);
@@ -812,18 +842,18 @@ function renderAdminStats() {
       <table class="admin-table">
         <thead><tr>
           <th>Менеджер</th>
-          ${ADMIN_STATUS_NAMES.map(n => `<th>${escapeHtml(n)}</th>`).join('')}
+          ${statusCols.map(c => `<th>${escapeHtml(c.name)}</th>`).join('')}
         </tr></thead>
         <tbody>
           ${managerRows.length ? managerRows.map(r => `
             <tr>
               <td class="manager-name" onclick="openAdminTaskList(${r.user.id})" title="Все задачи менеджера">${escapeHtml(r.user.login)}</td>
               ${r.counts.map((c, i) => `
-                <td class="stat-cell" onclick="openAdminTaskList(${r.user.id}, '${escapeHtml(ADMIN_STATUS_NAMES[i])}')" title="${escapeHtml(ADMIN_STATUS_NAMES[i])}">${c}</td>
+                <td class="stat-cell" onclick="openAdminTaskList(${r.user.id}, '${escapeHtml(statusCols[i].id)}')" title="${escapeHtml(statusCols[i].name)}">${c}</td>
               `).join('')}
             </tr>
           `).join('') : `
-            <tr><td colspan="5" style="text-align:center;color:#9ca3af;padding:30px;">Пользователи не созданы</td></tr>
+            <tr><td colspan="${statusCols.length + 1}" style="text-align:center;color:#9ca3af;padding:30px;">Пользователи не созданы</td></tr>
           `}
         </tbody>
       </table>
@@ -929,8 +959,8 @@ function formatDateAdmin(value) {
   return d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
-// Модалка со списком задач конкретного менеджера (опционально по статусу).
-function openAdminTaskList(managerId, statusName) {
+// Модалка со списком задач конкретного менеджера (опционально по столбцу).
+function openAdminTaskList(managerId, statusId) {
   const manager = findUserById(managerId);
   if (!manager) return;
   const content = document.getElementById('adminTasksListContent');
@@ -938,10 +968,10 @@ function openAdminTaskList(managerId, statusName) {
 
   let list = tasks.filter(t => taskManager(t).id === managerId);
   let filterLabel = 'Все задачи';
-  if (statusName) {
-    const col = taskColumns.find(c => c.name === statusName);
+  if (statusId) {
+    const col = taskColumns.find(c => c.id === statusId);
     if (col) list = list.filter(t => t.status === col.id);
-    filterLabel = statusName;
+    filterLabel = col ? col.name : '—';
   }
   list.sort((a, b) => (a.deadline || '').localeCompare(b.deadline || ''));
 
