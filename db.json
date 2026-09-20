@@ -6,7 +6,7 @@
       "login": "Admin",
       "password": "Admin",
       "role": "admin",
-      "name": "?????????????",
+      "name": "Администратор",
       "phone": "",
       "department": "",
       "position": "",
@@ -24,7 +24,7 @@
       "login": "manager",
       "password": "qwer1234",
       "role": "manager",
-      "name": "????????",
+      "name": "Менеджер",
       "position": "",
       "theme": "light",
       "substituteFor": null,
@@ -36,8 +36,8 @@
     {
       "orgName": "11",
       "orgCountry": "RU",
-      "orgCity": "???????",
-      "orgDirection": "???????????????",
+      "orgCity": "Обнинск",
+      "orgDirection": "Производственный",
       "orgAddress": "",
       "orgPhones": "",
       "orgStatus": "cooperation",
@@ -58,43 +58,43 @@
       "history": [
         {
           "date": "2026-08-27T15:38:55.703Z",
-          "type": "?????????? ??????",
+          "type": "Размещение заказа",
           "contactPerson": "",
           "manager": "Admin",
           "comment": "1212",
           "order": {
             "kg": 1212,
-            "condition": "????",
+            "condition": "Анод",
             "avgPrice": 650,
             "cost": 1221212
           },
           "tags": [],
           "closedAt": null,
           "nextActivityAt": null,
-          "activityType": "?????????? ??????",
+          "activityType": "Размещение заказа",
           "columnId": null
         },
         {
           "date": "2026-09-15T19:28:47.749Z",
-          "type": "?????????? ??????",
+          "type": "Размещение заказа",
           "contactPerson": "",
           "manager": "Admin",
-          "comment": "????? ?????",
+          "comment": "Сырой заказ",
           "order": {
             "kg": 1233,
-            "condition": "?????",
+            "condition": "Сырой",
             "avgPrice": 648.82,
             "cost": 800000
           },
           "tags": [],
           "closedAt": null,
           "nextActivityAt": null,
-          "activityType": "?????????? ??????",
+          "activityType": "Размещение заказа",
           "columnId": null
         },
         {
           "date": "2026-09-16T19:32:01.537Z",
-          "type": "??????",
+          "type": "Звонок",
           "contactPerson": "",
           "manager": "manager",
           "authorId": 2,
@@ -105,7 +105,7 @@
           "order": null,
           "closedAt": null,
           "nextActivityAt": null,
-          "activityType": "??????",
+          "activityType": "Звонок",
           "columnId": null
         }
       ],
@@ -161,42 +161,42 @@
   "taskColumns": [
     {
       "id": "in_progress",
-      "name": "? ??????",
+      "name": "В работе",
       "color": "#f59e0b",
       "order": 0,
       "locked": true
     },
     {
       "id": "problem",
-      "name": "????????",
+      "name": "Проблема",
       "color": "#ef4444",
       "order": 1,
       "locked": true
     },
     {
       "id": "drawings",
-      "name": "?????? ? ?????????",
+      "name": "Работа с чертежами",
       "color": "#8b5cf6",
       "order": 2,
       "locked": true
     },
     {
       "id": "invoiced",
-      "name": "????????? ????",
+      "name": "Выставлен счет",
       "color": "#10b981",
       "order": 3,
       "locked": true
     },
     {
       "id": "invoice_approval",
-      "name": "???? ?? ????????????",
+      "name": "Счет на согласование",
       "color": "#06b6d4",
       "order": 4,
       "locked": true
     },
     {
       "id": "order_placed",
-      "name": "???????? ?????",
+      "name": "Размещен заказ",
       "color": "#84cc16",
       "order": 5,
       "locked": true
@@ -253,8 +253,8 @@
   "chatLeads": [],
   "reminders": [
     {
-      "title": "????????",
-      "description": "2323?",
+      "title": "Напоминание",
+      "description": "",
       "date": "2026-09-15",
       "time": "09:00",
       "color": "#f59e0b",
@@ -286,8 +286,8 @@
     {
       "id": 1,
       "userId": 1,
-      "title": "???????????: ????????",
-      "message": "2323? · 09:00",
+      "title": "Напоминание",
+      "message": "09:00",
       "taskId": null,
       "read": false,
       "createdAt": "2026-09-15T19:26:21.479Z",
@@ -297,7 +297,7 @@
     {
       "id": 2,
       "userId": 1,
-      "title": "???????????: 1",
+      "title": "Напоминание: 1",
       "message": "2 · 22:29",
       "taskId": null,
       "read": false,
@@ -307,14 +307,10 @@
     }
   ],
   "interactionTypes": [
-    "??????",
-    "??????????",
-    "???????",
-    "??????",
-    "?????????? ??????",
-    "???????? ??",
-    "????? ??????",
-    "????????????",
+    "Звонок",
+    "Информация",
+    "Встреча",
+    "Письмо",
     "Размещение заказа",
     "Отправил КП",
     "Заказ матриц",
@@ -326,18 +322,18 @@
       "clientId": 1,
       "clientName": "11",
       "kg": 1233,
-      "condition": "?????",
+      "condition": "Сырой",
       "avgPrice": 648.82,
       "cost": 800000,
       "date": "2026-09-15T19:28:47.752Z",
       "createdBy": 1,
-      "comment": "????? ?????",
+      "comment": "Сырой заказ",
       "specification": "СП43525",
       "specificationKey": "СП43525"
     }
   ],
   "orgTypes": [
-    "???????????????"
+    "Производственный"
   ],
   "contactPositions": [
     "121"
