@@ -60,6 +60,8 @@ function rehydrateAll(db) {
   newsItems = db.news || [];
   minPrices = (db.minPrices && typeof db.minPrices === 'object' && !Array.isArray(db.minPrices)) ? db.minPrices : {};
   minPriceHistory = Array.isArray(db.minPriceHistory) ? db.minPriceHistory : [];
+  permissions = Array.isArray(db.permissions) ? db.permissions : [];
+  rolePermissions = (db.rolePermissions && typeof db.rolePermissions === 'object' && !Array.isArray(db.rolePermissions)) ? db.rolePermissions : {};
 }
 
 // Собрать полный снапшот из глобалов приложения.
@@ -86,7 +88,9 @@ function assembleDb() {
     contactPositions: contactPositions || [],
     news: newsItems || [],
     minPrices: minPrices || {},
-    minPriceHistory: minPriceHistory || []
+    minPriceHistory: minPriceHistory || [],
+    permissions: permissions || [],
+    rolePermissions: rolePermissions || {}
   };
 }
 

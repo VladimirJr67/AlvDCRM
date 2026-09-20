@@ -198,11 +198,11 @@ async function dadataCities(query, countryCode) {
 // привязка активности к столбцу, матрицы, запросы на перенос, чаты.
 const DB_VERSION = 6;
 
-// Роли системы: администратор, менеджер по продажам, руководитель.
-// Роли «technolog» в модели нет и не планируется: у технологов отдельный
-// контур работы, доступ в CRM им не выдаётся (проверено поиском по проекту —
-// упоминаний technolog/«технолог» нет ни в коде, ни в данных).
-const ROLES = { ADMIN: 'admin', MANAGER: 'manager', LEAD: 'lead' };
+// Роли системы: администратор, менеджер по продажам, руководитель,
+// разработчик (супер-админ — автоматически имеет все права и управляет
+// матрицей доступа). Роли «technolog» в модели нет: у технологов отдельный
+// контур работы, доступ в CRM им не выдаётся.
+const ROLES = { ADMIN: 'admin', MANAGER: 'manager', LEAD: 'lead', DEVELOPER: 'developer' };
 
 // Историческое значение role:'user' означало менеджера по продажам —
 // при миграции приводится к 'manager'. Неизвестные значения тоже становятся
@@ -210,7 +210,8 @@ const ROLES = { ADMIN: 'admin', MANAGER: 'manager', LEAD: 'lead' };
 const ROLE_ALIASES = {
   admin: 'admin', администратор: 'admin',
   manager: 'manager', user: 'manager', менеджер: 'manager', 'менеджер по продажам': 'manager',
-  lead: 'lead', head: 'lead', руководитель: 'lead', 'руководитель отдела': 'lead'
+  lead: 'lead', head: 'lead', руководитель: 'lead', 'руководитель отдела': 'lead',
+  developer: 'developer', dev: 'developer', разработчик: 'developer', 'разработчик': 'developer'
 };
 
 function normalizeRole(role) {
@@ -322,7 +323,11 @@ const DEFAULT_DB = {
   // Минимальные цены за кг по покрытиям: { 'Анод': { value, updatedAt } }.
   minPrices: {},
   // История изменений минимальных цен: кто, когда и на сколько изменил.
-  minPriceHistory: []
+  minPriceHistory: [],
+  // Каталог прав (id, title, group) и матрица «роль → список прав».
+  // Роль developer в матрицу не пишется — она имеет все права по определению.
+  permissions: [],
+  rolePermissions: {}
 };
 
 // Типы взаимодействий по умолчанию — сидируются только при первом старте
@@ -342,6 +347,66 @@ const REQUIRED_INTERACTION_TYPES = ['Размещение заказа', 'Отп
 
 // Легаси-набор без «Размещения заказа» — при миграции дополняется новым типом.
 const LEGACY_INTERACTION_TYPES = ['Звонок', 'Информация', 'Встреча', 'Письмо'];
+
+// Каталог прав (id, title, group). Новые фичи регистрируют своё право здесь:
+// по умолчанию его получает только роль developer, пока разработчик не выдаст
+// его в разделе «Права и роли».
+const PERMISSIONS = [
+  { id: 'clients.create', title: 'Создание клиентов', group: 'Клиенты' },
+  { id: 'clients.edit', title: 'Редактирование клиентов', group: 'Клиенты' },
+  { id: 'clients.delete', title: 'Удаление клиентов', group: 'Клиенты' },
+  { id: 'clients.import', title: 'Импорт клиентов', group: 'Клиенты' },
+  { id: 'clients.export', title: 'Экспорт клиентов', group: 'Клиенты' },
+  { id: 'clients.transfer', title: 'Перенос клиентов', group: 'Клиенты' },
+  { id: 'contacts.edit', title: 'Редактирование контактов', group: 'Контакты' },
+  { id: 'contacts.delete', title: 'Удаление контактов', group: 'Контакты' },
+  { id: 'tasks.create', title: 'Создание задач', group: 'Задачи' },
+  { id: 'tasks.assign', title: 'Назначение задач', group: 'Задачи' },
+  { id: 'tasks.track', title: 'Отслеживание задач', group: 'Задачи' },
+  { id: 'tasks.delete', title: 'Удаление задач', group: 'Задачи' },
+  { id: 'orders.viewAll', title: 'Просмотр всех заказов', group: 'Заказы' },
+  { id: 'orders.export', title: 'Экспорт заказов', group: 'Заказы' },
+  { id: 'matrices.create', title: 'Создание матриц', group: 'Матрицы' },
+  { id: 'matrices.updateStatus', title: 'Смена статуса матриц', group: 'Матрицы' },
+  { id: 'prices.edit', title: 'Изменение минимальных цен', group: 'Цены' },
+  { id: 'prices.massEdit', title: 'Массовое изменение цен', group: 'Цены' },
+  { id: 'news.publish', title: 'Публикация новостей', group: 'Новости' },
+  { id: 'chat.managers', title: 'Чат менеджеров', group: 'Чат' },
+  { id: 'chat.leads', title: 'Чат руководителей', group: 'Чат' },
+  { id: 'reports.comments', title: 'Отчёт по комментариям', group: 'Отчёты' },
+  { id: 'reports.sales', title: 'Отчёт по продажам', group: 'Отчёты' },
+  { id: 'admin.columns', title: 'Столбцы задач', group: 'Администрирование' },
+  { id: 'admin.users', title: 'Пользователи', group: 'Администрирование' },
+  { id: 'admin.permissions', title: 'Права и роли', group: 'Администрирование' },
+  { id: 'admin.readiness', title: 'Готовность (1С)', group: 'Администрирование' },
+  { id: 'admin.interaction-types', title: 'Типы взаимодействий', group: 'Администрирование' },
+  { id: 'admin.integrations', title: 'Интеграции', group: 'Администрирование' }
+];
+
+function allPermissionIds() {
+  return PERMISSIONS.map(p => p.id);
+}
+
+// Дефолтная матрица доступа (миграция для уже существующих баз): admin получает
+// все прежние права, manager/lead — тот объём, что был у них до появления матрицы.
+function defaultRolePermissions() {
+  const manager = [
+    'clients.create', 'clients.edit', 'clients.transfer',
+    'contacts.edit', 'contacts.delete',
+    'tasks.create',
+    'matrices.create', 'matrices.updateStatus',
+    'chat.managers'
+  ];
+  const lead = manager.concat([
+    'tasks.assign', 'tasks.track', 'orders.viewAll',
+    'reports.comments', 'reports.sales', 'chat.leads'
+  ]);
+  return {
+    admin: allPermissionIds().slice(),
+    manager: manager,
+    lead: lead
+  };
+}
 
 // ===== Миграции данных =====
 // Правило простое: ничего не удаляем и не перезаписываем — только дополняем
@@ -419,6 +484,18 @@ function normalizeDb(db) {
   d.taskColumnsPerManager = plainObject(d.taskColumnsPerManager);
   d.activityToColumnMap = plainObject(d.activityToColumnMap);
 
+  // --- Права и роли ---
+  // Каталог прав пополняем, если он пуст (список — системный справочник, его
+  // не редактируют вручную). Матрицу rolePermissions сидируем один раз — только
+  // если в базе её ещё нет: дальше ей управляет разработчик в «Права и роли».
+  d.permissions = asArray(d.permissions);
+  if (!d.permissions.length) d.permissions = PERMISSIONS.slice();
+  if (!(db && typeof db === 'object' && 'rolePermissions' in db)) {
+    d.rolePermissions = defaultRolePermissions();
+  } else {
+    d.rolePermissions = plainObject(d.rolePermissions);
+  }
+
   // Легаси/fresh-базы без коллекции — наполняем дефолтами.
   if (!(db && Array.isArray(db.interactionTypes)) && !d.interactionTypes.length) {
     d.interactionTypes = DEFAULT_INTERACTION_TYPES.slice();
@@ -447,6 +524,18 @@ function normalizeDb(db) {
     // Кто из руководителей отслеживает задачи сотрудника (раздел «Отслеживание»).
     u.trackedBy = asArray(u.trackedBy);
   });
+
+  // Bootstrap: в базе всегда есть хотя бы один разработчик (супер-админ),
+  // иначе матрицу прав некому редактировать. Дефолтный пароль меняют в разделе
+  // «Пользователи» (правит разработчика только сам разработчик).
+  if (!d.users.some(u => u && normalizeRole(u.role) === ROLES.DEVELOPER)) {
+    const maxId = d.users.reduce((m, u) => Math.max(m, u && u.id || 0), 0);
+    d.users.push({
+      id: maxId + 1, login: 'developer', password: 'developer', role: ROLES.DEVELOPER,
+      name: 'Разработчик', position: '', theme: 'light',
+      substituteFor: null, substituteUntil: null, trackedBy: []
+    });
+  }
 
   const fallbackManager = defaultManagerId(d.users);
 
@@ -844,16 +933,48 @@ function readinessStatus(store) {
   };
 }
 
-// Кто загрузил — только администратор. API базы у нас открыт, но операцию
-// с общим срезом закрываем ролью: иначе любой в сети мог бы подменить данные.
-function requireAdminSession(req) {
+// Права на сервере: роль developer имеет всё, остальные — по матрице
+// rolePermissions из db.json. До применения миграции (когда матрицы ещё нет)
+// admin сохраняет прежние права — это и есть «не ломать старые role==='admin'».
+function hasPermissionOnServer(user, permissionId) {
+  if (!user) return false;
+  const role = normalizeRole(user.role);
+  if (role === ROLES.DEVELOPER) return true;
+  const db = loadDb();
+  const map = plainObject(db.rolePermissions);
+  const list = map[role];
+  if (!Array.isArray(list)) return role === ROLES.ADMIN; // миграция ещё не применилась
+  return list.indexOf(permissionId) > -1;
+}
+
+// Middleware проверки права: возвращает { ok, user } или { ok:false, code, error }.
+function requirePermission(req, permissionId, label) {
   const session = resolveSession(req);
-  if (!session) return { ok: false, code: 401, error: 'Загрузка доступна из CRM под учётной записью администратора' };
+  if (!session) return { ok: false, code: 401, error: 'Действие доступно только из CRM под своей учётной записью' };
   const db = loadDb();
   const user = asArray(db.users).find(u => u.id === session.userId);
   if (!user) return { ok: false, code: 401, error: 'Сессия не найдена — войдите заново' };
-  if (normalizeRole(user.role) !== ROLES.ADMIN) {
-    return { ok: false, code: 403, error: 'Загружать готовность может только администратор' };
+  if (!hasPermissionOnServer(user, permissionId)) {
+    return { ok: false, code: 403, error: 'Недостаточно прав' + (label ? ': ' + label : '') };
+  }
+  return { ok: true, user: user };
+}
+
+// Право admin.readiness закрывает загрузку «Готовности».
+function requireAdminSession(req) {
+  return requirePermission(req, 'admin.readiness', 'загружать готовность может администратор или разработчик');
+}
+
+// Раздел «Права и роли» и эндпоинт /api/permissions доступны ТОЛЬКО разработчику
+// (супер-админу) — независимо от матрицы прав.
+function requireDeveloper(req) {
+  const session = resolveSession(req);
+  if (!session) return { ok: false, code: 401, error: 'Действие доступно только из CRM под своей учётной записью' };
+  const db = loadDb();
+  const user = asArray(db.users).find(u => u.id === session.userId);
+  if (!user) return { ok: false, code: 401, error: 'Сессия не найдена — войдите заново' };
+  if (normalizeRole(user.role) !== ROLES.DEVELOPER) {
+    return { ok: false, code: 403, error: 'Права и роли доступны только разработчику' };
   }
   return { ok: true, user: user };
 }
@@ -1261,6 +1382,41 @@ const server = http.createServer((req, res) => {
         }
         try {
           const db = JSON.parse(body);
+
+          // Защита матрицы доступа: менять permissions/rolePermissions и назначать
+          // роль developer может только разработчик. Остальные правки открыты, как
+          // и раньше, — так сохраняется прежнее поведение до полной миграции.
+          const session = resolveSession(req);
+          const actor = session ? asArray(loadDb().users).find(u => u.id === session.userId) : null;
+          const isDev = actor && normalizeRole(actor.role) === ROLES.DEVELOPER;
+          if (!isDev) {
+            const cur = loadDb();
+            const changedRights = JSON.stringify(asArray(db.permissions)) !== JSON.stringify(asArray(cur.permissions)) ||
+              JSON.stringify(plainObject(db.rolePermissions)) !== JSON.stringify(plainObject(cur.rolePermissions));
+            const developerTouched = () => {
+              const curById = {};
+              asArray(cur.users).forEach(u => { if (u && u.id != null) curById[u.id] = normalizeRole(u.role); });
+              const nextIds = {};
+              asArray(db.users).forEach(u => { if (u && u.id != null) nextIds[u.id] = true; });
+              // Удаление разработчика.
+              for (const id of Object.keys(curById)) {
+                if (curById[id] === ROLES.DEVELOPER && !nextIds[id]) return true;
+              }
+              // Появление/повышение/понижение роли разработчика.
+              return asArray(db.users).some(u => {
+                if (!u || u.id == null) return false;
+                const next = normalizeRole(u.role);
+                const prev = curById[u.id];
+                return (prev === ROLES.DEVELOPER) !== (next === ROLES.DEVELOPER);
+              });
+            };
+            if (changedRights || developerTouched()) {
+              res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+              res.end(JSON.stringify({ ok: false, error: 'Менять права, роли и разработчика может только разработчик' }));
+              return;
+            }
+          }
+
           saveDb(db);
           broadcastSse(); // мгновенно уведомить остальные окна/пользователей
           res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -1281,6 +1437,54 @@ const server = http.createServer((req, res) => {
   if (pathname === '/api/db/hash') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ hash: dbFingerprint() }));
+    return;
+  }
+
+  // ---- Права и роли: чтение и изменение матрицы (только разработчик) ----
+  if (pathname === '/api/permissions') {
+    if (req.method === 'GET') {
+      const access = requireDeveloper(req);
+      if (!access.ok) {
+        sendJson(res, access.code, { ok: false, error: access.error });
+        return;
+      }
+      const db = loadDb();
+      sendJson(res, 200, { ok: true, permissions: asArray(db.permissions), rolePermissions: plainObject(db.rolePermissions) });
+      return;
+    }
+
+    if (req.method === 'PUT') {
+      const access = requireDeveloper(req);
+      if (!access.ok) {
+        sendJson(res, access.code, { ok: false, error: access.error });
+        return;
+      }
+      readJsonBody(req, (err, body) => {
+        if (err) {
+          sendJson(res, 400, { ok: false, error: 'Некорректный JSON' });
+          return;
+        }
+        const next = plainObject(body && body.rolePermissions);
+        const db = loadDb();
+        // developer не хранится в матрице и не редактируется здесь.
+        ['admin', 'manager', 'lead'].forEach(role => {
+          next[role] = asArray(next[role]).map(String).filter(id => allPermissionIds().indexOf(id) > -1);
+        });
+        db.rolePermissions = next;
+        db.permissions = PERMISSIONS.slice();
+        try {
+          saveDb(db);
+        } catch (e) {
+          sendJson(res, 500, { ok: false, error: 'Не удалось сохранить матрицу: ' + e.message });
+          return;
+        }
+        broadcastSse();
+        sendJson(res, 200, { ok: true, rolePermissions: db.rolePermissions });
+      });
+      return;
+    }
+
+    sendJson(res, 405, { ok: false, error: 'Method not allowed' });
     return;
   }
 

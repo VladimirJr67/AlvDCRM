@@ -16,20 +16,24 @@ const USERS_KEY = 'alvid_crm_users';
 
 // Коды ролей и их подписи. Значение 'user' — историческое обозначение
 // менеджера: такие записи приводятся к 'manager' при загрузке.
+// developer — супер-админ: имеет все права и управляет матрицей доступа.
 const ROLE_ADMIN = 'admin';
 const ROLE_MANAGER = 'manager';
 const ROLE_LEAD = 'lead';
+const ROLE_DEVELOPER = 'developer';
 
 const ROLE_LABELS = {
   admin: 'Администратор',
   manager: 'Менеджер по продажам',
-  lead: 'Руководитель'
+  lead: 'Руководитель',
+  developer: 'Разработчик'
 };
 
 const ROLE_ALIASES = {
   admin: 'admin', 'администратор': 'admin',
   manager: 'manager', user: 'manager', 'менеджер': 'manager', 'менеджер по продажам': 'manager',
-  lead: 'lead', head: 'lead', 'руководитель': 'lead', 'руководитель отдела': 'lead'
+  lead: 'lead', head: 'lead', 'руководитель': 'lead', 'руководитель отдела': 'lead',
+  developer: 'developer', dev: 'developer', 'разработчик': 'developer', 'разработчик': 'developer'
 };
 
 function normalizeRole(role) {
@@ -129,10 +133,20 @@ function searchUsers(query, excludeIds) {
 // Права определяются строго ролью из актуального массива users.
 // Ни сессия, ни LocalStorage не могут «подарить» доступ: роль всегда
 // перечитывается из последних данных (после поллинга/гидрации).
+// Разработчик — супер-админ: isAdmin() для него тоже true, чтобы он видел
+// весь административный интерфейс; isDeveloper() выделяет его отдельно.
 function isAdmin() {
   if (!currentUser) return false;
   const live = findUserById(currentUser.id) || findUserByLogin(currentUser.login);
-  return !!(live && normalizeRole(live.role) === ROLE_ADMIN);
+  const role = normalizeRole(live && live.role);
+  return role === ROLE_ADMIN || role === ROLE_DEVELOPER;
+}
+
+// Текущий пользователь — разработчик (супер-админ).
+function isDeveloper() {
+  if (!currentUser) return false;
+  const live = findUserById(currentUser.id) || findUserByLogin(currentUser.login);
+  return !!(live && normalizeRole(live.role) === ROLE_DEVELOPER);
 }
 
 // Текущий пользователь — руководитель.
@@ -142,21 +156,49 @@ function isLead() {
   return !!(live && normalizeRole(live.role) === ROLE_LEAD);
 }
 
+// Есть ли у пользователя право permissionId. developer имеет всё.
+// До применения миграции (когда матрицы rolePermissions ещё нет) admin
+// сохраняет прежние права — чтобы не ломать старые проверки role==='admin'.
+function hasPermission(user, permissionId) {
+  const u = user || currentUser;
+  if (!u) return false;
+  const role = normalizeRole(u.role);
+  if (role === ROLE_DEVELOPER) return true;
+  const list = rolePermissions && rolePermissions[role];
+  if (!Array.isArray(list)) return role === ROLE_ADMIN;
+  return list.indexOf(permissionId) > -1;
+}
+
+// Удобная проверка для текущего пользователя (по актуальной роли).
+function can(permissionId) {
+  if (!currentUser) return false;
+  const live = findUserById(currentUser.id) || findUserByLogin(currentUser.login);
+  return hasPermission(live, permissionId);
+}
+
 // Проверка, что изменения не сломают систему: нельзя удалить/понизить
 // последнего администратора.
 function countAdmins() {
   return users.filter(u => normalizeRole(u.role) === ROLE_ADMIN).length;
 }
 
+function countDevelopers() {
+  return users.filter(u => normalizeRole(u.role) === ROLE_DEVELOPER).length;
+}
+
 function addUser(data) {
   if (!data.login || !data.password) return { ok: false, error: 'Заполните логин и пароль' };
   if (findUserByLogin(data.login)) return { ok: false, error: 'Логин уже занят' };
+  const newRole = normalizeRole(data.role);
+  if (newRole === ROLE_DEVELOPER && !isDeveloper()) {
+    return { ok: false, error: 'Назначить роль «Разработчик» может только разработчик' };
+  }
   const maxId = users.reduce((m, u) => Math.max(m, u.id || 0), 0);
   users.push({
     id: maxId + 1,
     login: data.login.trim(),
     password: data.password,
-    role: normalizeRole(data.role),
+    role: newRole,
     name: (data.name || '').trim() || data.login.trim(),
     position: (data.position || '').trim(),
     theme: data.theme || 'light',
@@ -177,9 +219,18 @@ function updateUser(id, data) {
   if (dup && dup.id !== id) return { ok: false, error: 'Логин уже занят' };
 
   const newRole = normalizeRole(data.role);
+  // Разработчика (и роль разработчика) меняет только разработчик.
+  const editingDeveloper = normalizeRole(u.role) === ROLE_DEVELOPER || newRole === ROLE_DEVELOPER;
+  if (editingDeveloper && !isDeveloper()) {
+    return { ok: false, error: 'Роль «Разработчик» может менять только разработчик' };
+  }
   // Нельзя понизить последнего администратора
   if (normalizeRole(u.role) === ROLE_ADMIN && newRole !== ROLE_ADMIN && countAdmins() <= 1) {
     return { ok: false, error: 'Нельзя понизить последнего администратора' };
+  }
+  // Нельзя понизить последнего разработчика
+  if (normalizeRole(u.role) === ROLE_DEVELOPER && newRole !== ROLE_DEVELOPER && countDevelopers() <= 1) {
+    return { ok: false, error: 'Нельзя понизить последнего разработчика' };
   }
 
   u.login = newLogin;
@@ -203,6 +254,12 @@ function deleteUser(id) {
   const u = findUserById(id);
   if (!u) return { ok: false, error: 'Пользователь не найден' };
   if (currentUser && currentUser.id === id) return { ok: false, error: 'Нельзя удалить собственную учётную запись' };
+  if (normalizeRole(u.role) === ROLE_DEVELOPER && !isDeveloper()) {
+    return { ok: false, error: 'Разработчика может удалить только разработчик' };
+  }
+  if (normalizeRole(u.role) === ROLE_DEVELOPER && countDevelopers() <= 1) {
+    return { ok: false, error: 'Нельзя удалить последнего разработчика' };
+  }
   if (normalizeRole(u.role) === ROLE_ADMIN && countAdmins() <= 1) return { ok: false, error: 'Нельзя удалить последнего администратора' };
 
   users = users.filter(x => x.id !== id);

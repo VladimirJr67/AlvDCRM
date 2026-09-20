@@ -20,13 +20,134 @@ function taskManager(task) {
   return users.find(u => normalizeRole(u.role) === ROLE_ADMIN) || { id: null, login: 'Admin', name: 'Администратор' };
 }
 
+// Право (или права), которыми закрыт каждый админ-раздел. developer обходит
+// проверку — он имеет все права по определению.
+const ADMIN_SECTION_PERMISSIONS = {
+  'admin-analysis': ['reports.sales', 'reports.comments'],
+  'admin-users': ['admin.users'],
+  'admin-task-columns': ['admin.columns'],
+  'admin-readiness': ['admin.readiness'],
+  'admin-interaction-types': ['admin.interaction-types'],
+  'admin-integrations': ['admin.integrations']
+};
+
+function adminDeniedHtml(message) {
+  return `<div class="placeholder"><h2>Доступ запрещён</h2><p>${escapeHtml(message || 'У вас нет прав на этот раздел')}</p></div>`;
+}
+
 function renderAdminSection(section) {
   injectAdminModals();
+  const main = document.getElementById('mainContent');
+
+  // «Права и роли» — только разработчик (супер-админ).
+  if (section === 'admin-permissions') {
+    if (!isDeveloper()) { if (main) main.innerHTML = adminDeniedHtml('Права и роли доступны только разработчику'); return; }
+    renderAdminPermissions();
+    return;
+  }
+
+  // Остальные разделы — по матрице прав.
+  const required = ADMIN_SECTION_PERMISSIONS[section];
+  if (required && !isDeveloper() && !required.some(p => can(p))) {
+    if (main) main.innerHTML = adminDeniedHtml();
+    return;
+  }
+
   if (section === 'admin-analysis') renderAdminAnalysis();
   else if (section === 'admin-users') renderAdminUsers();
   else if (section === 'admin-task-columns') renderAdminTaskColumns();
   else if (section === 'admin-interaction-types') renderAdminInteractionTypes();
   else if (section === 'admin-integrations') renderAdminIntegrations();
+}
+
+/* ===================== Права и роли =====================
+   Матрица доступа (только разработчик): строки — права по группам,
+   столбцы — admin/manager/lead. developer в таблице нет — у него всё. */
+
+const PERMISSION_ROLES = ['admin', 'manager', 'lead'];
+const PERMISSION_ROLE_TITLES = { admin: 'Администратор', manager: 'Менеджер', lead: 'Руководитель' };
+
+function renderAdminPermissions() {
+  const main = document.getElementById('mainContent');
+  if (!main) return;
+
+  const groups = [];
+  const byGroup = {};
+  (permissions || []).forEach(p => {
+    const g = p.group || 'Прочее';
+    if (!byGroup[g]) { byGroup[g] = []; groups.push(g); }
+    byGroup[g].push(p);
+  });
+
+  const checked = (role, permId) => {
+    const list = rolePermissions && rolePermissions[role];
+    return Array.isArray(list) && list.indexOf(permId) > -1;
+  };
+
+  main.innerHTML = `
+    <div style="padding:25px;max-width:1100px;margin:0 auto;height:100%;box-sizing:border-box;overflow-y:auto;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h1 style="font-size:22px;font-weight:600;color:#1a3a5c;">Права и роли</h1>
+        <button class="btn" onclick="savePermissionsFromAdmin()">Сохранить</button>
+      </div>
+      <p style="font-size:12px;color:#9ca3af;margin-bottom:20px;">
+        Отметьте права для каждой роли. Роль «Разработчик» здесь не показывается — у неё всегда
+        все права. После сохранения изменения применяются к роли сразу.
+      </p>
+      ${groups.length === 0
+        ? '<div class="empty-state" style="padding:30px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;"><p>Справочник прав пуст</p></div>'
+        : `
+        <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:auto;">
+          <table class="admin-table">
+            <thead><tr>
+              <th>Право</th>
+              ${PERMISSION_ROLES.map(r => `<th style="text-align:center;">${escapeHtml(PERMISSION_ROLE_TITLES[r])}</th>`).join('')}
+            </tr></thead>
+            <tbody>
+              ${groups.map(g => `
+                <tr><td colspan="${PERMISSION_ROLES.length + 1}" style="background:#f8fafc;font-weight:600;color:#475569;">${escapeHtml(g)}</td></tr>
+                ${byGroup[g].map(p => `
+                  <tr>
+                    <td>${escapeHtml(p.title)}<div class="field-hint">${escapeHtml(p.id)}</div></td>
+                    ${PERMISSION_ROLES.map(r => `<td style="text-align:center;"><input type="checkbox" id="perm_${r}_${p.id}" ${checked(r, p.id) ? 'checked' : ''}></td>`).join('')}
+                  </tr>`).join('')}
+              `).join('')}
+            </tbody>
+          </table>
+        </div>`}
+    </div>
+  `;
+}
+
+function savePermissionsFromAdmin() {
+  const next = {};
+  PERMISSION_ROLES.forEach(r => { next[r] = []; });
+  (permissions || []).forEach(p => {
+    PERMISSION_ROLES.forEach(r => {
+      const el = document.getElementById('perm_' + r + '_' + p.id);
+      if (el && el.checked) next[r].push(p.id);
+    });
+  });
+
+  rolePermissions = next;
+  if (typeof queueServerSave === 'function') queueServerSave();
+
+  if (typeof fetch !== 'function') { renderAdminPermissions(); return; }
+  fetch('/api/permissions', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rolePermissions: next })
+  }).then(res => res.json()).then(j => {
+    if (j && j.ok) {
+      rolePermissions = j.rolePermissions || next;
+      alert('Матрица прав сохранена');
+    } else {
+      alert((j && j.error) || 'Не удалось сохранить матрицу прав');
+    }
+    renderAdminPermissions();
+  }).catch(() => {
+    renderAdminPermissions();
+  });
 }
 
 /* ===================== Интеграции ===================== */
@@ -1044,7 +1165,8 @@ function roleBadgeHtml(u) {
   const styles = {
     admin: 'background:#dbeafe;color:#1e40af;',
     lead: 'background:#ede9fe;color:#5b21b6;',
-    manager: 'background:#f3f4f6;color:#4b5563;'
+    manager: 'background:#f3f4f6;color:#4b5563;',
+    developer: 'background:#1e293b;color:#f8fafc;'
   };
   return '<span class="badge" style="' + (styles[role] || styles.manager) + '">' +
     escapeHtml(userRoleLabel(u)) + '</span>';
@@ -1066,7 +1188,10 @@ function renderAdminUsers() {
             <th>Логин</th><th>ФИО</th><th>Должность</th><th>Пароль</th><th>Роль</th><th style="text-align:right;">Действия</th>
           </tr></thead>
           <tbody>
-            ${users.map(u => `
+            ${users.map(u => {
+              const isDev = normalizeRole(u.role) === ROLE_DEVELOPER;
+              const canManage = !isDev || isDeveloper();
+              return `
               <tr style="cursor:default;">
                 <td><strong>${escapeHtml(u.login)}</strong></td>
                 <td>${escapeHtml(u.name || '—')}</td>
@@ -1074,11 +1199,11 @@ function renderAdminUsers() {
                 <td><span style="font-family:'Courier New',monospace;">${escapeHtml(u.password)}</span></td>
                 <td>${roleBadgeHtml(u)}</td>
                 <td style="text-align:right;white-space:nowrap;">
-                  <button class="btn-icon-btn" style="font-size:12px;" onclick="openUserModal(${u.id})" title="Редактировать">Изменить</button>
-                  <button class="btn-icon-btn" style="font-size:12px;color:#e53e3e;" onclick="removeUser(${u.id})" title="Удалить">Удалить</button>
+                  ${canManage ? `<button class="btn-icon-btn" style="font-size:12px;" onclick="openUserModal(${u.id})" title="Редактировать">Изменить</button>
+                  <button class="btn-icon-btn" style="font-size:12px;color:#e53e3e;" onclick="removeUser(${u.id})" title="Удалить">Удалить</button>` : '<span class="field-hint">только разработчик</span>'}
                 </td>
-              </tr>
-            `).join('')}
+              </tr>`;
+            }).join('')}
           </tbody>
         </table>
       </div>
@@ -1096,7 +1221,16 @@ function openUserModal(id = null) {
   const pwdInput = document.getElementById('userPassword');
   pwdInput.value = u ? u.password : ''; // существующий пароль не сбрасываем
   pwdInput.placeholder = u ? 'Введите новый, если хотите сменить' : 'Пароль';
-  document.getElementById('userRole').value = u ? normalizeRole(u.role) : ROLE_MANAGER;
+
+  // Роль «Разработчик» в списке видит только сам разработчик.
+  const roleSelect = document.getElementById('userRole');
+  const role = u ? normalizeRole(u.role) : ROLE_MANAGER;
+  roleSelect.innerHTML =
+    '<option value="manager">Менеджер по продажам</option>' +
+    '<option value="lead">Руководитель</option>' +
+    '<option value="admin">Администратор</option>' +
+    (isDeveloper() ? '<option value="developer">Разработчик</option>' : '');
+  roleSelect.value = role;
   document.getElementById('userModal').classList.add('active');
 }
 

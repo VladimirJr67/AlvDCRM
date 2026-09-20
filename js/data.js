@@ -14,3 +14,5 @@ let matrices = [];                // заказы матриц: шифр, пок
 let clientTransferRequests = [];  // запросы на перенос клиента к другому менеджеру
 let chatManagers = [];            // чат менеджеров по продажам
 let chatLeads = [];               // чат руководителей
+let permissions = [];             // каталог прав: { id, title, group }
+let rolePermissions = {};         // матрица доступа: роль -> [права]

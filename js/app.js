@@ -11,7 +11,7 @@ const STARTABLE_SECTIONS = [
   'orders', 'clients', 'tasks', 'reminders', 'news', 'contacts',
   'contacts-internal', 'contacts-mobile', 'notifications', 'chat', 'tracking',
   'manager-tools', 'admin-analysis', 'admin-users', 'admin-task-columns',
-  'admin-readiness', 'admin-interaction-types', 'admin-integrations'
+  'admin-readiness', 'admin-interaction-types', 'admin-integrations', 'admin-permissions'
 ];
 let menuHandlerAttached = false;
 let clientsTopHeight = null;
@@ -90,15 +90,17 @@ function buildSidebar() {
     html += addItem('tracking', 'Отслеживание задач');
   }
   if (admin) {
-    html += addItem('admin', 'Администрирование', { submenu: [
-      { section: 'admin-analysis', label: 'Анализ' },
-      { section: 'admin-users', label: 'Пользователи' },
-      // Назначение задач живёт в главном меню «Задачи», в админке его нет.
-      { section: 'admin-task-columns', label: 'Столбцы задач' },
-      { section: 'admin-readiness', label: 'Готовность' },
-      { section: 'admin-interaction-types', label: 'Типы взаимодействий' },
-      { section: 'admin-integrations', label: 'Интеграции' }
-    ] });
+    // Пункты админки показываются по правам (матрица «Права и роли»).
+    // developer видит всё, включая сам раздел «Права и роли».
+    const adminItems = [];
+    if (can('reports.sales') || can('reports.comments')) adminItems.push({ section: 'admin-analysis', label: 'Анализ' });
+    if (can('admin.users')) adminItems.push({ section: 'admin-users', label: 'Пользователи' });
+    if (can('admin.columns')) adminItems.push({ section: 'admin-task-columns', label: 'Столбцы задач' });
+    if (can('admin.readiness')) adminItems.push({ section: 'admin-readiness', label: 'Готовность' });
+    if (can('admin.interaction-types')) adminItems.push({ section: 'admin-interaction-types', label: 'Типы взаимодействий' });
+    if (can('admin.integrations')) adminItems.push({ section: 'admin-integrations', label: 'Интеграции' });
+    if (isDeveloper()) adminItems.push({ section: 'admin-permissions', label: 'Права и роли' });
+    html += addItem('admin', 'Администрирование', { submenu: adminItems });
   }
 
   menu.innerHTML = html;
@@ -988,8 +990,8 @@ function renderSection(section) {
   } else if (section === 'tracking') {
     renderTracking();
   } else if (section === 'admin-readiness') {
-    if (!isAdmin()) {
-      main.innerHTML = `<div class="placeholder"><h2>Доступ запрещён</h2><p>Загружать готовность может только администратор</p></div>`;
+    if (!can('admin.readiness')) {
+      main.innerHTML = `<div class="placeholder"><h2>Доступ запрещён</h2><p>Загружать готовность может только администратор или разработчик</p></div>`;
       return;
     }
     renderAdminReadiness();
