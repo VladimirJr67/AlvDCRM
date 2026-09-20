@@ -509,9 +509,10 @@ function historyEntryHtml(h, opts) {
     : '';
   return `
     <div class="history-entry">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+      <div style="display:flex;align-items:center;gap:8px;">
         <span style="font-size:11px;color:#9ca3af;">${formatDate(h.date)}${h.editedAt ? ' · изменено' : ''}</span>
         <span class="badge">${escapeHtml(h.type)}</span>
+        <span style="flex:1 1 auto;"></span>
         ${editBtn}
       </div>
       <div class="history-comment">${escapeHtml(h.comment)}</div>
@@ -1257,22 +1258,21 @@ function createTasksForActivity(opts) {
   return result;
 }
 
-// Строка состояния активности в списке комментариев.
+// Строка состояния активности в списке комментариев. Статус «закрыта» больше
+// не показываем — он только дублировал факт назначенной даты и путал; оставляем
+// полезное: следующую активность и привязанную задачу.
 function activityStatusHtml(entry) {
   if (!entry) return '';
   const next = entry.nextActivityAt ? formatActivityMoment(entry.nextActivityAt) : '';
-  const closed = !!entry.closedAt;
-  if (!next && !closed) return '';
-  const badge = closed
-    ? '<span class="badge" style="background:#dcfce7;color:#166534;">закрыта</span>'
-    : '<span class="badge" style="background:#fef3c7;color:#92400e;">не закрыта — нужна следующая дата</span>';
+  const taskId = entry.taskId;
+  if (!next && !taskId) return '';
   const nextLine = next
-    ? `<span style="margin-left:6px;color:#1d4ed8;">следующая активность: ${escapeHtml(next)}</span>`
+    ? `<span style="color:#1d4ed8;">следующая активность: ${escapeHtml(next)}</span>`
     : '';
-  const taskLine = entry.taskId
-    ? `<span style="margin-left:6px;color:#6b7280;">задача №${entry.taskId}</span>`
+  const taskLine = taskId
+    ? `<span style="margin-left:6px;color:#6b7280;">задача №${taskId}</span>`
     : '';
-  return `<div style="font-size:11px;margin-top:5px;">${badge}${nextLine}${taskLine}</div>`;
+  return `<div style="font-size:11px;margin-top:5px;">${nextLine}${taskLine}</div>`;
 }
 
 // Стоимость за килограмм. null, если данных не хватает: нулевой вес или
