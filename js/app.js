@@ -950,6 +950,10 @@ function renderSection(section) {
   const main = document.getElementById('mainContent');
   if (!main) return;
 
+  // Разделы администрирования скроллятся на корневом контейнере (скроллбар
+  // у правого края окна), а их контент остаётся по центру за счёт max-width.
+  main.classList.toggle('admin-scroll', section.startsWith('admin'));
+
   if (section === 'clients') {
     main.innerHTML = `
       <div class="clients-split" id="clientsSplit">

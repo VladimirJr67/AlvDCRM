@@ -90,8 +90,7 @@ function renderAdminPermissions() {
   };
 
   main.innerHTML = `
-    <div style="height:100%;box-sizing:border-box;overflow-y:auto;">
-      <div style="padding:25px;max-width:1100px;margin:0 auto;">
+    <div style="padding:25px;max-width:1100px;margin:0 auto;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
         <h1 style="font-size:22px;font-weight:600;color:#1a3a5c;">Права и роли</h1>
         <button class="btn" onclick="savePermissionsFromAdmin()">Сохранить</button>
@@ -121,7 +120,6 @@ function renderAdminPermissions() {
             </tbody>
           </table>
         </div>`}
-      </div>
     </div>
   `;
 }
@@ -188,8 +186,7 @@ async function renderAdminLoginBackground() {
   const files = (status && status.files) || [];
 
   main.innerHTML = `
-    <div style="height:100%;box-sizing:border-box;overflow-y:auto;">
-      <div style="padding:25px;max-width:860px;margin:0 auto;">
+    <div style="padding:25px;max-width:860px;margin:0 auto;">
       <h1 style="font-size:22px;font-weight:600;color:#1a3a5c;margin-bottom:6px;">Фон страницы входа</h1>
       <p style="font-size:12px;color:#9ca3af;margin-bottom:20px;">
         Фото, видео или анимация на весь экран входа. Изменения видны после обновления страницы входа (Ctrl+F5).
@@ -227,7 +224,6 @@ async function renderAdminLoginBackground() {
                 </tr>`).join('')}
             </tbody>
           </table>` : '<div class="field-hint">Загруженных файлов пока нет.</div>'}
-      </div>
       </div>
     </div>
   `;
@@ -306,8 +302,7 @@ async function renderAdminIntegrations() {
   if (!main) return;
 
   main.innerHTML = `
-    <div style="height:100%;box-sizing:border-box;overflow-y:auto;">
-      <div style="padding:25px;max-width:820px;margin:0 auto;">
+    <div style="padding:25px;max-width:820px;margin:0 auto;">
       <div style="margin-bottom:20px;">
         <h1 style="font-size:22px;font-weight:600;color:#1a3a5c;">Интеграции</h1>
       </div>
@@ -352,7 +347,6 @@ async function renderAdminIntegrations() {
           (46 стран, 566 городов). Кнопка «Заполнить по ИНН» в карточке клиента сообщит,
           что сервис не настроен. Новые города можно просто дописать в массив <code>CITY_FALLBACK</code>.
         </div>
-      </div>
       </div>
     </div>`;
 
@@ -427,8 +421,7 @@ function renderAdminInteractionTypes() {
   if (!main) return;
 
   main.innerHTML = `
-    <div style="height:100%;box-sizing:border-box;overflow-y:auto;">
-      <div style="padding:25px;max-width:860px;margin:0 auto;">
+    <div style="padding:25px;max-width:860px;margin:0 auto;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;gap:10px;">
         <h1 style="font-size:22px;font-weight:600;color:#1a3a5c;">Типы взаимодействий</h1>
         <button class="btn btn-secondary" onclick="goToSection('admin-task-columns')">Столбцы и привязки</button>
@@ -479,7 +472,6 @@ function renderAdminInteractionTypes() {
             `}
           </tbody>
         </table>
-      </div>
       </div>
     </div>
   `;
@@ -569,8 +561,7 @@ function renderAdminTaskColumns() {
   const ownUsed = ownList.reduce((sum, c) => sum + tasks.filter(t => t.status === c.id).length, 0);
 
   main.innerHTML = `
-    <div style="height:100%;box-sizing:border-box;overflow-y:auto;">
-      <div style="padding:25px;max-width:1000px;margin:0 auto;">
+    <div style="padding:25px;max-width:1000px;margin:0 auto;">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:16px;">
         <h1 style="font-size:22px;font-weight:600;color:#1a3a5c;">Столбцы задач</h1>
         <button class="btn btn-secondary" onclick="applyRecommendedBindingsFromAdmin()">Создать столбцы и привязки по ТЗ</button>
@@ -648,7 +639,6 @@ function renderAdminTaskColumns() {
             }).join('') : '<tr><td colspan="2" style="text-align:center;color:#9ca3af;padding:24px;">Типы не добавлены</td></tr>'}
           </tbody>
         </table>
-      </div>
       </div>
     </div>
   `;
@@ -810,8 +800,7 @@ function renderAdminReadiness() {
   const totals = status.totals || null;
 
   main.innerHTML = `
-    <div style="height:100%;box-sizing:border-box;overflow-y:auto;">
-      <div style="padding:25px;max-width:900px;margin:0 auto;">
+    <div style="padding:25px;max-width:900px;margin:0 auto;">
       <h1 style="font-size:22px;font-weight:600;color:#1a3a5c;margin-bottom:16px;">Готовность по спецификациям</h1>
 
       <p style="font-size:12px;color:#9ca3af;margin-bottom:18px;">
@@ -887,7 +876,6 @@ function renderAdminReadiness() {
             ${report.ordersWithoutData.map(o => escapeHtml(o.specification)).join(', ')}
           </div>` : ''}
       ` : ''}
-      </div>
     </div>
   `;
 
@@ -1056,8 +1044,7 @@ function renderAdminAnalysis() {
     </div>`;
 
   main.innerHTML = `
-    <div style="height:100%;box-sizing:border-box;overflow-y:auto;">
-      <div style="padding:25px;max-width:1100px;margin:0 auto;">
+    <div style="padding:25px;max-width:1100px;margin:0 auto;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
         <h1 style="font-size:22px;font-weight:600;color:#1a3a5c;">Анализ</h1>
         ${adminAnalysisTab === 'comments'
@@ -1067,7 +1054,6 @@ function renderAdminAnalysis() {
       ${tabs}
       ${dateBar}
       ${adminAnalysisTab === 'comments' ? renderAdminCommentsFeed() : renderAdminStats()}
-      </div>
     </div>
   `;
 }
@@ -1334,8 +1320,7 @@ function renderAdminUsers() {
   if (!main) return;
 
   main.innerHTML = `
-    <div style="height:100%;box-sizing:border-box;overflow-y:auto;">
-      <div style="padding:25px;max-width:1000px;margin:0 auto;">
+    <div style="padding:25px;max-width:1000px;margin:0 auto;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
         <h1 style="font-size:22px;font-weight:600;color:#1a3a5c;">Пользователи</h1>
         <button class="btn" onclick="openUserModal()">+ Добавить пользователя</button>
@@ -1364,7 +1349,6 @@ function renderAdminUsers() {
             }).join('')}
           </tbody>
         </table>
-      </div>
       </div>
     </div>
   `;
