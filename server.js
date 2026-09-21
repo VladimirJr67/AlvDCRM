@@ -395,6 +395,7 @@ const PERMISSIONS = [
   { id: 'clients.import', title: 'Импорт клиентов', group: 'Клиенты' },
   { id: 'clients.export', title: 'Экспорт клиентов', group: 'Клиенты' },
   { id: 'clients.transfer', title: 'Перенос клиентов', group: 'Клиенты' },
+  { id: 'clients.viewAll', title: 'Просмотр всех клиентов', group: 'Клиенты' },
   { id: 'contacts.edit', title: 'Редактирование контактов', group: 'Контакты' },
   { id: 'contacts.delete', title: 'Удаление контактов', group: 'Контакты' },
   { id: 'tasks.create', title: 'Создание задач', group: 'Задачи' },
@@ -435,7 +436,7 @@ function defaultRolePermissions() {
     'chat.managers'
   ];
   const lead = manager.concat([
-    'tasks.assign', 'tasks.track', 'orders.viewAll',
+    'tasks.assign', 'tasks.track', 'orders.viewAll', 'clients.viewAll',
     'reports.comments', 'reports.sales', 'chat.leads'
   ]);
   return {
@@ -523,16 +524,32 @@ function normalizeDb(db) {
   d.activityToColumnMap = plainObject(d.activityToColumnMap);
 
   // --- Права и роли ---
-  // Каталог прав пополняем, если он пуст (список — системный справочник, его
-  // не редактируют вручную). Матрицу rolePermissions сидируем один раз — только
-  // если в базе её ещё нет: дальше ей управляет разработчик в «Права и роли».
+  // Каталог прав — системный справочник: дополняем недостающими правами
+  // (например, новые «clients.viewAll»), не трогая уже существующие.
+  // Матрицу rolePermissions сидируем один раз — только если в базе её ещё нет:
+  // дальше ей управляет разработчик в «Права и роли».
   d.permissions = asArray(d.permissions);
-  if (!d.permissions.length) d.permissions = PERMISSIONS.slice();
+  if (!d.permissions.length) {
+    d.permissions = PERMISSIONS.slice();
+  } else {
+    const existingIds = d.permissions.map(p => p && p.id).filter(Boolean);
+    PERMISSIONS.forEach(p => {
+      if (existingIds.indexOf(p.id) === -1) d.permissions.push(p);
+    });
+  }
   if (!(db && typeof db === 'object' && 'rolePermissions' in db)) {
     d.rolePermissions = defaultRolePermissions();
   } else {
     d.rolePermissions = plainObject(d.rolePermissions);
   }
+  // «Видеть всех клиентов» — базовое право администратора и руководителя:
+  // при появлении нового права в каталоге дописываем его в их матрицу.
+  ['admin', 'lead'].forEach(role => {
+    const list = asArray(d.rolePermissions[role]);
+    if (list.length && list.indexOf('clients.viewAll') === -1) {
+      d.rolePermissions[role] = list.concat(['clients.viewAll']);
+    }
+  });
 
   // Легаси/fresh-базы без коллекции — наполняем дефолтами.
   if (!(db && Array.isArray(db.interactionTypes)) && !d.interactionTypes.length) {

@@ -91,8 +91,9 @@ function visibleClientsForFilter() {
     return clients.filter(c => c.createdBy === currentUser.id);
   }
   if (f === 'all') {
-    // Администратор — все; пользователь — свои + общие (без владельца).
-    if (isAdmin()) return clients;
+    // Все компании: администратор/разработчик и роли с правом clients.viewAll
+    // видят всех клиентов; остальные — свои + общие (без владельца).
+    if (isAdmin() || (typeof can === 'function' && can('clients.viewAll'))) return clients;
     return clients.filter(c => c.createdBy === currentUser.id || !c.createdBy);
   }
   // Конкретный менеджер.
