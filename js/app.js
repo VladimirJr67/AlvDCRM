@@ -972,11 +972,6 @@ function renderSection(section) {
               ${managerPickerHtml()}
               <input type="text" class="search-bar" id="searchInput" placeholder="Поиск по названию, сайту, почте, телефону, адресу, ИНН/ОГРН, ID старой базы..." oninput="scheduleClientsSearch()" style="margin-bottom:0;flex:1;">
             </div>
-            ${isAdmin() ? `
-              <div class="import-comment-row">
-                <input type="text" id="importManagerComment" placeholder="Комментарий менеджеру при импорте (необязательно)">
-                <span class="field-hint">Уйдёт в уведомление вместе с количеством закреплённых клиентов.</span>
-              </div>` : ''}
             <div id="clientsImportResult" class="import-result" style="display:none;"></div>
           </div>
           <div class="clients-top-content" id="tableWrap"></div>

@@ -2167,17 +2167,14 @@ async function importClientsFromExcel(event) {
     saveClients(clients);
     renderClientsTable();
 
-    // Каждому менеджеру — одно уведомление с количеством закреплённых клиентов
-    // и комментарием администратора.
-    const commentEl = document.getElementById('importManagerComment');
-    const comment = commentEl ? commentEl.value.trim() : '';
+    // Каждому менеджеру — одно уведомление с количеством закреплённых клиентов.
+    // Поле комментария при импорте убрано — передаём пустую строку.
     const meId = currentUser ? currentUser.id : null;
     Object.keys(result.owners).forEach(uid => {
       const ownerId = parseInt(uid, 10);
       if (ownerId === meId) return;
-      notifyClientTransfer(ownerId, result.owners[uid], comment);
+      notifyClientTransfer(ownerId, result.owners[uid], '');
     });
-    if (commentEl) commentEl.value = '';
 
     const parts = ['Импортировано клиентов: ' + result.list.length];
     if (result.duplicates) parts.push('уже были в базе (по ID старой базы): ' + result.duplicates);

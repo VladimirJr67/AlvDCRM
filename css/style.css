@@ -718,14 +718,6 @@ select[multiple] option:checked { background: #3b82f6; color: #fff; }
   padding: 2px 8px; border-radius: 10px; white-space: nowrap;
 }
 
-/* Комментарий в почтовом ящике импорта */
-.import-comment-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
-.import-comment-row input {
-  flex: 1; min-width: 240px; padding: 8px 11px; border: 1px solid #d0d5dd;
-  border-radius: 6px; font-size: 12.5px; outline: none;
-}
-.import-comment-row input:focus { border-color: #3b82f6; }
-
 /* Окно «Особые отметки» */
 .note-form { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; margin-bottom: 16px; }
 .note-form textarea {
