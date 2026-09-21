@@ -213,6 +213,39 @@ function stopSessionKeepAlive() {
   sessionKeepAliveTimer = null;
 }
 
+/* ===== Фон страницы входа ===== */
+
+// Фон задаёт разработчик в config.local.json (loginBackground). Сервер
+// подставляет путь в window.__LOGIN_BACKGROUND__ при отдаче index.html.
+// Пусто → оставляем стандартный светлый фон (клиент ничего не делает).
+function applyLoginBackground() {
+  const url = String(window.__LOGIN_BACKGROUND__ || '').trim();
+  const bg = document.getElementById('loginBg');
+  const overlay = document.getElementById('loginBgOverlay');
+  if (!url || !bg) return;
+
+  if (/\.(mp4|webm)$/i.test(url)) {
+    const video = document.createElement('video');
+    video.autoplay = true;
+    video.muted = true;
+    video.loop = true;
+    video.playsInline = true;
+    const source = document.createElement('source');
+    source.src = url;
+    source.type = /\.webm$/i.test(url) ? 'video/webm' : 'video/mp4';
+    video.appendChild(source);
+    bg.appendChild(video);
+  } else {
+    const img = document.createElement('img');
+    img.src = url;
+    img.alt = '';
+    bg.appendChild(img);
+  }
+  if (overlay) overlay.style.display = 'block';
+}
+
+document.addEventListener('DOMContentLoaded', applyLoginBackground);
+
 /* ===== Мелкие обработчики формы ===== */
 
 document.addEventListener('DOMContentLoaded', () => {

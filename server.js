@@ -82,6 +82,15 @@ function dadataConfigured() {
   return !!dadataToken();
 }
 
+// Фон страницы входа: путь к файлу в config.local.json (loginBackground) или null.
+// Файлы кладутся в assets/login/ и отдаются как статика (например
+// /assets/login/photo.jpg). Если пусто — используется стандартный светлый фон.
+function loginBackground() {
+  const cfg = loadConfig();
+  const v = (cfg && cfg.loginBackground) || '';
+  return String(v).trim() || null;
+}
+
 // Запросы, меняющие конфигурацию, принимаем только с этой машины (loopback):
 // полноценной авторизации у приложения нет, поэтому ключ нельзя разрешать
 // записывать любому, кто дотянется до порта по сети.
@@ -1279,8 +1288,11 @@ const MIME = {
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.gif': 'image/gif',
+  '.webp': 'image/webp',
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
   '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 };
 
@@ -1305,6 +1317,28 @@ function serveFile(filePath, res) {
 
     res.writeHead(200, headers);
     res.end(data);
+  });
+}
+
+// index.html с подстановкой фона входа (loginBackground из config.local.json).
+// Пустой фон → в index.html попадает null, и клиент оставляет стандартный фон.
+function serveIndex(res) {
+  const filePath = path.join(ROOT, 'index.html');
+  fs.readFile(filePath, 'utf8', (err, html) => {
+    if (err) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('Not found');
+      return;
+    }
+    const script = `<script>window.__LOGIN_BACKGROUND__=${JSON.stringify(loginBackground())};</script>`;
+    const out = html.replace('</body>', script + '</body>');
+    res.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0'
+    });
+    res.end(out);
   });
 }
 
@@ -1680,6 +1714,13 @@ const server = http.createServer((req, res) => {
   }
 
   // ---- Статика ----
+  // index.html отдаём с инъекцией фона входа из config.local.json: клиент не
+  // читает config напрямую, а получает только готовый путь к фону.
+  if (pathname === '/') {
+    serveIndex(res);
+    return;
+  }
+
   let filePath = pathname === '/' ? path.join(ROOT, 'index.html') : path.join(ROOT, pathname);
 
   // Конфигурацию с API-ключами, базу и её резервные копии как статику
