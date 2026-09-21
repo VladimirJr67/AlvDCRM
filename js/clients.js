@@ -1549,7 +1549,7 @@ function matrixExtraText(matrixData) {
   return parts.join('\n');
 }
 
-// Записи заказов матриц: по одной на шифр, статус — «Поступила».
+// Записи заказов матриц: по одной на шифр, статус — «Поступила», источник — «Заказ матриц».
 function saveMatrixOrders(client, ciphers, coating, comment) {
   ciphers.forEach(cipher => {
     addMatrix({
@@ -1559,6 +1559,7 @@ function saveMatrixOrders(client, ciphers, coating, comment) {
       clientId: client ? client.id : null,
       clientName: client ? client.orgName : '',
       comment: comment || '',
+      source: 'order',
       createdBy: currentUser ? currentUser.id : null
     });
   });

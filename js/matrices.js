@@ -42,8 +42,9 @@ function saveMatrices() {
   queueServerSave();
 }
 
-// Новая запись матрицы. Общая точка входа: и для ручного добавления,
-// и для активности «Заказ матриц».
+// Новая запись матрицы. Общая точка входа: для активности «Заказ матриц»
+// (source: 'order') и для ручного добавления в «Учёт матриц»/карточке клиента
+// (source: 'manual').
 function addMatrix(data) {
   const maxId = matrices.reduce((m, x) => Math.max(m, x.id || 0), 0);
   const status = MATRIX_STATUSES.indexOf(data.status) > -1 ? data.status : MATRIX_STATUSES[0];
@@ -56,6 +57,9 @@ function addMatrix(data) {
     clientName: (data.clientName || '').trim(),
     date: data.date || new Date().toISOString().slice(0, 10),
     comment: (data.comment || '').trim(),
+    weightPerM: (data.weightPerM || '').trim(),
+    press: (data.press || '').trim(),
+    source: data.source === 'order' ? 'order' : 'manual',
     createdAt: new Date().toISOString(),
     createdBy: data.createdBy !== undefined ? data.createdBy : (currentUser ? currentUser.id : null)
   };
@@ -360,11 +364,11 @@ function deleteMatrix(id) {
 const CLIENT_MATRIX_PRESSES = ['5', '7', '8', '7/8'];
 
 function clientMatricesFor(clientId) {
-  return (clientMatrices || []).filter(m => m && String(m.clientId) === String(clientId));
+  return (matrices || []).filter(m => m && String(m.clientId) === String(clientId));
 }
 
 function saveClientMatrices() {
-  if (typeof queueServerSave === 'function') queueServerSave();
+  saveMatrices();
 }
 
 function updateClientMatricesCount(clientId) {
@@ -396,7 +400,7 @@ function resetClientMatrixForm() {
 function renderClientMatricesList(clientId) {
   const tbody = document.getElementById('clientMatricesTableBody');
   const modalCount = document.getElementById('clientMatricesModalCount');
-  const list = clientMatricesFor(clientId);
+  const list = clientMatricesFor(clientId).sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
   if (modalCount) modalCount.textContent = list.length ? `(${list.length})` : '';
   updateClientMatricesCount(clientId);
   if (!tbody) return;
@@ -408,7 +412,7 @@ function renderClientMatricesList(clientId) {
   tbody.innerHTML = list.map(m => `
     <tr>
       <td><strong>${escapeHtml(m.cipher || '—')}</strong></td>
-      <td>${escapeHtml(m.weight || '—')}</td>
+      <td>${escapeHtml(m.weightPerM || '—')}</td>
       <td>${escapeHtml(m.press || '—')}</td>
       <td style="text-align:right;white-space:nowrap;">
         <button class="btn-icon-btn" onclick="deleteClientMatrix(${m.id})" title="Удалить матрицу">Удалить</button>
@@ -421,34 +425,137 @@ function addClientMatrix(e) {
   const clientIdRaw = document.getElementById('clientMatricesClientId').value;
   const clientId = clientIdRaw ? parseInt(clientIdRaw, 10) : null;
   if (!clientId) { alert('Сначала выберите клиента'); return; }
+  const client = clients.find(c => c.id === clientId);
 
   const cipher = String(document.getElementById('clientMatrixCipher').value || '').trim();
   if (!cipher) { alert('Укажите шифр матрицы'); return; }
-  const weight = String(document.getElementById('clientMatrixWeight').value || '').trim();
+  const weightPerM = String(document.getElementById('clientMatrixWeight').value || '').trim();
   const press = document.getElementById('clientMatrixPress').value;
 
-  const maxId = (clientMatrices || []).reduce((m, x) => Math.max(m, x.id || 0), 0);
-  clientMatrices.push({
-    id: maxId + 1,
-    clientId: clientId,
+  addMatrix({
     cipher: cipher,
-    weight: weight,
+    weightPerM: weightPerM,
     press: press,
-    createdAt: new Date().toISOString(),
+    clientId: clientId,
+    clientName: client ? (client.orgName || '') : '',
+    source: 'manual',
     createdBy: currentUser ? currentUser.id : null
   });
-  saveClientMatrices();
   resetClientMatrixForm();
   renderClientMatricesList(clientId);
 }
 
 function deleteClientMatrix(id) {
-  const m = (clientMatrices || []).find(x => x.id === id);
+  const m = (matrices || []).find(x => x.id === id);
   if (!m) return;
   if (!confirm(`Удалить матрицу «${m.cipher || '—'}»?`)) return;
-  clientMatrices = (clientMatrices || []).filter(x => x.id !== id);
-  saveClientMatrices();
+  matrices = (matrices || []).filter(x => x.id !== id);
+  saveMatrices();
   renderClientMatricesList(m.clientId);
+}
+
+/* ============================================================
+   «Учёт матриц» — общий список всех матриц: и созданные активностью
+   «Заказ матриц» (source: 'order'), и добавленные вручную (source: 'manual').
+   Одна коллекция matrices — та же, что в карточке клиента.
+   ============================================================ */
+
+let matrixAccountingSearch = '';
+
+function matrixAccountingList() {
+  const q = String(matrixAccountingSearch || '').trim().toLowerCase();
+  return [...matrices]
+    .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+    .filter(m => {
+      if (!q) return true;
+      const clientName = String(m.clientName || '').toLowerCase();
+      const cipher = String(m.cipher || '').toLowerCase();
+      const weight = String(m.weightPerM || '').toLowerCase();
+      return clientName.includes(q) || cipher.includes(q) || weight.includes(q);
+    });
+}
+
+function setMatrixAccountingSearch(value) {
+  matrixAccountingSearch = value || '';
+  renderMatrixAccounting();
+}
+
+function renderMatrixAccounting() {
+  const main = document.getElementById('mainContent');
+  if (!main) return;
+  const canAdd = isAdmin() || (typeof can === 'function' && can('matrices.create'));
+  const list = matrixAccountingList();
+
+  main.innerHTML = `
+    <div style="padding:22px 24px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:10px;flex-wrap:wrap;">
+        <h1 style="font-size:22px;font-weight:600;color:#1a3a5c;">Учёт матриц</h1>
+        ${canAdd ? '<button class="btn" onclick="openMatrixAccountingModal()">+ Добавить матрицу</button>' : ''}
+      </div>
+      <div style="margin-bottom:14px;">
+        <input type="text" class="search-bar" placeholder="Поиск по шифру, клиенту, весу…" value="${escapeHtml(matrixAccountingSearch)}" oninput="setMatrixAccountingSearch(this.value)" style="max-width:420px;margin-bottom:0;">
+      </div>
+      <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:auto;">
+        <table class="admin-table">
+          <thead><tr><th>Клиент</th><th>Шифр</th><th>Вес за м/п</th><th>Пресс</th>${canAdd ? '<th style="text-align:right;">Действия</th>' : ''}</tr></thead>
+          <tbody>
+            ${list.length ? list.map(m => `
+              <tr style="cursor:default;">
+                <td>${m.clientId
+                  ? `<a href="#" onclick="event.preventDefault();goToClient(${m.clientId});">${escapeHtml(m.clientName || '—')}</a>`
+                  : escapeHtml(m.clientName || '—')}</td>
+                <td><strong>${escapeHtml(m.cipher || '—')}</strong></td>
+                <td>${escapeHtml(m.weightPerM || '—')}</td>
+                <td>${escapeHtml(m.press || '—')}</td>
+                ${canAdd ? `<td style="text-align:right;white-space:nowrap;"><button class="btn-icon-btn" onclick="deleteMatrixAccounting(${m.id})" title="Удалить матрицу">Удалить</button></td>` : ''}
+              </tr>`).join('') : `<tr><td colspan="5" style="text-align:center;color:#9ca3af;padding:30px;">Матриц пока нет</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function openMatrixAccountingModal() {
+  const modal = document.getElementById('matrixAccountingModal');
+  if (!modal) return;
+  document.getElementById('matrixAccountingCipher').value = '';
+  document.getElementById('matrixAccountingWeight').value = '';
+  document.getElementById('matrixAccountingPress').value = CLIENT_MATRIX_PRESSES[0];
+  document.getElementById('matrixAccountingClient').innerHTML = matrixClientSelectOptions('');
+  modal.classList.add('active');
+}
+
+function saveMatrixAccounting(e) {
+  if (e && e.preventDefault) e.preventDefault();
+  const cipher = String(document.getElementById('matrixAccountingCipher').value || '').trim();
+  if (!cipher) { alert('Укажите шифр матрицы'); return; }
+  const clientIdRaw = document.getElementById('matrixAccountingClient').value;
+  const clientId = clientIdRaw ? parseInt(clientIdRaw, 10) : null;
+  const client = clientId ? clients.find(c => c.id === clientId) : null;
+  const weightPerM = String(document.getElementById('matrixAccountingWeight').value || '').trim();
+  const press = document.getElementById('matrixAccountingPress').value;
+
+  addMatrix({
+    cipher: cipher,
+    clientId: clientId,
+    clientName: client ? (client.orgName || '') : '',
+    weightPerM: weightPerM,
+    press: press,
+    source: 'manual',
+    createdBy: currentUser ? currentUser.id : null
+  });
+  closeModal('matrixAccountingModal');
+  renderMatrixAccounting();
+}
+
+function deleteMatrixAccounting(id) {
+  const m = (matrices || []).find(x => x.id === id);
+  if (!m) return;
+  if (!confirm(`Удалить матрицу «${m.cipher || '—'}»?`)) return;
+  matrices = (matrices || []).filter(x => x.id !== id);
+  saveMatrices();
+  renderMatrixAccounting();
 }
 
 // Экспорт в Excel — только администратор; выгружается текущая выборка.

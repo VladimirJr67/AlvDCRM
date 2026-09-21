@@ -37,8 +37,14 @@ function el(id) {
 }
 
 const alerts = [];
+const store = {};
 const sandbox = {
   console, alert: m => alerts.push(String(m)), confirm: () => true,
+  localStorage: {
+    getItem: k => (k in store ? store[k] : null),
+    setItem: (k, v) => { store[k] = String(v); },
+    removeItem: k => { delete store[k]; }
+  },
   document: {
     getElementById: el, querySelector: () => null, querySelectorAll: () => [],
     addEventListener: () => {}, createElement: () => el('__c')
@@ -69,15 +75,16 @@ run(`
   el('clientMatrixWeight').value = '12';
   el('clientMatrixPress').value = '7';
   run('addClientMatrix({ preventDefault(){} })');
-  check('матрица добавлена с clientId', run('clientMatrices.length') === 1 && run('clientMatrices[0].clientId') === 1);
+  check('матрица добавлена с clientId', run('matrices.length') === 1 && run('matrices[0].clientId') === 1);
   check('поля сохранены (шифр/вес/пресс)',
-    run('clientMatrices[0].cipher') === 'ШФ-101' && run('clientMatrices[0].weight') === '12' && run('clientMatrices[0].press') === '7');
+    run('matrices[0].cipher') === 'ШФ-101' && run('matrices[0].weightPerM') === '12' && run('matrices[0].press') === '7');
+  check('источник — ручной', run('matrices[0].source') === 'manual');
   check('счётчик обновился', String(el('clientMatricesCount').textContent) === '(1)', el('clientMatricesCount').textContent);
 
   el('clientMatrixCipher').value = '   ';
   alerts.length = 0;
   run('addClientMatrix({ preventDefault(){} })');
-  check('пустой шифр отклонён', alerts.length === 1 && run('clientMatrices.length') === 1);
+  check('пустой шифр отклонён', alerts.length === 1 && run('matrices.length') === 1);
 
   check('фильтр по клиенту', run('clientMatricesFor(1).length') === 1 && run('clientMatricesFor(999).length') === 0);
 
@@ -85,9 +92,9 @@ run(`
   check('модалка открыта', el('clientMatricesModal').classList.contains('active'));
   check('заголовок с клиентом', /Ромашка/.test(el('clientMatricesModalTitle').textContent));
 
-  const id = run('clientMatrices[0].id');
+  const id = run('matrices[0].id');
   run(`deleteClientMatrix(${id})`);
-  check('матрица удалена', run('clientMatrices.length') === 0);
+  check('матрица удалена', run('matrices.length') === 0);
   check('счётчик обнулился', el('clientMatricesCount').textContent === '');
 
   console.log(failures ? `\n  Провалов: ${failures}` : '\n  Все проверки матриц клиента пройдены');

@@ -650,7 +650,7 @@ function normalizeDb(db) {
     if (typeof n.sound !== 'string' || !n.sound) n.sound = DEFAULT_NOTIFY_SETTINGS.sound;
   });
 
-  // --- Матрицы: шифр, покрытие, статус, клиент, дата ---
+  // --- Матрицы: шифр, покрытие, статус, клиент, дата + учёт (вес/пресс/источник) ---
   d.matrices.forEach(m => {
     if (!m || typeof m !== 'object') return;
     if (typeof m.cipher !== 'string') m.cipher = '';
@@ -660,8 +660,38 @@ function normalizeDb(db) {
     if (typeof m.clientName !== 'string') m.clientName = '';
     if (!('date' in m)) m.date = null;
     if (typeof m.comment !== 'string') m.comment = '';
+    if (typeof m.weightPerM !== 'string') m.weightPerM = '';
+    if (typeof m.press !== 'string') m.press = '';
+    if (m.source !== 'order' && m.source !== 'manual') m.source = 'manual';
+    if (!('createdAt' in m)) m.createdAt = null;
     if (!('createdBy' in m)) m.createdBy = null;
   });
+
+  // Миграция: прежняя коллекция «Матрицы клиента» (clientMatrices) объединяется
+  // с matrices — одна коллекция. Записи переносим как ручные (source: 'manual').
+  const legacyClientMatrices = asArray(d.clientMatrices).filter(m => m && m.cipher);
+  if (legacyClientMatrices.length) {
+    let maxId = d.matrices.reduce((mx, m) => Math.max(mx, m.id || 0), 0);
+    legacyClientMatrices.forEach(cm => {
+      maxId += 1;
+      d.matrices.push({
+        id: maxId,
+        cipher: String(cm.cipher || ''),
+        coating: '',
+        status: MATRIX_STATUS_DEFAULT,
+        clientId: cm.clientId != null ? cm.clientId : null,
+        clientName: '',
+        date: null,
+        comment: '',
+        weightPerM: typeof cm.weight === 'string' ? cm.weight : '',
+        press: typeof cm.press === 'string' ? cm.press : '',
+        source: 'manual',
+        createdAt: cm.createdAt || new Date().toISOString(),
+        createdBy: cm.createdBy != null ? cm.createdBy : null
+      });
+    });
+    d.clientMatrices = [];
+  }
 
   // --- Запросы на перенос клиента ---
   d.clientTransferRequests.forEach(r => {

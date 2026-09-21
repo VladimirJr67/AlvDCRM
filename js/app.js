@@ -8,7 +8,7 @@ let pollingStarted = false;
 
 // Разделы, которые можно открыть ссылкой /?section=… (проверяются при старте).
 const STARTABLE_SECTIONS = [
-  'orders', 'clients', 'tasks', 'reminders', 'news', 'contacts',
+  'orders', 'matrix-accounting', 'clients', 'tasks', 'reminders', 'news', 'contacts',
   'contacts-internal', 'contacts-mobile', 'notifications', 'chat', 'tracking',
   'manager-tools', 'admin-analysis', 'admin-users', 'admin-task-columns',
   'admin-readiness', 'admin-interaction-types', 'admin-integrations', 'admin-permissions',
@@ -67,6 +67,7 @@ function buildSidebar() {
 
   let html = '';
   html += addItem('orders', 'Заказы/Матрицы');
+  html += addItem('matrix-accounting', 'Учёт матриц');
   html += addItem('clients', 'Клиенты');
   html += addItem('tasks', 'Задачи', { badge: 'tasksMenuBadge' });
   html += addItem('reminders', 'Напоминания');
@@ -765,6 +766,47 @@ function injectModals() {
       </div>
     </div>
 
+    <div class="modal-overlay" id="matrixAccountingModal" onclick="if(event.target===this)closeModal('matrixAccountingModal')">
+      <div class="modal" style="width:520px;max-width:94vw;">
+        <div class="modal-head">
+          <h2>Новая матрица</h2>
+          <button type="button" class="modal-close-icon" onclick="closeModal('matrixAccountingModal')" title="Закрыть" aria-label="Закрыть">✕</button>
+        </div>
+        <form onsubmit="saveMatrixAccounting(event)">
+          <div class="form-section">
+            <div class="form-row">
+              <div class="form-group">
+                <label>Клиент</label>
+                <select id="matrixAccountingClient"></select>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Шифр</label>
+                <input type="text" id="matrixAccountingCipher" placeholder="Например, ШФ-101">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Вес за м/п</label>
+                <input type="text" id="matrixAccountingWeight" placeholder="кг">
+              </div>
+              <div class="form-group">
+                <label>Пресс</label>
+                <select id="matrixAccountingPress">
+                  <option>5</option><option>7</option><option>8</option><option>7/8</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('matrixAccountingModal')">Отмена</button>
+            <button type="submit" class="btn">Добавить матрицу</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <div class="modal-overlay" id="profileModal" onclick="if(event.target===this)closeModal('profileModal')">
       <div class="modal" style="width:580px;max-width:94vw;">
         <div class="modal-head">
@@ -1011,6 +1053,8 @@ function renderSection(section) {
     renderReminders();
   } else if (section === 'orders') {
     renderOrders();
+  } else if (section === 'matrix-accounting') {
+    renderMatrixAccounting();
   } else if (section === 'tasks') {
     renderTasks();
   } else if (section === 'notifications') {
