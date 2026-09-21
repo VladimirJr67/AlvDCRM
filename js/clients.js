@@ -398,11 +398,11 @@ function renderClientContacts(id) {
     ${renderHistoryBlock(client, editable)}`;
 }
 
-// Счётчик комментариев на кнопке «Особые отметки».
+// Счётчик заметок на кнопке «Особые отметки».
 function updateClientNotesCount(client) {
   const el = document.getElementById('notesCount');
   if (!el) return;
-  const count = client ? (client.history || []).length : 0;
+  const count = client ? specialNotesFor(client.id).length : 0;
   el.textContent = count ? `(${count})` : '';
 }
 
@@ -1660,9 +1660,19 @@ function refreshClientViews(clientId) {
 }
 
 /* ===== Особые отметки =====
-   Комментарии по клиенту целиком, без привязки к конкретному контактному
-   лицу: список с автором и датой, добавление доступно всем, отметки-теги
-   «Для себя» / «Для отчёта», правка — автору и администратору. */
+   Самостоятельные текстовые заметки по клиенту в коллекции specialNotes.
+   Никак не связаны с комментариями/историей: заметка не создаёт запись в
+   истории взаимодействий и не создаёт задачу — только текст и важность
+   («Очень важно» / «Для информации»). */
+
+// Активные заметки конкретного клиента (снятые хранятся как active:false).
+function specialNotesFor(clientId) {
+  return (specialNotes || []).filter(n => n && String(n.clientId) === String(clientId) && n.active !== false);
+}
+
+function saveSpecialNotes() {
+  if (typeof queueServerSave === 'function') queueServerSave();
+}
 
 function openClientNotes(clientId) {
   const client = clients.find(c => c.id === clientId);
@@ -1671,66 +1681,18 @@ function openClientNotes(clientId) {
   document.getElementById('notesModalTitle').textContent = 'Особые отметки — ' + (client.orgName || '');
   resetNotesForm();
   renderClientNotes(clientId);
-  // Отметки есть — открываем список, отметок нет — сразу форму добавления.
-  setNotesMode(notesModeFor(client));
   document.getElementById('clientNotesModal').classList.add('active');
-}
-
-// Режим окна отметок: 'list' — список с кнопкой добавления,
-// 'add' — форма добавления/правки.
-function setNotesMode(mode) {
-  const isAdd = mode === 'add';
-  const form = document.getElementById('noteForm');
-  const addBtn = document.getElementById('noteAddBtn');
-  const list = document.getElementById('notesList');
-  const cancelBtn = document.getElementById('noteCancelBtn');
-  if (form) form.style.display = isAdd ? '' : 'none';
-  if (addBtn) addBtn.style.display = isAdd ? 'none' : '';
-  if (list) list.style.display = isAdd ? 'none' : '';
-  if (cancelBtn) cancelBtn.style.display = isAdd ? '' : 'none';
-}
-
-function notesModeFor(client) {
-  return (client && (client.history || []).length) ? 'list' : 'add';
-}
-
-// Кнопка «+ Добавить отметку» внутри списка.
-function showNotesAddForm() {
-  resetNotesForm();
-  setNotesMode('add');
-  const text = document.getElementById('noteText');
-  if (text && text.focus) text.focus();
-}
-
-// Отмена добавления/правки: возвращаемся к списку.
-function cancelNoteEdit() {
-  const clientId = parseInt(document.getElementById('notesClientId').value, 10);
-  const client = clients.find(c => c.id === clientId);
-  resetNotesForm();
-  setNotesMode(notesModeFor(client));
 }
 
 function resetNotesForm() {
   const text = document.getElementById('noteText');
   if (text) text.value = '';
-  const editIdx = document.getElementById('noteEditIdx');
-  if (editIdx) editIdx.value = '';
-
-  const typeSel = document.getElementById('noteType');
-  if (typeSel) {
-    const types = (interactionTypes && interactionTypes.length) ? interactionTypes : ['Информация'];
-    const current = typeSel.value;
-    typeSel.innerHTML = types.map(t => `<option>${escapeHtml(t)}</option>`).join('');
-    typeSel.value = types.indexOf(current) > -1 ? current : types[0];
-  }
-
-  setCommentTagInputs('noteTagSelf', 'noteTagReport', []);
-  const nextEl = document.getElementById('noteNextActivity');
-  if (nextEl) nextEl.value = '';
+  const editId = document.getElementById('noteEditIdx');
+  if (editId) editId.value = '';
+  const status = document.getElementById('noteStatus');
+  if (status) status.value = 'info';
   const saveBtn = document.getElementById('noteSaveBtn');
-  if (saveBtn) saveBtn.textContent = 'Добавить отметку';
-  const cancelBtn = document.getElementById('noteCancelBtn');
-  if (cancelBtn) cancelBtn.style.display = 'none';
+  if (saveBtn) saveBtn.textContent = 'Добавить заметку';
 }
 
 function renderClientNotes(clientId) {
@@ -1738,58 +1700,63 @@ function renderClientNotes(clientId) {
   const list = document.getElementById('notesList');
   if (!client || !list) return;
 
-  const notes = [...(client.history || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
+  const notes = specialNotesFor(clientId).sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
   const modalCount = document.getElementById('notesModalCount');
   if (modalCount) modalCount.textContent = notes.length ? `(${notes.length})` : '';
   updateClientNotesCount(client);
 
   if (!notes.length) {
-    list.innerHTML = '<div class="empty-state" style="padding:30px 16px;"><p>Отметок пока нет</p></div>';
+    list.innerHTML = '<div class="empty-state" style="padding:30px 16px;"><p>Заметок пока нет</p></div>';
     return;
   }
 
-  list.innerHTML = notes.map(entry => {
-    const idx = (client.history || []).indexOf(entry);
+  list.innerHTML = notes.map(n => {
+    const important = n.status === 'important';
+    const canEdit = isAdmin() || (currentUser && n.authorId === currentUser.id);
     return `
-      <div class="note-item">
+      <div class="note-item${important ? ' note-important' : ''}">
         <div class="note-item-head">
-          <span class="note-author">${escapeHtml(entry.manager || '—')}</span>
-          <span class="note-date">${formatDate(entry.date)}${entry.editedAt ? ' · изменено' : ''}</span>
-          <span class="badge">${escapeHtml(entry.type || '')}</span>
-          ${canEditComment(entry)
-            ? `<button class="btn-icon-btn" onclick="startEditNote(${clientId}, ${idx})" title="Редактировать отметку">Изменить</button>`
-            : ''}
+          <span class="note-author">${escapeHtml(n.authorName || '—')}</span>
+          <span class="note-date">${formatDate(n.createdAt)}</span>
+          ${important ? '<span class="note-status-important">Очень важно</span>' : ''}
+          ${canEdit ? `<button class="btn-icon-btn" onclick="startEditNote(${n.id})" title="Редактировать заметку">Изменить</button>
+          <button class="btn-icon-btn" onclick="deleteClientNote(${n.id})" title="Удалить заметку">Удалить</button>` : ''}
         </div>
-        <div class="note-text">${escapeHtml(entry.comment || '')}</div>
-        ${activityStatusHtml(entry)}
-        ${entry.tags && entry.tags.length ? `<div class="comment-tags">${commentTagsHtml(entry.tags)}</div>` : ''}
+        <div class="note-text">${escapeHtml(n.text)}</div>
       </div>`;
   }).join('');
 }
 
-function startEditNote(clientId, idx) {
-  const client = clients.find(c => c.id === clientId);
-  if (!client || !client.history || !client.history[idx]) return;
-  const entry = client.history[idx];
-  if (!canEditComment(entry)) {
-    alert('Править отметку может её автор или администратор.');
+function startEditNote(noteId) {
+  const n = (specialNotes || []).find(x => x.id === noteId);
+  if (!n) return;
+  if (!isAdmin() && (!currentUser || n.authorId !== currentUser.id)) {
+    alert('Править заметку может её автор или администратор.');
     return;
   }
-
-  document.getElementById('noteEditIdx').value = idx;
-  document.getElementById('noteText').value = entry.comment || '';
-  const typeSel = document.getElementById('noteType');
-  if (typeSel && entry.type) typeSel.value = entry.type;
-  setCommentTagInputs('noteTagSelf', 'noteTagReport', entry.tags);
-  const nextEl = document.getElementById('noteNextActivity');
-  if (nextEl) nextEl.value = entry.nextActivityAt || '';
-
+  document.getElementById('noteEditIdx').value = noteId;
+  document.getElementById('noteText').value = n.text || '';
+  const status = document.getElementById('noteStatus');
+  if (status) status.value = n.status || 'info';
   const saveBtn = document.getElementById('noteSaveBtn');
   if (saveBtn) saveBtn.textContent = 'Сохранить изменения';
-  // Показываем форму: из списка отметок она скрыта.
-  setNotesMode('add');
   const text = document.getElementById('noteText');
   if (text && text.focus) text.focus();
+}
+
+function deleteClientNote(noteId) {
+  const n = (specialNotes || []).find(x => x.id === noteId);
+  if (!n) return;
+  if (!isAdmin() && (!currentUser || n.authorId !== currentUser.id)) {
+    alert('Удалять заметку может её автор или администратор.');
+    return;
+  }
+  if (!confirm('Удалить заметку?')) return;
+  n.active = false;   // мягкое удаление
+  saveSpecialNotes();
+  const clientId = parseInt(document.getElementById('notesClientId').value, 10);
+  renderClientNotes(clientId);
+  renderClientContacts(clientId);
 }
 
 function saveClientNote() {
@@ -1797,77 +1764,45 @@ function saveClientNote() {
   const client = clients.find(c => c.id === clientId);
   if (!client) return;
   if (!canWriteToClient(client)) { alert('Недостаточно прав для изменения этого клиента.'); return; }
-  if (!client.history) client.history = [];
 
   const textEl = document.getElementById('noteText');
   const text = textEl ? textEl.value.trim() : '';
-  if (!text) { alert('Введите текст отметки'); return; }
+  if (!text) { alert('Введите текст заметки'); return; }
 
-  const typeSel = document.getElementById('noteType');
-  const type = (typeSel && typeSel.value) ? typeSel.value : 'Информация';
-  const tags = readCommentTags('noteTagSelf', 'noteTagReport');
-  const editIdxEl = document.getElementById('noteEditIdx');
-  const editIdx = editIdxEl ? editIdxEl.value : '';
+  const statusEl = document.getElementById('noteStatus');
+  const status = (statusEl && statusEl.value === 'important') ? 'important' : 'info';
 
-  // Отметка — такая же активность, поэтому правило то же: закрывается только
-  // вместе со следующей датой. Исключение — «Нерентабелен».
-  const nextEl = document.getElementById('noteNextActivity');
-  const nextCheck = checkNextActivity(type, nextEl ? nextEl.value : '');
-  if (!nextCheck.ok) { alert(nextCheck.error); return; }
+  const editIdEl = document.getElementById('noteEditIdx');
+  const editId = editIdEl && editIdEl.value ? parseInt(editIdEl.value, 10) : null;
 
-  const boundColumnId = activityColumnId(type);
-
-  if (editIdx !== '') {
-    const entry = client.history[parseInt(editIdx, 10)];
-    if (!entry) return;
-    if (!canEditComment(entry)) {
-      alert('Править отметку может её автор или администратор.');
+  if (editId) {
+    const n = (specialNotes || []).find(x => x.id === editId);
+    if (!n) return;
+    if (!isAdmin() && (!currentUser || n.authorId !== currentUser.id)) {
+      alert('Править заметку может её автор или администратор.');
       return;
     }
-    entry.comment = text;
-    entry.type = type;
-    entry.tags = tags;
-    entry.editedAt = new Date().toISOString();
-    applyActivityFields(entry, type, nextCheck.nextAt, boundColumnId || entry.columnId || null);
-    const linked = entry.taskId ? tasks.find(t => t.id === entry.taskId) : null;
-    if (linked) {
-      linked.deadline = nextCheck.nextAt || '';
-      saveTasks();
-    }
+    n.text = text;
+    n.status = status;
   } else {
-    const entry = {
-      date: new Date().toISOString(),
-      type: type,
-      contactPerson: '',
-      manager: currentUser ? currentUser.login : '',
+    const maxId = (specialNotes || []).reduce((m, x) => Math.max(m, x.id || 0), 0);
+    specialNotes.push({
+      id: maxId + 1,
+      clientId: clientId,
+      contactId: null,
+      text: text,
+      status: status,
+      color: '',
       authorId: currentUser ? currentUser.id : null,
-      comment: text,
-      tags: tags,
-      order: null
-    };
-    applyActivityFields(entry, type, nextCheck.nextAt, boundColumnId);
-    client.history.push(entry);
-
-    // Задача по активности — в привязанный столбец (если привязка есть).
-    const created = createTasksForActivity({
-      type: type,
-      clientId: client.id,
-      clientName: client.orgName,
-      nextAt: nextCheck.nextAt,
-      description: activityTaskDescription(entry, client, '')
+      authorName: currentUser ? (currentUser.name || currentUser.login) : '',
+      createdAt: new Date().toISOString(),
+      active: true
     });
-    if (created.task) entry.taskId = created.task.id;
   }
 
-  saveClients(clients);
+  saveSpecialNotes();
   resetNotesForm();
   renderClientNotes(clientId);
-  setNotesMode(notesModeFor(client));
-  renderClientContacts(clientId);
-  if (document.getElementById('clientCardModal') &&
-      document.getElementById('clientCardModal').classList.contains('active')) {
-    renderClientCard(cardClientId || clientId);
-  }
 }
 
 function closeModal(id) {

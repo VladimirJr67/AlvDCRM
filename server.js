@@ -561,6 +561,7 @@ function normalizeDb(db) {
     if (!('contactId' in n)) n.contactId = null;
     if (typeof n.text !== 'string') n.text = '';
     if (typeof n.color !== 'string') n.color = '';
+    if (!('status' in n)) n.status = 'info';   // 'important' | 'info'
     if (!('authorId' in n)) n.authorId = null;
     if (!('authorName' in n)) n.authorName = '';
     if (!('createdAt' in n)) n.createdAt = new Date().toISOString();

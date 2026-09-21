@@ -251,19 +251,21 @@ const taskList = () => run('tasks');
   check('«Нерентабелен»: активность закрыта', !!noProfit.closedAt && noProfit.nextActivityAt === null);
   check('«Нерентабелен»: задача не создаётся', taskList().length === beforeNoProfit);
 
-  /* ---- 10. Отметка в «Особых отметках» подчиняется тем же правилам ---- */
-  resetElements(['noteType', 'noteText', 'noteNextActivity', 'noteEditIdx', 'noteTagSelf', 'noteTagReport']);
+  /* ---- 10. «Особые отметки» — отдельные заметки, не комментарии ---- */
+  resetElements(['noteText', 'noteEditIdx', 'noteStatus']);
   el('notesClientId').value = '1';
-  el('noteType').value = 'Звонок';
-  el('noteText').value = 'Отметка через особые отметки';
+  el('noteText').value = 'Отдельная заметка';
+  el('noteStatus').value = 'important';
+  const beforeHistory = run('clients[0].history.length');
+  const beforeTasks = taskList().length;
   alerts.length = 0;
   run('saveClientNote()');
-  check('отметка без даты: блокируется', alerts.length === 1 && run('clients[0].history.length') === 7);
-  el('noteNextActivity').value = '2026-10-20T15:00';
-  const beforeNote = taskList().length;
-  run('saveClientNote()');
-  check('отметка с датой: задача создана', taskList().length === beforeNote + 1 &&
-    taskList()[taskList().length - 1].status === callsColumn);
+  check('заметка сохранена в specialNotes', run('specialNotes.length') === 1 &&
+    run('specialNotes[0].text') === 'Отдельная заметка');
+  check('заметка НЕ попала в историю взаимодействий', run('clients[0].history.length') === beforeHistory);
+  check('заметка НЕ создала задачу', taskList().length === beforeTasks);
+  check('важность заметки сохранена', run('specialNotes[0].status') === 'important');
+  check('ошибок при сохранении не было', alerts.length === 0, alerts.join(' / '));
 
   /* ---- 11. Служебные типы защищены от удаления ---- */
   const protectedIdx = run("interactionTypes.indexOf('Нерентабелен')");

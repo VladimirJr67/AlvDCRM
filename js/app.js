@@ -698,7 +698,8 @@ function injectModals() {
       </div>
     </div>
 
-    <div class="modal-overlay" id="clientNotesModal" onclick="if(event.target===this)closeModal('clientNotesModal')">      <div class="modal" style="width:760px;max-width:94vw;">
+    <div class="modal-overlay" id="clientNotesModal" onclick="if(event.target===this)closeModal('clientNotesModal')">
+      <div class="modal" style="width:640px;max-width:94vw;">
         <div class="modal-head">
           <h2 id="notesModalTitle">Особые отметки</h2>
           <button type="button" class="modal-close-icon" onclick="closeModal('clientNotesModal')" title="Закрыть" aria-label="Закрыть">✕</button>
@@ -706,29 +707,19 @@ function injectModals() {
         <input type="hidden" id="notesClientId">
         <input type="hidden" id="noteEditIdx" value="">
 
-        <div class="note-form" id="noteForm">
-          <textarea id="noteText" rows="3" placeholder="Текст отметки по клиенту…"></textarea>
-          <div class="note-form-row" style="margin-bottom:8px;">
-            <input type="datetime-local" id="noteNextActivity" title="Следующая активность"
-                   style="flex:1;padding:8px 10px;border:1px solid #d0d5dd;border-radius:6px;font-size:13px;">
-            <span class="field-hint" style="max-width:260px;">
-              Активность закрывается только со следующей датой. Исключение — «Нерентабелен».
-            </span>
-          </div>
+        <div class="note-form">
+          <textarea id="noteText" rows="3" placeholder="Текст заметки по клиенту…"></textarea>
           <div class="note-form-row">
-            <select id="noteType" title="Тип взаимодействия"></select>
-            <div class="tag-picker">
-              <label class="tag-option"><input type="checkbox" id="noteTagSelf"> <span>Для себя</span></label>
-              <label class="tag-option"><input type="checkbox" id="noteTagReport"> <span>Для отчёта</span></label>
-            </div>
-            <button type="button" class="btn" id="noteSaveBtn" onclick="saveClientNote()">Добавить отметку</button>
-            <button type="button" class="btn btn-secondary" id="noteCancelBtn" style="display:none;" onclick="cancelNoteEdit()">Отмена</button>
+            <select id="noteStatus" title="Важность заметки">
+              <option value="info">Для информации</option>
+              <option value="important">Очень важно</option>
+            </select>
+            <button type="button" class="btn" id="noteSaveBtn" onclick="saveClientNote()">Добавить заметку</button>
           </div>
         </div>
 
         <div class="notes-head">
-          <span>Отметки <span class="cc-count" id="notesModalCount"></span></span>
-          <button type="button" class="btn btn-sm" id="noteAddBtn" onclick="showNotesAddForm()">+ Добавить отметку</button>
+          <span>Заметки <span class="cc-count" id="notesModalCount"></span></span>
         </div>
         <div class="notes-list" id="notesList"></div>
       </div>
