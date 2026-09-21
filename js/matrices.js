@@ -487,28 +487,37 @@ function renderMatrixAccounting() {
   const list = matrixAccountingList();
 
   main.innerHTML = `
-    <div style="padding:22px 24px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:10px;flex-wrap:wrap;">
-        <h1 style="font-size:22px;font-weight:600;color:#1a3a5c;">Учёт матриц</h1>
-        ${canAdd ? '<button class="btn" onclick="openMatrixAccountingModal()">+ Добавить матрицу</button>' : ''}
+    <div class="orders-page">
+      <div class="orders-head">
+        <h1>Учёт матриц</h1>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <input type="text" class="search-bar" placeholder="Поиск по шифру, клиенту, весу…" value="${escapeHtml(matrixAccountingSearch)}" oninput="setMatrixAccountingSearch(this.value)" style="width:300px;max-width:100%;margin-bottom:0;">
+          ${canAdd ? '<button class="btn" onclick="openMatrixAccountingModal()">+ Добавить матрицу</button>' : ''}
+        </div>
       </div>
-      <div style="margin-bottom:14px;">
-        <input type="text" class="search-bar" placeholder="Поиск по шифру, клиенту, весу…" value="${escapeHtml(matrixAccountingSearch)}" oninput="setMatrixAccountingSearch(this.value)" style="max-width:420px;margin-bottom:0;">
-      </div>
+
       <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:auto;">
         <table class="admin-table">
-          <thead><tr><th>Клиент</th><th>Шифр</th><th>Вес за м/п</th><th>Пресс</th>${canAdd ? '<th style="text-align:right;">Действия</th>' : ''}</tr></thead>
+          <thead><tr>
+            <th style="width:30%;">Клиент</th>
+            <th style="width:20%;">Шифр</th>
+            <th style="width:15%;">Вес за м/п</th>
+            <th style="width:15%;">Пресс</th>
+            <th style="width:20%;text-align:right;">Действия</th>
+          </tr></thead>
           <tbody>
             ${list.length ? list.map(m => `
               <tr style="cursor:default;">
                 <td>${m.clientId
                   ? `<a href="#" onclick="event.preventDefault();goToClient(${m.clientId});">${escapeHtml(m.clientName || '—')}</a>`
-                  : escapeHtml(m.clientName || '—')}</td>
+                  : '—'}</td>
                 <td><strong>${escapeHtml(m.cipher || '—')}</strong></td>
                 <td>${escapeHtml(m.weightPerM || '—')}</td>
                 <td>${escapeHtml(m.press || '—')}</td>
-                ${canAdd ? `<td style="text-align:right;white-space:nowrap;"><button class="btn-icon-btn" onclick="deleteMatrixAccounting(${m.id})" title="Удалить матрицу">Удалить</button></td>` : ''}
-              </tr>`).join('') : `<tr><td colspan="5" style="text-align:center;color:#9ca3af;padding:30px;">Матриц пока нет</td></tr>`}
+                <td style="text-align:right;white-space:nowrap;">
+                  ${canAdd ? `<button class="btn-icon-btn" onclick="deleteMatrixAccounting(${m.id})" title="Удалить матрицу">Удалить</button>` : ''}
+                </td>
+              </tr>`).join('') : `<tr><td colspan="5" style="text-align:center;color:#9ca3af;padding:40px;">Список пуст</td></tr>`}
           </tbody>
         </table>
       </div>
