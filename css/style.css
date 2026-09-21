@@ -1,13 +1,16 @@
 * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
 body { background: #f5f6f8; color: #222; font-size: 13px; overflow: hidden; }
 
-.login-screen { position: relative; display: flex; align-items: center; justify-content: center; height: 100vh; background: linear-gradient(135deg, #eef1f5 0%, #dde3ec 100%); }
-.login-card { position: relative; z-index: 2; background: #fff; padding: 40px 50px; border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.08); width: 360px; text-align: center; }
+.login-screen { position: relative; display: flex; align-items: center; justify-content: center; height: 100vh; background: linear-gradient(135deg, #ffffff 0%, #f4f6f9 100%); }
+/* Карточка логина сливается с фоном: без фонового цвета, тени и границ.
+   Логотип, поля и кнопка не меняются — только контейнер. */
+.login-card { position: relative; z-index: 2; background: transparent; box-shadow: none; border: none; padding: 40px 50px; width: 360px; text-align: center; }
 /* Фон страницы входа: изображение/видео/анимация на весь экран (object-fit: cover),
-   поверх — полупрозрачный оверлей, чтобы карточка и форма читались. */
-.login-bg { position: absolute; inset: 0; z-index: 0; overflow: hidden; }
+   поверх — полупрозрачный оверлей, чтобы карточка и форма читались. Слои не
+   перехватывают клики (pointer-events: none). */
+.login-bg { position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
 .login-bg img, .login-bg video { width: 100%; height: 100%; object-fit: cover; display: block; }
-.login-bg-overlay { position: absolute; inset: 0; z-index: 1; background: rgba(15, 23, 42, 0.4); display: none; }
+.login-bg-overlay { position: absolute; inset: 0; z-index: 1; background: rgba(15, 23, 42, 0.4); display: none; pointer-events: none; }
 /* Логотип на входе — крупнее и аккуратнее */
 .login-card img {
   width: 190px; max-width: 100%; height: auto;
