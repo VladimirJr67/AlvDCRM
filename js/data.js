@@ -16,3 +16,4 @@ let chatManagers = [];            // чат менеджеров по прода
 let chatLeads = [];               // чат руководителей
 let permissions = [];             // каталог прав: { id, title, group }
 let rolePermissions = {};         // матрица доступа: роль -> [права]
+let clientMatrices = [];          // «Матрицы клиента»: { id, clientId, cipher, weight, press }

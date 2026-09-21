@@ -734,6 +734,44 @@ function injectModals() {
       </div>
     </div>
 
+    <div class="modal-overlay" id="clientMatricesModal" onclick="if(event.target===this)closeModal('clientMatricesModal')">
+      <div class="modal" style="width:640px;max-width:94vw;">
+        <div class="modal-head">
+          <h2 id="clientMatricesModalTitle">Матрицы клиента</h2>
+          <button type="button" class="modal-close-icon" onclick="closeModal('clientMatricesModal')" title="Закрыть" aria-label="Закрыть">✕</button>
+        </div>
+        <input type="hidden" id="clientMatricesClientId">
+
+        <form onsubmit="addClientMatrix(event)" style="display:flex;gap:8px;align-items:flex-end;margin-bottom:14px;flex-wrap:wrap;">
+          <div class="form-group" style="flex:1;min-width:130px;">
+            <label>Шифр</label>
+            <input type="text" id="clientMatrixCipher" placeholder="Например, ШФ-101">
+          </div>
+          <div class="form-group" style="width:110px;">
+            <label>Вес м/п</label>
+            <input type="text" id="clientMatrixWeight" placeholder="кг">
+          </div>
+          <div class="form-group" style="width:90px;">
+            <label>Пресс</label>
+            <select id="clientMatrixPress">
+              <option>5</option><option>7</option><option>8</option><option>7/8</option>
+            </select>
+          </div>
+          <button type="submit" class="btn">+ Добавить матрицу</button>
+        </form>
+
+        <div class="notes-head">
+          <span>Матрицы <span class="cc-count" id="clientMatricesModalCount"></span></span>
+        </div>
+        <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:auto;max-height:50vh;">
+          <table class="admin-table">
+            <thead><tr><th>Шифр</th><th>Вес м/п</th><th>Пресс</th><th style="text-align:right;">Действия</th></tr></thead>
+            <tbody id="clientMatricesTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <div class="modal-overlay" id="profileModal" onclick="if(event.target===this)closeModal('profileModal')">
       <div class="modal" style="width:580px;max-width:94vw;">
         <div class="modal-head">
@@ -960,6 +998,8 @@ function renderSection(section) {
               </div>
               <button class="btn btn-sm btn-secondary" onclick="openClientNotes(selectedClientId)"
                       title="Все комментарии по клиенту: добавление, отметки, правка">Особые отметки <span class="count" id="notesCount"></span></button>
+              <button class="btn btn-sm btn-secondary" onclick="openClientMatrices(selectedClientId)"
+                      title="Матрицы, привязанные к этому клиенту">Матрицы клиента <span class="count" id="clientMatricesCount"></span></button>
             </div>
             <button class="btn btn-sm" id="contactsAddBtn" onclick="openContactModal(selectedClientId)">+ Добавить</button>
           </div>

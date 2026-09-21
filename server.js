@@ -327,7 +327,10 @@ const DEFAULT_DB = {
   // Каталог прав (id, title, group) и матрица «роль → список прав».
   // Роль developer в матрицу не пишется — она имеет все права по определению.
   permissions: [],
-  rolePermissions: {}
+  rolePermissions: {},
+  // «Матрицы клиента» — привязанные к карточке клиента матрицы
+  // { id, clientId, cipher, weight, press }.
+  clientMatrices: []
 };
 
 // Типы взаимодействий по умолчанию — сидируются только при первом старте
@@ -481,6 +484,7 @@ function normalizeDb(db) {
   d.clientTransferRequests = asArray(d.clientTransferRequests);
   d.chatManagers = asArray(d.chatManagers);
   d.chatLeads = asArray(d.chatLeads);
+  d.clientMatrices = asArray(d.clientMatrices);
   d.taskColumnsPerManager = plainObject(d.taskColumnsPerManager);
   d.activityToColumnMap = plainObject(d.activityToColumnMap);
 

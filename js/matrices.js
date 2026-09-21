@@ -351,6 +351,106 @@ function deleteMatrix(id) {
   renderMatricesTab();
 }
 
+/* ============================================================
+   «Матрицы клиента» — список матриц, привязанных к карточке клиента.
+   Отдельно от заказов матриц (matrices[]): это простой справочник
+   Шифр / Вес м/п / Пресс (5, 7, 8, 7/8) конкретного клиента.
+   ============================================================ */
+
+const CLIENT_MATRIX_PRESSES = ['5', '7', '8', '7/8'];
+
+function clientMatricesFor(clientId) {
+  return (clientMatrices || []).filter(m => m && String(m.clientId) === String(clientId));
+}
+
+function saveClientMatrices() {
+  if (typeof queueServerSave === 'function') queueServerSave();
+}
+
+function updateClientMatricesCount(clientId) {
+  const el = document.getElementById('clientMatricesCount');
+  if (!el) return;
+  const count = clientId != null ? clientMatricesFor(clientId).length : 0;
+  el.textContent = count ? `(${count})` : '';
+}
+
+function openClientMatrices(clientId) {
+  const client = clients.find(c => c.id === clientId);
+  if (!client) { alert('Сначала выберите клиента'); return; }
+  document.getElementById('clientMatricesClientId').value = clientId;
+  document.getElementById('clientMatricesModalTitle').textContent = 'Матрицы клиента — ' + (client.orgName || '');
+  resetClientMatrixForm();
+  renderClientMatricesList(clientId);
+  document.getElementById('clientMatricesModal').classList.add('active');
+}
+
+function resetClientMatrixForm() {
+  const cipher = document.getElementById('clientMatrixCipher');
+  if (cipher) cipher.value = '';
+  const weight = document.getElementById('clientMatrixWeight');
+  if (weight) weight.value = '';
+  const press = document.getElementById('clientMatrixPress');
+  if (press) press.value = CLIENT_MATRIX_PRESSES[0];
+}
+
+function renderClientMatricesList(clientId) {
+  const tbody = document.getElementById('clientMatricesTableBody');
+  const modalCount = document.getElementById('clientMatricesModalCount');
+  const list = clientMatricesFor(clientId);
+  if (modalCount) modalCount.textContent = list.length ? `(${list.length})` : '';
+  updateClientMatricesCount(clientId);
+  if (!tbody) return;
+
+  if (!list.length) {
+    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#9ca3af;padding:24px;">Матриц пока нет</td></tr>';
+    return;
+  }
+  tbody.innerHTML = list.map(m => `
+    <tr>
+      <td><strong>${escapeHtml(m.cipher || '—')}</strong></td>
+      <td>${escapeHtml(m.weight || '—')}</td>
+      <td>${escapeHtml(m.press || '—')}</td>
+      <td style="text-align:right;white-space:nowrap;">
+        <button class="btn-icon-btn" onclick="deleteClientMatrix(${m.id})" title="Удалить матрицу">Удалить</button>
+      </td>
+    </tr>`).join('');
+}
+
+function addClientMatrix(e) {
+  if (e && e.preventDefault) e.preventDefault();
+  const clientIdRaw = document.getElementById('clientMatricesClientId').value;
+  const clientId = clientIdRaw ? parseInt(clientIdRaw, 10) : null;
+  if (!clientId) { alert('Сначала выберите клиента'); return; }
+
+  const cipher = String(document.getElementById('clientMatrixCipher').value || '').trim();
+  if (!cipher) { alert('Укажите шифр матрицы'); return; }
+  const weight = String(document.getElementById('clientMatrixWeight').value || '').trim();
+  const press = document.getElementById('clientMatrixPress').value;
+
+  const maxId = (clientMatrices || []).reduce((m, x) => Math.max(m, x.id || 0), 0);
+  clientMatrices.push({
+    id: maxId + 1,
+    clientId: clientId,
+    cipher: cipher,
+    weight: weight,
+    press: press,
+    createdAt: new Date().toISOString(),
+    createdBy: currentUser ? currentUser.id : null
+  });
+  saveClientMatrices();
+  resetClientMatrixForm();
+  renderClientMatricesList(clientId);
+}
+
+function deleteClientMatrix(id) {
+  const m = (clientMatrices || []).find(x => x.id === id);
+  if (!m) return;
+  if (!confirm(`Удалить матрицу «${m.cipher || '—'}»?`)) return;
+  clientMatrices = (clientMatrices || []).filter(x => x.id !== id);
+  saveClientMatrices();
+  renderClientMatricesList(m.clientId);
+}
+
 // Экспорт в Excel — только администратор; выгружается текущая выборка.
 function exportMatricesExcel() {
   if (!isAdmin()) { alert('Экспорт матриц доступен администратору.'); return; }

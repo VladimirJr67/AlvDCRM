@@ -362,6 +362,7 @@ function renderClientContacts(id) {
   if (countEl) countEl.textContent = contacts.length ? `(${contacts.length})` : '';
   if (addBtn) addBtn.disabled = !canAdd;
   updateClientNotesCount(client);
+  if (typeof updateClientMatricesCount === 'function') updateClientMatricesCount(client.id);
 
   if (contacts.length === 0) {
     panel.innerHTML = `<div class="empty-state"><p>${canAdd ? 'Нет контактных лиц.<br>Нажмите «+ Добавить», чтобы создать первое' : 'Нет контактных лиц'}</p></div>

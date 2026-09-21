@@ -62,6 +62,7 @@ function rehydrateAll(db) {
   minPriceHistory = Array.isArray(db.minPriceHistory) ? db.minPriceHistory : [];
   permissions = Array.isArray(db.permissions) ? db.permissions : [];
   rolePermissions = (db.rolePermissions && typeof db.rolePermissions === 'object' && !Array.isArray(db.rolePermissions)) ? db.rolePermissions : {};
+  clientMatrices = Array.isArray(db.clientMatrices) ? db.clientMatrices : [];
 }
 
 // Собрать полный снапшот из глобалов приложения.
@@ -90,7 +91,8 @@ function assembleDb() {
     minPrices: minPrices || {},
     minPriceHistory: minPriceHistory || [],
     permissions: permissions || [],
-    rolePermissions: rolePermissions || {}
+    rolePermissions: rolePermissions || {},
+    clientMatrices: clientMatrices || []
   };
 }
 
