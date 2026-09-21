@@ -11,7 +11,8 @@ const STARTABLE_SECTIONS = [
   'orders', 'clients', 'tasks', 'reminders', 'news', 'contacts',
   'contacts-internal', 'contacts-mobile', 'notifications', 'chat', 'tracking',
   'manager-tools', 'admin-analysis', 'admin-users', 'admin-task-columns',
-  'admin-readiness', 'admin-interaction-types', 'admin-integrations', 'admin-permissions'
+  'admin-readiness', 'admin-interaction-types', 'admin-integrations', 'admin-permissions',
+  'admin-login-background'
 ];
 let menuHandlerAttached = false;
 let clientsTopHeight = null;
@@ -100,6 +101,7 @@ function buildSidebar() {
     if (can('admin.interaction-types')) adminItems.push({ section: 'admin-interaction-types', label: 'Типы взаимодействий' });
     if (can('admin.integrations')) adminItems.push({ section: 'admin-integrations', label: 'Интеграции' });
     if (isDeveloper()) adminItems.push({ section: 'admin-permissions', label: 'Права и роли' });
+    if (isDeveloper()) adminItems.push({ section: 'admin-login-background', label: 'Фон входа' });
     html += addItem('admin', 'Администрирование', { submenu: adminItems });
   }
 

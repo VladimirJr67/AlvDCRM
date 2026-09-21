@@ -39,10 +39,15 @@ function renderAdminSection(section) {
   injectAdminModals();
   const main = document.getElementById('mainContent');
 
-  // «Права и роли» — только разработчик (супер-админ).
+  // «Права и роли» и «Фон входа» — только разработчик (супер-админ).
   if (section === 'admin-permissions') {
     if (!isDeveloper()) { if (main) main.innerHTML = adminDeniedHtml('Права и роли доступны только разработчику'); return; }
     renderAdminPermissions();
+    return;
+  }
+  if (section === 'admin-login-background') {
+    if (!isDeveloper()) { if (main) main.innerHTML = adminDeniedHtml('Фон входа настраивает только разработчик'); return; }
+    renderAdminLoginBackground();
     return;
   }
 
@@ -148,6 +153,144 @@ function savePermissionsFromAdmin() {
   }).catch(() => {
     renderAdminPermissions();
   });
+}
+
+/* ===================== Фон страницы входа =====================
+   Только разработчик: загрузка/выбор/удаление фона экрана входа. Файлы
+   хранятся в assets/login/, путь — в config.local.json (loginBackground). */
+
+function loginBackgroundPreviewHtml(url) {
+  if (/\.(mp4|webm)$/i.test(url)) {
+    return `<video src="${escapeHtml(url)}" autoplay muted loop playsinline
+             style="width:100%;max-width:480px;border-radius:8px;display:block;"></video>`;
+  }
+  return `<img src="${escapeHtml(url)}" alt=""
+           style="width:100%;max-width:480px;border-radius:8px;display:block;">`;
+}
+
+async function renderAdminLoginBackground() {
+  const main = document.getElementById('mainContent');
+  if (!main) return;
+  main.innerHTML = '<div class="placeholder" style="padding:60px 20px;">Загрузка…</div>';
+
+  let status;
+  try {
+    const res = await fetch('/api/login-background', { credentials: 'same-origin', cache: 'no-store' });
+    status = await res.json();
+  } catch (e) {
+    main.innerHTML = '<div class="placeholder" style="padding:60px 20px;"><p>Сервер недоступен</p></div>';
+    return;
+  }
+
+  const cur = (status && status.loginBackground) || '';
+  const files = (status && status.files) || [];
+
+  main.innerHTML = `
+    <div style="padding:25px;max-width:860px;margin:0 auto;height:100%;box-sizing:border-box;overflow-y:auto;">
+      <h1 style="font-size:22px;font-weight:600;color:#1a3a5c;margin-bottom:6px;">Фон страницы входа</h1>
+      <p style="font-size:12px;color:#9ca3af;margin-bottom:20px;">
+        Фото, видео или анимация на весь экран входа. Изменения видны после обновления страницы входа (Ctrl+F5).
+      </p>
+
+      <div class="integration-card">
+        <div class="section-header"><h3>Текущий фон</h3></div>
+        ${cur
+          ? `${loginBackgroundPreviewHtml(cur)}
+             <div style="margin-top:8px;font-size:12px;color:#6b7280;">${escapeHtml(cur)}</div>
+             <div style="margin-top:12px;"><button class="btn btn-secondary" onclick="clearLoginBackground()">Убрать фон (стандартный)</button></div>`
+          : '<div class="field-hint">Сейчас — стандартный светлый фон.</div>'}
+      </div>
+
+      <div class="integration-card">
+        <div class="section-header"><h3>Загрузить файл</h3></div>
+        <input type="file" id="loginBgFile" accept=".jpg,.jpeg,.png,.webp,.gif,.mp4,.webm"
+               onchange="uploadLoginBackgroundFile(this)">
+        <div class="field-hint">Фото: jpg/jpeg/png/webp/gif. Видео/анимация: mp4/webm. До ~10 МБ.</div>
+      </div>
+
+      <div class="integration-card">
+        <div class="section-header"><h3>Файлы</h3></div>
+        ${files.length ? `
+          <table class="admin-table">
+            <thead><tr><th>Файл</th><th style="text-align:right;">Действия</th></tr></thead>
+            <tbody>
+              ${files.map(f => `
+                <tr style="cursor:default;">
+                  <td><strong>${escapeHtml(f)}</strong></td>
+                  <td style="text-align:right;white-space:nowrap;">
+                    <button class="btn btn-sm${cur === ('/assets/login/' + f) ? '' : ' btn-secondary'}" onclick="setLoginBackground('/assets/login/${escapeHtml(f)}')">Сделать фоном</button>
+                    <button class="btn-icon-btn" onclick="removeLoginBackgroundFile('${escapeHtml(f)}')" title="Удалить файл">Удалить</button>
+                  </td>
+                </tr>`).join('')}
+            </tbody>
+          </table>` : '<div class="field-hint">Загруженных файлов пока нет.</div>'}
+      </div>
+    </div>
+  `;
+}
+
+function uploadLoginBackgroundFile(input) {
+  const file = input && input.files && input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const data = String(reader.result || '');
+    fetch('/api/login-background/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename: file.name, data: data })
+    }).then(r => r.json()).then(j => {
+      if (j && j.ok) {
+        setLoginBackground(j.url);
+      } else {
+        alert((j && j.error) || 'Не удалось загрузить файл');
+        renderAdminLoginBackground();
+      }
+    }).catch(() => {
+      alert('Не удалось загрузить файл');
+      renderAdminLoginBackground();
+    });
+  };
+  reader.readAsDataURL(file);
+}
+
+function setLoginBackground(path) {
+  fetch('/api/login-background', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ loginBackground: path })
+  }).then(r => r.json()).then(j => {
+    if (j && j.ok) {
+      alert('Фон сохранён. Обновите страницу входа (Ctrl+F5).');
+      renderAdminLoginBackground();
+    } else {
+      alert((j && j.error) || 'Не удалось сохранить фон');
+    }
+  }).catch(() => alert('Сервер недоступен'));
+}
+
+function clearLoginBackground() {
+  if (!confirm('Убрать фон и вернуть стандартный светлый?')) return;
+  fetch('/api/login-background', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ loginBackground: '' })
+  }).then(r => r.json()).then(j => {
+    if (j && j.ok) renderAdminLoginBackground();
+    else alert((j && j.error) || 'Не удалось убрать фон');
+  }).catch(() => alert('Сервер недоступен'));
+}
+
+function removeLoginBackgroundFile(filename) {
+  if (!confirm('Удалить файл «' + filename + '»?')) return;
+  fetch('/api/login-background/remove', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filename: filename })
+  }).then(r => r.json()).then(j => {
+    if (j && j.ok) renderAdminLoginBackground();
+    else alert((j && j.error) || 'Не удалось удалить файл');
+  }).catch(() => alert('Сервер недоступен'));
 }
 
 /* ===================== Интеграции ===================== */

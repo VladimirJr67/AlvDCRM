@@ -91,6 +91,31 @@ function loginBackground() {
   return String(v).trim() || null;
 }
 
+// Допустимые форматы фона входа и папка, куда их кладёт разработчик из админки.
+const LOGIN_BG_EXTS = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.mp4', '.webm'];
+const LOGIN_ASSETS_DIR = path.join(ROOT, 'assets', 'login');
+
+// Безопасное имя файла: только имя (без каталогов), допустимое расширение,
+// небуквенные символы заменяются на «_».
+function sanitizeLoginBgFilename(name) {
+  const base = path.basename(String(name == null ? '' : name).trim());
+  const ext = path.extname(base).toLowerCase();
+  if (LOGIN_BG_EXTS.indexOf(ext) === -1) return null;
+  const stem = base.slice(0, -ext.length).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
+  return (stem || 'bg') + ext;
+}
+
+function loginBackgroundFiles() {
+  try {
+    if (!fs.existsSync(LOGIN_ASSETS_DIR)) return [];
+    return fs.readdirSync(LOGIN_ASSETS_DIR)
+      .filter(f => LOGIN_BG_EXTS.indexOf(path.extname(f).toLowerCase()) > -1)
+      .sort((a, b) => a.localeCompare(b, 'ru'));
+  } catch (e) {
+    return [];
+  }
+}
+
 // Запросы, меняющие конфигурацию, принимаем только с этой машины (loopback):
 // полноценной авторизации у приложения нет, поэтому ключ нельзя разрешать
 // записывать любому, кто дотянется до порта по сети.
@@ -1524,6 +1549,82 @@ const server = http.createServer((req, res) => {
     }
 
     sendJson(res, 405, { ok: false, error: 'Method not allowed' });
+    return;
+  }
+
+  // ---- Фон страницы входа (только разработчик): статус, загрузка, выбор, удаление ----
+  if (pathname === '/api/login-background') {
+    if (req.method === 'GET') {
+      const access = requireDeveloper(req);
+      if (!access.ok) { sendJson(res, access.code, { ok: false, error: access.error }); return; }
+      sendJson(res, 200, { ok: true, loginBackground: loginBackground(), files: loginBackgroundFiles() });
+      return;
+    }
+
+    if (req.method === 'POST') {
+      const access = requireDeveloper(req);
+      if (!access.ok) { sendJson(res, access.code, { ok: false, error: access.error }); return; }
+      readJsonBody(req, (err, body) => {
+        if (err) { sendJson(res, 400, { ok: false, error: 'Некорректный JSON' }); return; }
+        const cfg = loadConfig();
+        const v = String((body && body.loginBackground) || '').trim();
+        if (v) cfg.loginBackground = v; else delete cfg.loginBackground;
+        try { saveConfig(cfg); } catch (e) { sendJson(res, 500, { ok: false, error: 'Не удалось сохранить конфиг: ' + e.message }); return; }
+        sendJson(res, 200, { ok: true, loginBackground: loginBackground() });
+      });
+      return;
+    }
+
+    sendJson(res, 405, { ok: false, error: 'Method not allowed' });
+    return;
+  }
+
+  if (pathname === '/api/login-background/upload') {
+    if (req.method !== 'POST') { sendJson(res, 405, { ok: false, error: 'Method not allowed' }); return; }
+    const access = requireDeveloper(req);
+    if (!access.ok) { sendJson(res, access.code, { ok: false, error: access.error }); return; }
+
+    readUtf8Body(req, 15 * 1024 * 1024, (err, body) => {
+      if (err) { sendJson(res, 400, { ok: false, error: 'Файл слишком большой (до ~10 МБ)' }); return; }
+      let payload;
+      try { payload = JSON.parse(body || '{}'); } catch (e) { sendJson(res, 400, { ok: false, error: 'Некорректный JSON' }); return; }
+      const safe = sanitizeLoginBgFilename(payload && payload.filename);
+      if (!safe) { sendJson(res, 400, { ok: false, error: 'Поддерживаются: jpg, jpeg, png, webp, gif, mp4, webm' }); return; }
+      const b64 = String((payload && payload.data) || '').replace(/^data:[^;]+;base64,/, '');
+      let buf;
+      try { buf = Buffer.from(b64, 'base64'); } catch (e) { buf = null; }
+      if (!buf || !buf.length) { sendJson(res, 400, { ok: false, error: 'Не удалось прочитать файл' }); return; }
+      try {
+        if (!fs.existsSync(LOGIN_ASSETS_DIR)) fs.mkdirSync(LOGIN_ASSETS_DIR, { recursive: true });
+        fs.writeFileSync(path.join(LOGIN_ASSETS_DIR, safe), buf);
+      } catch (e) { sendJson(res, 500, { ok: false, error: 'Не удалось сохранить файл: ' + e.message }); return; }
+      sendJson(res, 200, { ok: true, url: '/assets/login/' + safe, filename: safe });
+    });
+    return;
+  }
+
+  if (pathname === '/api/login-background/remove') {
+    if (req.method !== 'POST') { sendJson(res, 405, { ok: false, error: 'Method not allowed' }); return; }
+    const access = requireDeveloper(req);
+    if (!access.ok) { sendJson(res, access.code, { ok: false, error: access.error }); return; }
+
+    readJsonBody(req, (err, body) => {
+      if (err) { sendJson(res, 400, { ok: false, error: 'Некорректный JSON' }); return; }
+      const safe = sanitizeLoginBgFilename(body && body.filename);
+      if (!safe) { sendJson(res, 400, { ok: false, error: 'Некорректное имя файла' }); return; }
+      const filePath = path.join(LOGIN_ASSETS_DIR, safe);
+      try {
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      } catch (e) { sendJson(res, 500, { ok: false, error: 'Не удалось удалить файл: ' + e.message }); return; }
+      // Если это текущий фон — сбрасываем на стандартный.
+      const cur = loginBackground();
+      if (cur && path.basename(cur) === safe) {
+        const cfg = loadConfig();
+        delete cfg.loginBackground;
+        try { saveConfig(cfg); } catch (e) {}
+      }
+      sendJson(res, 200, { ok: true, loginBackground: loginBackground(), files: loginBackgroundFiles() });
+    });
     return;
   }
 
