@@ -406,6 +406,14 @@ function assignmentCandidates() {
   return users.filter(u => u && u.id !== (currentUser ? currentUser.id : null));
 }
 
+// Задача считается совместной, если её назначили другому пользователю
+// (исполнитель ≠ автор). Используется для колонки «Совместные задачи»,
+// ограничения прав исполнителя и раздела «Отслеживание задач».
+function isSharedTask(task) {
+  if (!task || task.assignedTo == null) return false;
+  return task.assignedTo !== task.ownerId;
+}
+
 // Применить назначение к задаче: пусто — снять назначение.
 function applyTaskAssignment(task, assignedToId) {
   if (!task) return { ok: false, error: 'Задача не найдена' };
@@ -417,6 +425,7 @@ function applyTaskAssignment(task, assignedToId) {
     task.assignedBy = null;
     task.assignedAt = null;
     task.assignmentStatus = null;
+    task.isShared = false;
     return { ok: true, assigned: false, changed: changed };
   }
 
@@ -427,6 +436,9 @@ function applyTaskAssignment(task, assignedToId) {
   task.assignedBy = currentUser ? currentUser.id : null;
   task.assignedAt = new Date().toISOString();
   task.assignmentStatus = changed ? 'pending' : (task.assignmentStatus || 'pending');
+  task.isShared = target.id !== task.ownerId;
+  if (!Array.isArray(task.statusHistory)) task.statusHistory = [];
+  if (typeof task.closeComment !== 'string') task.closeComment = '';
   return { ok: true, assigned: true, changed: changed, user: target };
 }
 
@@ -974,6 +986,26 @@ function userTaskProgress(userId) {
   };
 }
 
+let trackingAssigneeFilter = '';
+let trackingAssignerFilter = '';
+let trackingStatusFilter = '';
+
+function sharedTrackingTasks() {
+  return tasks
+    .filter(t => isSharedTask(t))
+    .filter(t => !trackingAssigneeFilter || String(t.assignedTo) === String(trackingAssigneeFilter))
+    .filter(t => !trackingAssignerFilter || String(t.assignedBy || t.ownerId) === String(trackingAssignerFilter))
+    .filter(t => !trackingStatusFilter || t.status === trackingStatusFilter)
+    .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+}
+
+function setTrackingFilter(kind, value) {
+  if (kind === 'assignee') trackingAssigneeFilter = value || '';
+  else if (kind === 'assigner') trackingAssignerFilter = value || '';
+  else if (kind === 'status') trackingStatusFilter = value || '';
+  renderTracking();
+}
+
 function renderTracking() {
   const main = document.getElementById('mainContent');
   if (!main) return;
@@ -982,6 +1014,41 @@ function renderTracking() {
     main.innerHTML = `<div class="placeholder"><h2>Доступ запрещён</h2><p>Отслеживание задач доступно руководителю и администратору</p></div>`;
     return;
   }
+
+  const sharedList = sharedTrackingTasks();
+  const userOpts = users.map(u => `<option value="${u.id}"${String(trackingAssigneeFilter) === String(u.id) || String(trackingAssignerFilter) === String(u.id) ? ' selected' : ''}>${escapeHtml(u.name || u.login)}</option>`).join('');
+  const statusOpts = taskColumns.map(c => `<option value="${c.id}"${trackingStatusFilter === c.id ? ' selected' : ''}>${escapeHtml(c.name)}</option>`).join('');
+
+  const sharedTable = `
+    <div class="orders-analysis-title" style="margin-top:22px;">Совместные задачи (${sharedList.length})</div>
+    <div class="orders-filters">
+      <label>Исполнитель <select onchange="setTrackingFilter('assignee', this.value)"><option value="">Все</option>${userOpts}</select></label>
+      <label>Автор <select onchange="setTrackingFilter('assigner', this.value)"><option value="">Все</option>${userOpts}</select></label>
+      <label>Статус <select onchange="setTrackingFilter('status', this.value)"><option value="">Все</option>${statusOpts}</select></label>
+    </div>
+    <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:auto;margin-bottom:24px;">
+      <table class="admin-table">
+        <thead><tr><th>Автор</th><th>Исполнитель</th><th>Статус</th><th>Дедлайн</th><th>Комментарий</th><th style="text-align:right;">Действия</th></tr></thead>
+        <tbody>
+          ${sharedList.length ? sharedList.map(t => {
+            const author = findUserById(t.assignedBy || t.ownerId);
+            const assignee = findUserById(t.assignedTo);
+            const col = taskColumns.find(c => c.id === t.status);
+            return `<tr style="cursor:default;">
+              <td>${escapeHtml(author ? (author.name || author.login) : '—')}</td>
+              <td>${escapeHtml(assignee ? (assignee.name || assignee.login) : '—')}</td>
+              <td>${escapeHtml(col ? col.name : (t.status || '—'))}</td>
+              <td>${escapeHtml(t.deadline ? formatDate(t.deadline) : '—')}</td>
+              <td style="max-width:240px;">${escapeHtml(t.closeComment || t.description || '—')}</td>
+              <td style="text-align:right;white-space:nowrap;">
+                <button class="btn-icon-btn" onclick="openTaskModal(tasks.find(x=>x.id===${t.id}))" title="Редактировать">Изменить</button>
+                <button class="btn-icon-btn" onclick="deleteTask(${t.id})" title="Удалить">Удалить</button>
+              </td>
+            </tr>`;
+          }).join('') : `<tr><td colspan="6" style="text-align:center;color:#9ca3af;padding:40px;">Совместных задач нет</td></tr>`}
+        </tbody>
+      </table>
+    </div>`;
 
   const tracked = trackedUsers();
   const candidates = users.filter(u => u.id !== (currentUser ? currentUser.id : null) &&
@@ -1030,6 +1097,7 @@ function renderTracking() {
         и что просрочено. Отслеживаемый сотрудник попадает в список наблюдателей
         своих текущих и будущих задач.
       </p>
+      ${sharedTable}
       ${tracked.length === 0 ? `
         <div class="empty-state" style="padding:60px 20px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;">
           <p>Пока никто не отслеживается.</p>
@@ -1175,9 +1243,8 @@ function assignmentStatusInfo(status) {
 // а не отдельный статус: задача остаётся в своей колонке, но видна помощнику
 // отдельным столбцом — он есть у всех пользователей по умолчанию.
 function renderCoopColumn(boardTasks) {
-  const uid = currentUser ? currentUser.id : null;
   const colTasks = boardTasks
-    .filter(t => isCoAssignee(t, uid))
+    .filter(t => isSharedTask(t))
     .sort((a, b) => (a.order || 0) - (b.order || 0));
   const fakeCol = { id: 'coop', name: 'Совместные задачи', coop: true };
 
@@ -1487,7 +1554,40 @@ function openTaskModal(task = null, clientId = null, defaultColumn = null) {
   // ссылку «убрать» выводит выбор клиента в открытом поле.
   clientLink.style.display = 'none';
 
+  // Совместная задача: исполнитель не редактирует поля, только статус и закрытие
+  // с комментарием. Автор/назначивший и исполнитель видят лог статусов.
+  const sharedAssignee = !!(task && isSharedTask(task) && task.assignedTo === currentUser.id);
+  const showStatusLog = !!(task && isSharedTask(task));
+  const editable = !sharedAssignee;
+  ['taskTitle', 'taskDescription', 'taskDeadline', 'taskPriority', 'taskKind', 'taskLinkUrl',
+   'taskAssignTo', 'taskClientSearch', 'taskContactSelect', 'coAssigneeSearch'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = !editable;
+  });
+
+  const closeRow = document.getElementById('taskCloseCommentRow');
+  const closeCommentEl = document.getElementById('taskCloseComment');
+  if (closeRow) closeRow.style.display = (sharedAssignee && task && isCompletedColumnId(task.status)) ? '' : 'none';
+  if (closeCommentEl) closeCommentEl.value = (task && task.closeComment) || '';
+
+  const logRow = document.getElementById('taskStatusLogRow');
+  const logEl = document.getElementById('taskStatusLog');
+  if (logRow) logRow.style.display = showStatusLog ? '' : 'none';
+  if (logEl) logEl.innerHTML = renderStatusLog(task);
+
   document.getElementById('taskModal').classList.add('active');
+}
+
+function renderStatusLog(task) {
+  const h = task && Array.isArray(task.statusHistory) ? task.statusHistory : [];
+  if (!h.length) return '<span style="color:#9ca3af;">Статусы ещё не менялись</span>';
+  return h.map(e => {
+    const col = taskColumns.find(c => c.id === e.status);
+    const name = col ? col.name : (e.status || '—');
+    const u = e.by ? findUserById(e.by) : null;
+    const who = u ? (u.name || u.login) : '—';
+    return `<div style="padding:2px 0;">${escapeHtml(name)} · ${escapeHtml(formatDate(e.at))} · ${escapeHtml(who)}</div>`;
+  }).join('');
 }
 
 // Скрыть выбор клиента и показать его подписью (клиент уже известен).
@@ -1619,6 +1719,26 @@ function saveTask(e) {
     }
   }
 
+  const current = id ? tasks.find(t => t.id === parseInt(id)) : null;
+
+  // Совместная задача: исполнитель меняет только статус и комментарий при закрытии.
+  if (current && isSharedTask(current) && current.assignedTo === currentUser.id) {
+    const newStatus = document.getElementById('taskColumn').value;
+    const closeEl = document.getElementById('taskCloseComment');
+    const closeComment = closeEl ? closeEl.value.trim() : '';
+    if (isCompletedColumnId(newStatus) && !closeComment) {
+      alert('Укажите комментарий при закрытии задачи.');
+      return;
+    }
+    const res = setTaskStatus(current, newStatus);
+    if (!res.ok) { alert(res.error); return; }
+    current.closeComment = closeComment;
+    saveTasks();
+    closeModal('taskModal');
+    renderTasks();
+    return;
+  }
+
   const kindEl = document.getElementById('taskKind');
   const linkEl = document.getElementById('taskLinkUrl');
   const kind = (kindEl && kindEl.value === 'link') ? 'link' : 'regular';
@@ -1637,7 +1757,6 @@ function saveTask(e) {
   };
 
   // Задачу-ссылку нельзя закрыть, пока не отмечена галочка на карточке.
-  const current = id ? tasks.find(t => t.id === parseInt(id)) : null;
   const linkWorkedOff = current ? !!current.linkWorkedOff : false;
   if (kind === 'link' && isCompletedColumnId(data.status) && !linkWorkedOff) {
     alert('Задача «Отработка ссылки» закрывается только после отметки «Ссылка отработана».\n' +
@@ -1775,6 +1894,13 @@ function setTaskStatus(task, status) {
   if (task.status !== status) {
     task.status = status;
     task.statusUpdatedAt = new Date().toISOString();
+    // Лог смены статусов — виден автору/назначившему в карточке и в «Отслеживании».
+    if (!Array.isArray(task.statusHistory)) task.statusHistory = [];
+    task.statusHistory.push({
+      status: status,
+      at: new Date().toISOString(),
+      by: currentUser ? currentUser.id : null
+    });
   }
   return { ok: true };
 }

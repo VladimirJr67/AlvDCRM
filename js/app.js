@@ -594,6 +594,18 @@ function injectModals() {
                 </div>
               </div>
             </div>
+            <div class="form-row" id="taskCloseCommentRow" style="display:none;">
+              <div class="form-group">
+                <label>Комментарий при закрытии *</label>
+                <textarea id="taskCloseComment" rows="2" placeholder="Почему задача закрывается"></textarea>
+              </div>
+            </div>
+            <div class="form-row" id="taskStatusLogRow" style="display:none;">
+              <div class="form-group">
+                <label>История статусов</label>
+                <div id="taskStatusLog" style="font-size:12px;color:#4b5563;background:#f9fafb;border-radius:6px;padding:8px 10px;"></div>
+              </div>
+            </div>
             <div class="linked-client-line" id="taskClientFixed" style="display:none;"></div>
             <div class="form-row">
               <div class="form-group client-typeahead-group" id="taskClientGroup">

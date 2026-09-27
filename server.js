@@ -651,6 +651,10 @@ function normalizeDb(db) {
     // (закрывается только после галочки «Ссылка отработана»).
     if (t.kind !== 'link') t.kind = 'regular';
     if (typeof t.linkUrl !== 'string') t.linkUrl = '';
+    // Совместные задачи: исполнитель ≠ автор, лог статусов, комментарий закрытия.
+    if (!('isShared' in t)) t.isShared = (t.assignedTo != null && t.assignedTo !== t.ownerId);
+    if (!Array.isArray(t.statusHistory)) t.statusHistory = [];
+    if (typeof t.closeComment !== 'string') t.closeComment = '';
   });
 
   // --- Заказы: номер спецификации (СП) для сопоставления с готовностью ---
