@@ -987,21 +987,19 @@ function userTaskProgress(userId) {
 }
 
 let trackingAssigneeFilter = '';
-let trackingAssignerFilter = '';
 let trackingStatusFilter = '';
 
 function sharedTrackingTasks() {
+  const me = currentUser ? currentUser.id : null;
   return tasks
-    .filter(t => isSharedTask(t))
+    .filter(t => isSharedTask(t) && t.assignedBy === me)
     .filter(t => !trackingAssigneeFilter || String(t.assignedTo) === String(trackingAssigneeFilter))
-    .filter(t => !trackingAssignerFilter || String(t.assignedBy || t.ownerId) === String(trackingAssignerFilter))
     .filter(t => !trackingStatusFilter || t.status === trackingStatusFilter)
     .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
 }
 
 function setTrackingFilter(kind, value) {
   if (kind === 'assignee') trackingAssigneeFilter = value || '';
-  else if (kind === 'assigner') trackingAssignerFilter = value || '';
   else if (kind === 'status') trackingStatusFilter = value || '';
   renderTracking();
 }
@@ -1016,36 +1014,32 @@ function renderTracking() {
   }
 
   const sharedList = sharedTrackingTasks();
-  const userOpts = users.map(u => `<option value="${u.id}"${String(trackingAssigneeFilter) === String(u.id) || String(trackingAssignerFilter) === String(u.id) ? ' selected' : ''}>${escapeHtml(u.name || u.login)}</option>`).join('');
+  const userOpts = users.map(u => `<option value="${u.id}"${String(trackingAssigneeFilter) === String(u.id) ? ' selected' : ''}>${escapeHtml(u.name || u.login)}</option>`).join('');
   const statusOpts = taskColumns.map(c => `<option value="${c.id}"${trackingStatusFilter === c.id ? ' selected' : ''}>${escapeHtml(c.name)}</option>`).join('');
 
   const sharedTable = `
-    <div class="orders-analysis-title" style="margin-top:22px;">Совместные задачи (${sharedList.length})</div>
+    <div class="orders-analysis-title" style="margin-top:22px;">Назначенные задачи (${sharedList.length})</div>
     <div class="orders-filters">
       <label>Исполнитель <select onchange="setTrackingFilter('assignee', this.value)"><option value="">Все</option>${userOpts}</select></label>
-      <label>Автор <select onchange="setTrackingFilter('assigner', this.value)"><option value="">Все</option>${userOpts}</select></label>
       <label>Статус <select onchange="setTrackingFilter('status', this.value)"><option value="">Все</option>${statusOpts}</select></label>
     </div>
     <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:auto;margin-bottom:24px;">
       <table class="admin-table">
-        <thead><tr><th>Автор</th><th>Исполнитель</th><th>Статус</th><th>Дедлайн</th><th>Комментарий</th><th style="text-align:right;">Действия</th></tr></thead>
+        <thead><tr><th>Исполнитель</th><th>Статус</th><th>Дедлайн</th><th style="text-align:right;">Действия</th></tr></thead>
         <tbody>
           ${sharedList.length ? sharedList.map(t => {
-            const author = findUserById(t.assignedBy || t.ownerId);
             const assignee = findUserById(t.assignedTo);
             const col = taskColumns.find(c => c.id === t.status);
             return `<tr style="cursor:default;">
-              <td>${escapeHtml(author ? (author.name || author.login) : '—')}</td>
               <td>${escapeHtml(assignee ? (assignee.name || assignee.login) : '—')}</td>
               <td>${escapeHtml(col ? col.name : (t.status || '—'))}</td>
               <td>${escapeHtml(t.deadline ? formatDate(t.deadline) : '—')}</td>
-              <td style="max-width:240px;">${escapeHtml(t.closeComment || t.description || '—')}</td>
               <td style="text-align:right;white-space:nowrap;">
-                <button class="btn-icon-btn" onclick="openTaskModal(tasks.find(x=>x.id===${t.id}))" title="Редактировать">Изменить</button>
+                <button class="btn-icon-btn" onclick="openTaskModal(tasks.find(x=>x.id===${t.id}))" title="Информация о задаче">Информация</button>
                 <button class="btn-icon-btn" onclick="deleteTask(${t.id})" title="Удалить">Удалить</button>
               </td>
             </tr>`;
-          }).join('') : `<tr><td colspan="6" style="text-align:center;color:#9ca3af;padding:40px;">Совместных задач нет</td></tr>`}
+          }).join('') : `<tr><td colspan="4" style="text-align:center;color:#9ca3af;padding:40px;">Назначенных задач нет</td></tr>`}
         </tbody>
       </table>
     </div>`;
@@ -1147,8 +1141,6 @@ function renderTasks() {
           ${sortedColumns.map(col => renderTaskColumn(col, boardTasks)).join('')}
 
           ${renderAssignedColumn(boardTasks)}
-
-          ${renderCoopColumn(boardTasks)}
         </div>
 
         <button class="board-scroll-btn left" type="button"
@@ -1590,6 +1582,27 @@ function renderStatusLog(task) {
   }).join('');
 }
 
+// При выборе исполнителя поле «Колонка» фиксируется на «Назначенные задачи».
+function onTaskAssignChange() {
+  const assign = document.getElementById('taskAssignTo');
+  const column = document.getElementById('taskColumn');
+  if (!assign || !column) return;
+  const hasAssignee = !!(assign.value && assign.value !== '');
+  if (hasAssignee) {
+    if (!column.querySelector('option[value="assigned"]')) {
+      const opt = document.createElement('option');
+      opt.value = 'assigned';
+      opt.textContent = 'Назначенные задачи';
+      column.appendChild(opt);
+    }
+    column.value = 'assigned';
+    column.disabled = true;
+  } else {
+    column.disabled = false;
+    if (column.value === 'assigned') column.value = column.options[0] ? column.options[0].value : '';
+  }
+}
+
 // Скрыть выбор клиента и показать его подписью (клиент уже известен).
 function setTaskClientFieldLocked(client) {
   const group = document.getElementById('taskClientGroup');
@@ -1743,12 +1756,21 @@ function saveTask(e) {
   const linkEl = document.getElementById('taskLinkUrl');
   const kind = (kindEl && kindEl.value === 'link') ? 'link' : 'regular';
 
+  // «Назначенные задачи» — это фиксация колонки при выборе исполнителя, а не
+  // реальный столбец: сохраняем в первый реальный столбец (задача видна
+  // исполнителю в его «Назначенных задачах» как фильтр-представление).
+  let status = document.getElementById('taskColumn').value;
+  if (status === 'assigned') {
+    const first = [...taskColumns].sort((a, b) => (a.order || 0) - (b.order || 0))[0];
+    status = first ? first.id : (current ? current.status : 'in_progress');
+  }
+
   const data = {
     title: document.getElementById('taskTitle').value.trim(),
     description: document.getElementById('taskDescription').value.trim(),
     deadline: document.getElementById('taskDeadline').value,
     priority: document.getElementById('taskPriority').value,
-    status: document.getElementById('taskColumn').value,
+    status: status,
     coAssignees: taskCoAssignees.slice(),
     clientId: clientIdVal ? parseInt(clientIdVal) : null,
     contactId: contactIdVal ? parseInt(contactIdVal) : null,

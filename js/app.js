@@ -587,7 +587,7 @@ function injectModals() {
             <div class="form-row" id="taskAssignRow" style="display:none;">
               <div class="form-group">
                 <label>Назначить исполнителю</label>
-                <select id="taskAssignTo"></select>
+                <select id="taskAssignTo" onchange="onTaskAssignChange()"></select>
                 <div class="field-hint">
                   Исполнитель увидит задачу в своём столбце «Назначенные задачи» и подтвердит её.
                   Пустое значение — задача остаётся вашей.
