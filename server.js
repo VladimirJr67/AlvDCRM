@@ -655,6 +655,8 @@ function normalizeDb(db) {
     if (!('isShared' in t)) t.isShared = (t.assignedTo != null && t.assignedTo !== t.ownerId);
     if (!Array.isArray(t.statusHistory)) t.statusHistory = [];
     if (typeof t.closeComment !== 'string') t.closeComment = '';
+    if (typeof t.closedAt !== 'string') t.closedAt = '';
+    if (t.closedBy == null) t.closedBy = null;
   });
 
   // --- Заказы: номер спецификации (СП) для сопоставления с готовностью ---

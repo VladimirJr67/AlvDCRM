@@ -1210,7 +1210,11 @@ function renderTaskColumn(col, boardTasks) {
 // пользователю, независимо от их основной колонки.
 function renderAssignedColumn(boardTasks) {
   const uid = currentUser ? currentUser.id : null;
-  const colTasks = boardTasks.filter(t => t.assignedTo === uid).sort((a, b) => (a.order || 0) - (b.order || 0));
+  // Завершённые назначенные задачи уходят из активного списка исполнителя
+  // (но остаются в истории и в «Отслеживании задач» у назначившего).
+  const colTasks = boardTasks
+    .filter(t => t.assignedTo === uid && t.assignmentStatus !== 'completed')
+    .sort((a, b) => (a.order || 0) - (b.order || 0));
   const fakeCol = { id: 'assigned', name: 'Назначенные задачи', assigned: true };
 
   return `
@@ -1352,7 +1356,7 @@ function renderTaskCard(task, col) {
           <span style="font-size:11px;color:#9ca3af;flex-shrink:0;">Статус:</span>
           <span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px;background:${assignInfo.color};color:#fff;flex-shrink:0;">${assignInfo.label}</span>
           ${canManageAssignment(task) ? `
-            <select onclick="event.stopPropagation()" onchange="setAssignmentStatus(${task.id}, this.value)"
+            <select onclick="event.stopPropagation()" onchange="onAssignStatusChange(${task.id}, this.value)"
                     style="margin-left:auto;font-size:11px;padding:3px 4px;border:1px solid #d0d5dd;border-radius:4px;background:#fff;color:#374151;max-width:110px;">
               ${ASSIGNMENT_STATUSES.map(s => `<option value="${s.value}" ${s.value === task.assignmentStatus ? 'selected' : ''}>${s.label}</option>`).join('')}
             </select>
@@ -1577,14 +1581,27 @@ function openTaskModal(task = null, clientId = null, defaultColumn = null) {
 
 function renderStatusLog(task) {
   const h = task && Array.isArray(task.statusHistory) ? task.statusHistory : [];
-  if (!h.length) return '<span style="color:#9ca3af;">Статусы ещё не менялись</span>';
-  return h.map(e => {
+  const rows = h.map(e => {
     const col = taskColumns.find(c => c.id === e.status);
     const name = e.label || (col ? col.name : (e.status || '—'));
     const u = e.by ? findUserById(e.by) : null;
     const who = u ? (u.name || u.login) : '—';
     return `<div style="padding:2px 0;">${escapeHtml(name)} · ${escapeHtml(formatDate(e.at))} · ${escapeHtml(who)}</div>`;
-  }).join('');
+  });
+
+  // Комментарий при закрытии назначенной задачи — обязательный и сохраняется отдельно.
+  if (task && task.closeComment) {
+    const closer = task.closedBy ? findUserById(task.closedBy) : null;
+    const who = closer ? (closer.name || closer.login) : '—';
+    rows.push(
+      `<div style="padding:2px 0;margin-top:4px;border-top:1px dashed #e5e7eb;color:#1f2937;">` +
+      `<strong>Комментарий к закрытию:</strong> ${escapeHtml(task.closeComment)}</div>` +
+      `<div style="padding:2px 0;color:#6b7280;">Закрыто: ${escapeHtml(task.closedAt ? formatDate(task.closedAt) : '—')} · ${escapeHtml(who)}</div>`
+    );
+  }
+
+  if (!rows.length) return '<span style="color:#9ca3af;">Статусы ещё не менялись</span>';
+  return rows.join('');
 }
 
 // При выборе исполнителя поле «Колонка» фиксируется на «Назначенные задачи».
@@ -1887,6 +1904,64 @@ function setAssignmentStatus(taskId, status) {
   t.statusHistory.push({ status: 'assigned:' + status, label: info ? info.label : status, at: new Date().toISOString(), by: currentUser ? currentUser.id : null });
   saveTasks();
   refreshAfterTaskChange();
+}
+
+// Переключение статуса из карточки назначенной задачи. Перевод в «Выполнено»
+// нельзя сделать без обязательного комментария — открываем отдельное окно.
+function onAssignStatusChange(taskId, value) {
+  if (value === 'completed') {
+    openTaskCloseModal(taskId);
+  } else {
+    setAssignmentStatus(taskId, value);
+  }
+}
+
+// Окно обязательного комментария при закрытии назначенной задачи.
+function openTaskCloseModal(taskId) {
+  const t = tasks.find(x => x.id === taskId);
+  if (!t || !canManageAssignment(t)) return;
+  document.getElementById('taskCloseId').value = taskId;
+  document.getElementById('taskCloseModalComment').value = '';
+  document.getElementById('taskCloseSubmit').disabled = true;
+  document.getElementById('taskCloseModal').classList.add('active');
+}
+
+// Кнопка «Отправить» активна только при непустом комментарии.
+function onTaskCloseCommentInput() {
+  const comment = document.getElementById('taskCloseModalComment');
+  const submit = document.getElementById('taskCloseSubmit');
+  if (!comment || !submit) return;
+  submit.disabled = !comment.value.trim();
+}
+
+// Закрыть назначенную задачу с обязательным комментарием.
+function submitTaskClose() {
+  const idEl = document.getElementById('taskCloseId');
+  const commentEl = document.getElementById('taskCloseModalComment');
+  if (!idEl || !commentEl) return;
+  const taskId = parseInt(idEl.value, 10);
+  const comment = commentEl.value.trim();
+  if (!comment) return; // без комментария закрыть нельзя
+
+  const t = tasks.find(x => x.id === taskId);
+  if (!t || !canManageAssignment(t)) return;
+
+  const now = new Date().toISOString();
+  t.assignmentStatus = 'completed';
+  t.closeComment = comment;
+  t.closedAt = now;
+  t.closedBy = currentUser ? currentUser.id : null;
+  if (!Array.isArray(t.statusHistory)) t.statusHistory = [];
+  t.statusHistory.push({ status: 'assigned:completed', label: 'Выполнено', at: now, by: currentUser ? currentUser.id : null });
+
+  saveTasks();
+  closeModal('taskCloseModal');
+  refreshAfterTaskChange();
+}
+
+// «Отмена» — закрыть окно без изменения статуса задачи.
+function cancelTaskClose() {
+  closeModal('taskCloseModal');
 }
 
 /* ===== Дедлайны с временем ===== */

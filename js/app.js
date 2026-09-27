@@ -646,6 +646,26 @@ function injectModals() {
       </div>
     </div>
 
+    <div class="modal-overlay" id="taskCloseModal" onclick="if(event.target===this)closeModal('taskCloseModal')">
+      <div class="modal" style="width:480px;max-width:94vw;">
+        <div class="modal-head">
+          <h2>Закрытие задачи</h2>
+          <button type="button" class="modal-close-icon" onclick="cancelTaskClose()" title="Отмена" aria-label="Отмена">✕</button>
+        </div>
+        <input type="hidden" id="taskCloseId">
+        <div class="form-section">
+          <div class="form-group">
+            <label>Комментарий *</label>
+            <textarea id="taskCloseModalComment" rows="3" placeholder="Почему задача закрывается" oninput="onTaskCloseCommentInput()"></textarea>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="cancelTaskClose()">Отмена</button>
+          <button type="button" class="btn" id="taskCloseSubmit" onclick="submitTaskClose()" disabled>Отправить</button>
+        </div>
+      </div>
+    </div>
+
     <div class="modal-overlay" id="clientCardModal" onclick="if(event.target===this)closeModal('clientCardModal')">
       <div class="modal" style="width:760px;max-width:94vw;">
         <div class="modal-head" style="margin-bottom:6px;justify-content:flex-end;">
