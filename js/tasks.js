@@ -1025,21 +1025,22 @@ function renderTracking() {
     </div>
     <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:auto;margin-bottom:24px;">
       <table class="admin-table">
-        <thead><tr><th>Исполнитель</th><th>Статус</th><th>Дедлайн</th><th style="text-align:right;">Действия</th></tr></thead>
+        <thead><tr><th>Название</th><th>Исполнитель</th><th>Статус</th><th>Дедлайн</th><th style="text-align:right;">Действия</th></tr></thead>
         <tbody>
           ${sharedList.length ? sharedList.map(t => {
             const assignee = findUserById(t.assignedTo);
-            const col = taskColumns.find(c => c.id === t.status);
+            const statusInfo = assignmentStatusInfo(t.assignmentStatus);
             return `<tr style="cursor:default;">
+              <td><strong>${escapeHtml(t.title || '—')}</strong></td>
               <td>${escapeHtml(assignee ? (assignee.name || assignee.login) : '—')}</td>
-              <td>${escapeHtml(col ? col.name : (t.status || '—'))}</td>
+              <td>${escapeHtml(statusInfo ? statusInfo.label : (t.status || '—'))}</td>
               <td>${escapeHtml(t.deadline ? formatDate(t.deadline) : '—')}</td>
               <td style="text-align:right;white-space:nowrap;">
                 <button class="btn-icon-btn" onclick="openTaskModal(tasks.find(x=>x.id===${t.id}))" title="Информация о задаче">Информация</button>
                 <button class="btn-icon-btn" onclick="deleteTask(${t.id})" title="Удалить">Удалить</button>
               </td>
             </tr>`;
-          }).join('') : `<tr><td colspan="4" style="text-align:center;color:#9ca3af;padding:40px;">Назначенных задач нет</td></tr>`}
+          }).join('') : `<tr><td colspan="5" style="text-align:center;color:#9ca3af;padding:40px;">Назначенных задач нет</td></tr>`}
         </tbody>
       </table>
     </div>`;
@@ -1177,7 +1178,11 @@ function renderTasks() {
 // Столбец доски. Доска одинакова для всех: управление столбцами —
 // в администрировании, поэтому кнопок правки здесь нет.
 function renderTaskColumn(col, boardTasks) {
-  const colTasks = boardTasks.filter(t => t.status === col.id).sort((a, b) => (a.order || 0) - (b.order || 0));
+  // Назначенные задачи живут только в столбце «Назначенные задачи» и не
+  // дублируются в обычных столбцах (даже если у них есть status).
+  const colTasks = boardTasks
+    .filter(t => t.status === col.id && t.assignedTo == null)
+    .sort((a, b) => (a.order || 0) - (b.order || 0));
   const individual = !!col.individual;
 
   return `
@@ -1575,7 +1580,7 @@ function renderStatusLog(task) {
   if (!h.length) return '<span style="color:#9ca3af;">Статусы ещё не менялись</span>';
   return h.map(e => {
     const col = taskColumns.find(c => c.id === e.status);
-    const name = col ? col.name : (e.status || '—');
+    const name = e.label || (col ? col.name : (e.status || '—'));
     const u = e.by ? findUserById(e.by) : null;
     const who = u ? (u.name || u.login) : '—';
     return `<div style="padding:2px 0;">${escapeHtml(name)} · ${escapeHtml(formatDate(e.at))} · ${escapeHtml(who)}</div>`;
@@ -1876,6 +1881,10 @@ function setAssignmentStatus(taskId, status) {
   const t = tasks.find(x => x.id === taskId);
   if (!t || !canManageAssignment(t)) return;
   t.assignmentStatus = status;
+  // Лог статусов назначенной задачи — виден назначившему в реальном времени.
+  if (!Array.isArray(t.statusHistory)) t.statusHistory = [];
+  const info = assignmentStatusInfo(status);
+  t.statusHistory.push({ status: 'assigned:' + status, label: info ? info.label : status, at: new Date().toISOString(), by: currentUser ? currentUser.id : null });
   saveTasks();
   refreshAfterTaskChange();
 }
