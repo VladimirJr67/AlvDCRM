@@ -994,7 +994,7 @@ function sharedTrackingTasks() {
   return tasks
     .filter(t => isSharedTask(t) && t.assignedBy === me)
     .filter(t => !trackingAssigneeFilter || String(t.assignedTo) === String(trackingAssigneeFilter))
-    .filter(t => !trackingStatusFilter || t.status === trackingStatusFilter)
+    .filter(t => !trackingStatusFilter || t.assignmentStatus === trackingStatusFilter)
     .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
 }
 
@@ -1015,7 +1015,10 @@ function renderTracking() {
 
   const sharedList = sharedTrackingTasks();
   const userOpts = users.map(u => `<option value="${u.id}"${String(trackingAssigneeFilter) === String(u.id) ? ' selected' : ''}>${escapeHtml(u.name || u.login)}</option>`).join('');
-  const statusOpts = taskColumns.map(c => `<option value="${c.id}"${trackingStatusFilter === c.id ? ' selected' : ''}>${escapeHtml(c.name)}</option>`).join('');
+  // Фильтр статусов «Отслеживания задач» показывает реальные статусы
+  // назначенных задач (Не принято / Принято / В работе / Выполнено), а не
+  // столбцы канбана (В работе, Размещён заказ, Встреча, Звонок и т.п.).
+  const statusOpts = ASSIGNMENT_STATUSES.map(s => `<option value="${s.value}"${trackingStatusFilter === s.value ? ' selected' : ''}>${escapeHtml(s.label)}</option>`).join('');
 
   const sharedTable = `
     <div class="orders-analysis-title" style="margin-top:22px;">Назначенные задачи (${sharedList.length})</div>
