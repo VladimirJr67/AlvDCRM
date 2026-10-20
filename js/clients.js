@@ -151,6 +151,7 @@ const MANAGER_FIXED_OPTIONS = [
 ];
 
 // Варианты с учётом введённого текста: сначала служебные, затем люди.
+// В выпадающем списке показываем только ФИО — без логина.
 function managerOptions(query) {
   const q = (query || '').trim().toLowerCase();
   const fixed = MANAGER_FIXED_OPTIONS.filter(o => !q || o.label.toLowerCase().includes(q));
@@ -158,7 +159,7 @@ function managerOptions(query) {
     .filter(u => !q
       || (u.name || '').toLowerCase().includes(q)
       || (u.login || '').toLowerCase().includes(q))
-    .map(u => ({ value: String(u.id), label: u.name || u.login, hint: u.login }));
+    .map(u => ({ value: String(u.id), label: u.name || u.login, hint: '' }));
   return fixed.concat(people);
 }
 
@@ -338,6 +339,8 @@ function renderClientContacts(id) {
     if (countEl) countEl.textContent = '';
     if (addBtn) addBtn.disabled = true;
     if (notesBtn) notesBtn.disabled = true;
+    updateClientNotesCount(null);
+    if (typeof updateClientTasksCount === 'function') updateClientTasksCount(null);
     panel.innerHTML = `<div class="placeholder"><h2>Выберите клиента</h2><p>Кликните на строку в таблице, чтобы увидеть контактные лица</p></div>`;
     return;
   }
@@ -358,6 +361,7 @@ function renderClientContacts(id) {
   if (notesBtn) notesBtn.disabled = !canManage;
   updateClientNotesCount(client);
   if (typeof updateClientMatricesCount === 'function') updateClientMatricesCount(client.id);
+  if (typeof updateClientTasksCount === 'function') updateClientTasksCount(client.id);
 
   if (contacts.length === 0) {
     panel.innerHTML = `<div class="empty-state"><p>${canAdd ? 'Нет контактных лиц.<br>Нажмите «+ Добавить», чтобы создать первое' : 'Нет контактных лиц'}</p></div>
@@ -393,12 +397,16 @@ function renderClientContacts(id) {
     ${renderHistoryBlock(client, editable)}`;
 }
 
-// Счётчик заметок на кнопке «Особые отметки».
+// Счётчик заметок на кнопке «Особые отметки». Если отметки есть, кнопка
+// становится красной (красный индикатор), чтобы её нельзя было не заметить.
 function updateClientNotesCount(client) {
   const el = document.getElementById('notesCount');
-  if (!el) return;
   const count = client ? specialNotesFor(client.id).length : 0;
-  el.textContent = count ? `(${count})` : '';
+  if (el) el.textContent = count ? `(${count})` : '';
+  const btn = document.getElementById('notesBtn');
+  if (btn && btn.classList && typeof btn.classList.toggle === 'function') {
+    btn.classList.toggle('notes-alert', count > 0);
+  }
 }
 
 /* ===== Мессенджеры контактного лица ===== */
@@ -670,7 +678,7 @@ function renderClientCard(id) {
           <div class="cc-actions">
             <button class="btn btn-sm btn-secondary" onclick="openTaskModalWithClient(${client.id})">+ Задача</button>
             <button class="btn btn-sm btn-secondary" onclick="openCardReminderModal(${client.id})">+ Напоминание</button>
-            <button class="btn btn-sm btn-secondary" onclick="openClientNotes(${client.id})">Особые отметки</button>
+            <button class="btn btn-sm btn-secondary${specialNotesFor(client.id).length ? ' notes-alert' : ''}" onclick="openClientNotes(${client.id})">Особые отметки</button>
           </div>` : ''}
         </div>
       </div>
@@ -694,27 +702,39 @@ function renderClientCard(id) {
         </div>
       </div>
 
-      ${(isAdmin() || (!canWrite && isManagerRole(currentUser))) ? `
+      ${(() => {
+        // Кто меняет ответственного напрямую (без запроса): администратор,
+        // руководитель и разработчик. Менеджер у чужого клиента видит кнопку
+        // «Запрос на перенос» (летит текущему владельцу), а владелец с
+        // входящим запросом — кнопки «Перенести / Отказать».
+        const canChangeOwner = isAdmin() || isLead();
+        const pendingReq = typeof pendingTransferForClient === 'function' ? pendingTransferForClient(client.id) : null;
+        const pendingForMe = !!(pendingReq && currentUser && pendingReq.toManagerId === currentUser.id);
+        const canAskTransfer = !canWrite && isManagerRole(currentUser) && !canChangeOwner;
+        if (!canChangeOwner && !pendingForMe && !canAskTransfer) return '';
+        return `
       <div class="cc-block">
         <div class="cc-block-head"><h3>Ответственный менеджер</h3></div>
         <div class="cc-block-body">
           ${pendingTransferHtml(client)}
-          <div class="card-transfer">
-            ${isAdmin()
-              ? `<select id="cardOwnerSelect" title="Менеджер, которому передаём клиента">${clientOwnerOptions(client.createdBy)}</select>
-                 <input type="text" id="cardTransferComment" placeholder="Комментарий менеджеру (необязательно)">
-                 <button type="button" class="btn btn-sm btn-secondary" onclick="requestClientTransferFromCard()">Отправить запрос</button>
-                 <button type="button" class="btn btn-sm" onclick="applyClientTransfer()">Передать сразу</button>`
-              : `<button type="button" class="btn btn-sm" onclick="openTransferRequestModal(${client.id})">Запрос на перенос</button>`}
-          </div>
+          ${canChangeOwner ? `<div class="card-transfer">
+            <select id="cardOwnerSelect" title="Менеджер, которому передаём клиента">${clientOwnerOptions(client.createdBy)}</select>
+            <input type="text" id="cardTransferComment" placeholder="Комментарий менеджеру (необязательно)">
+            <button type="button" class="btn btn-sm" onclick="applyClientTransfer()">Сменить ответственного</button>
+          </div>` : (pendingForMe ? '' : `<div class="card-transfer">
+            <button type="button" class="btn btn-sm" onclick="requestClientTransferFromCard()">Запрос на перенос</button>
+          </div>`)}
           <div class="field-hint">
             Сейчас: <strong>${escapeHtml(managerName)}</strong>.
-            ${isAdmin()
-              ? '«Передать сразу» меняет ответственного без подтверждения, «Отправить запрос» — ждёт решения менеджера.'
-              : 'Отправьте запрос — клиент перейдёт к выбранному менеджеру только после того, как он подтвердит.'}
+            ${canChangeOwner
+              ? 'Смена ответственного выполняется сразу, без запроса.'
+              : (pendingForMe
+                  ? 'У вас входящий запрос на перенос — решите его кнопками выше.'
+                  : 'Запрос уйдёт текущему владельцу — клиент перейдёт к вам только после его решения.')}
           </div>
         </div>
-      </div>` : ''}
+      </div>`;
+      })()}
 
       <div class="cc-block">
         <div class="cc-block-head"><h3>Контакты</h3></div>
@@ -913,7 +933,7 @@ function saveClient(e) {
 
       // Перенос другому менеджеру — уведомляем нового ответственного.
       if (ownerId && ownerId !== previousOwner) {
-        notifyClientTransfer(ownerId, 1, transferComment);
+        notifyClientTransfer(ownerId, 1, transferComment, clients[idx].id);
       }
     }
   } else {
@@ -925,12 +945,9 @@ function saveClient(e) {
     clients.push(data);
 
     if (isAdmin() && ownerId && currentUser && ownerId !== currentUser.id) {
-      // Администратор закрепил нового клиента за менеджером.
-      notifyClientTransfer(ownerId, 1, transferComment);
-    } else if (currentUser && !isAdmin()) {
-      // Менеджер создал клиента сам — подтверждаем ему создание.
-      notifyUser(currentUser.id, 'Клиент добавлен',
-        'Вы добавили клиента «' + data.orgName + '» в свою базу.', null);
+      // Администратор закрепил нового клиента за менеджером — уведомляем
+      // менеджера. Себе уведомление не шлём: организацию добавил я сам.
+      notifyClientTransfer(ownerId, 1, transferComment, data.id);
     }
   }
 
@@ -944,11 +961,13 @@ function saveClient(e) {
 }
 
 // Уведомление менеджеру о закреплении клиентов (импорт или перенос).
-function notifyClientTransfer(userId, count, comment) {
+// Если клиент один — прикладываем ссылку «Перейти к клиенту».
+function notifyClientTransfer(userId, count, comment, clientId) {
   if (!userId) return;
   let text = 'На вас перенесли клиента в кол-ве ' + count;
   if (comment) text += '. ' + comment;
-  notifyUser(userId, 'Клиенты закреплены за вами', text, null);
+  notifyUser(userId, 'Клиенты закреплены за вами', text, null,
+    clientId ? { clientId: clientId } : null);
 }
 
 // Отмена редактирования: закрываем форму и возвращаемся в карточку просмотра.
@@ -1594,13 +1613,14 @@ function clientOwnerOptions(currentOwnerId) {
   ).join('');
 }
 
-// Передача клиента другому менеджеру прямо из карточки (только администратор).
-// Менеджеры пользуются запросом: см. requestClientTransferFromCard().
+// Передача клиента другому менеджеру прямо из карточки (администратор,
+// руководитель и разработчик — без запросов). Менеджеры пользуются запросом:
+// см. requestClientTransferFromCard().
 function applyClientTransfer() {
   const id = cardClientId || selectedClientId;
   const client = clients.find(c => c.id === id);
   if (!client) return;
-  if (!isAdmin()) { alert('Передавать клиентов сразу может только администратор. Отправьте запрос.'); return; }
+  if (!(isAdmin() || isLead())) { alert('Передавать клиентов сразу может только администратор или руководитель. Отправьте запрос.'); return; }
 
   const select = document.getElementById('cardOwnerSelect');
   const commentEl = document.getElementById('cardTransferComment');
@@ -1617,7 +1637,7 @@ function applyClientTransfer() {
   client.createdBy = newOwnerId;
   client.responsibleManagerId = newOwnerId;
   saveClients(clients);
-  notifyClientTransfer(newOwnerId, 1, comment);
+  notifyClientTransfer(newOwnerId, 1, comment, client.id);
 
   // Открытые запросы по этому клиенту закрываем: передача уже состоялась.
   const pending = pendingTransferForClient(client.id);
@@ -1630,27 +1650,18 @@ function applyClientTransfer() {
   if (typeof updateTransfersMenuBadge === 'function') updateTransfersMenuBadge();
 }
 
-// Запрос на перенос клиента из карточки (путь администратора: свой селект
-// менеджера и комментарий). У менеджеров перенос идёт через модалку
-// transferRequestModal (js/transfers.js).
+// Запрос на перенос из карточки: менеджер просит передать ему чужого клиента.
+// Выбора менеджера нет — запрос всегда уходит текущему владельцу клиента.
 function requestClientTransferFromCard() {
   const id = cardClientId || selectedClientId;
   const client = clients.find(c => c.id === id);
   if (!client) return;
 
-  const select = document.getElementById('cardOwnerSelect');
-  const commentEl = document.getElementById('cardTransferComment');
-  const targetId = select ? select.value : '';
-  const comment = commentEl ? commentEl.value.trim() : '';
-
-  if (!targetId) { alert('Выберите менеджера, которому передаём клиента'); return; }
-
-  const res = createClientTransferRequest(client.id, targetId, comment);
+  const res = createClientTransferRequest(client.id, '');
   if (!res.ok) { alert(res.error); return; }
 
-  if (commentEl) commentEl.value = '';
-  alert('Запрос отправлен: ' + transferManagerName(parseInt(targetId, 10)) +
-    ' получит уведомление и примет решение.');
+  alert('Запрос отправлен владельцу клиента: ' + transferManagerName(client.createdBy) +
+    '. Клиент перейдёт к вам после его решения.');
   renderClientCard(client.id);
   if (typeof updateTransfersMenuBadge === 'function') updateTransfersMenuBadge();
 }

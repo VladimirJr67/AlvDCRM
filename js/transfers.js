@@ -96,7 +96,7 @@ function canRequestClientTransfer(client) {
   return isManagerRole(currentUser) && client.createdBy !== currentUser.id;
 }
 
-function createClientTransferRequest(clientId, toManagerId, comment) {
+function createClientTransferRequest(clientId, toManagerIdOrComment, comment) {
   if (!currentUser) return { ok: false, error: 'Нужно войти в систему' };
   const client = clients.find(c => c.id === clientId);
   if (!client) return { ok: false, error: 'Клиент не найден' };
@@ -104,11 +104,22 @@ function createClientTransferRequest(clientId, toManagerId, comment) {
     return { ok: false, error: 'Запросить перенос можно только по чужому клиенту' };
   }
 
-  const targetId = parseInt(toManagerId, 10);
+  // Новый путь (ТЗ): запрос всегда уходит текущему владельцу клиента,
+  // выбора менеджера нет. Старый вид с явным адресатом (второй аргумент —
+  // число) оставлен для уже созданных запросов и старых вызовов.
+  const legacy = typeof toManagerIdOrComment === 'number';
+  const targetId = legacy ? parseInt(toManagerIdOrComment, 10) : client.createdBy;
+  const commentText = legacy
+    ? String(comment == null ? '' : comment).trim()
+    : String(toManagerIdOrComment == null ? '' : toManagerIdOrComment).trim();
+
   const target = findUserById(targetId);
   if (!target || !isManagerRole(target)) return { ok: false, error: 'Выберите менеджера' };
-  if (target.id === client.createdBy) {
+  if (legacy && target.id === client.createdBy) {
     return { ok: false, error: 'Этот клиент уже закреплён за выбранным менеджером' };
+  }
+  if (!legacy && target.id === currentUser.id) {
+    return { ok: false, error: 'Это ваш клиент' };
   }
   const pending = pendingTransferForClient(client.id);
   if (pending) {
@@ -124,7 +135,8 @@ function createClientTransferRequest(clientId, toManagerId, comment) {
     fromManagerName: currentUser.name || currentUser.login || '',
     toManagerId: target.id,
     toManagerName: target.name || target.login || '',
-    comment: String(comment == null ? '' : comment).trim(),
+    mode: legacy ? 'target' : 'owner',
+    comment: commentText,
     status: 'pending',
     createdAt: new Date().toISOString(),
     decidedAt: null,
@@ -136,9 +148,10 @@ function createClientTransferRequest(clientId, toManagerId, comment) {
   notifyUser(
     target.id,
     'Запрос на перенос клиента',
-    (request.fromManagerName || 'Менеджер') + ' передаёт вам клиента «' + request.clientName + '»' +
+    (request.fromManagerName || 'Менеджер') + ' просит передать ему клиента «' + request.clientName + '»' +
       (request.comment ? '. Комментарий: ' + request.comment : ''),
-    null
+    null,
+    { clientId: client.id }
   );
   updateTransfersMenuBadge();
   return { ok: true, request: request };
@@ -151,16 +164,23 @@ function canDecideTransfer(request) {
   return isAdmin() || request.toManagerId === currentUser.id;
 }
 
-// Принять: клиент переходит к тому, кому его передавали.
+// Принять: клиент переходит к тому, кто просил перенос (новый путь), либо к
+// адресату запроса (старый путь с явным менеджером).
 function acceptTransferRequest(id) {
   const r = transferRequestsList().find(x => x.id === id);
   if (!r) return { ok: false, error: 'Запрос не найден' };
   if (!canDecideTransfer(r)) return { ok: false, error: 'Решает тот, кому передают клиента' };
 
+  // Новый режим «owner»: клиент переходит инициатору (он просил его себе).
+  // Старые запросы без режима и режим «target» — клиент переходит адресату.
+  const ownerMode = r.mode === 'owner';
+  const newOwnerId = ownerMode ? r.fromManagerId : r.toManagerId;
+  const otherId = ownerMode ? r.toManagerId : r.fromManagerId;
+
   const client = clients.find(c => c.id === r.clientId);
   if (client) {
-    client.createdBy = r.toManagerId;
-    client.responsibleManagerId = r.toManagerId;   // поле схемы v6 — держим в синхроне
+    client.createdBy = newOwnerId;
+    client.responsibleManagerId = newOwnerId;   // поле схемы v6 — держим в синхроне
     saveClients(clients);
   }
 
@@ -169,19 +189,20 @@ function acceptTransferRequest(id) {
   r.decidedBy = currentUser.id;
   saveClientTransferRequests();
 
-  // Обе стороны получают уведомление: инициатор — что перенос принят,
-  // новый владелец — что клиент теперь закреплён за ним.
+  // Обе стороны получают уведомление со ссылкой «Перейти к клиенту».
   notifyUser(
-    r.fromManagerId,
-    'Перенос клиента принят',
-    'Клиент «' + r.clientName + '» передан менеджеру ' + transferManagerName(r.toManagerId),
-    null
-  );
-  notifyUser(
-    r.toManagerId,
+    newOwnerId,
     'Клиент передан вам',
     '«' + r.clientName + '» теперь закреплён за вами',
-    null
+    null,
+    { clientId: r.clientId }
+  );
+  notifyUser(
+    otherId,
+    'Перенос клиента принят',
+    'Клиент «' + r.clientName + '» передан менеджеру ' + transferManagerName(newOwnerId),
+    null,
+    { clientId: r.clientId }
   );
   updateTransfersMenuBadge();
   refreshAfterTransfer();
@@ -202,8 +223,16 @@ function rejectTransferRequest(id) {
   notifyUser(
     r.fromManagerId,
     'Перенос клиента отклонён',
+    'Клиент «' + r.clientName + '» остаётся у текущего менеджера',
+    null,
+    { clientId: r.clientId }
+  );
+  notifyUser(
+    r.toManagerId,
+    'Вы отклонили перенос',
     'Клиент «' + r.clientName + '» остаётся за вами',
-    null
+    null,
+    { clientId: r.clientId }
   );
   updateTransfersMenuBadge();
   refreshAfterTransfer();
@@ -251,10 +280,10 @@ function pendingTransferHtml(client) {
   if (canDecide) {
     return `
       <div class="transfer-pending">
-        <span>Запрос на перенос: <strong>${escapeHtml(transferManagerName(r.fromManagerId))}</strong> → <strong>вам</strong> · требуется ваше решение</span>
+        <span>Запрос на перенос: <strong>${escapeHtml(transferManagerName(r.fromManagerId))}</strong> просит передать клиента · требуется ваше решение</span>
         <span style="white-space:nowrap;">
-          <button type="button" class="btn btn-sm" onclick="decideTransferFromCard(${r.id}, true)">Подтвердить</button>
-          <button type="button" class="btn btn-sm btn-secondary" onclick="decideTransferFromCard(${r.id}, false)">Отклонить</button>
+          <button type="button" class="btn btn-sm" onclick="decideTransferFromCard(${r.id}, true)">Перенести</button>
+          <button type="button" class="btn btn-sm btn-secondary" onclick="decideTransferFromCard(${r.id}, false)">Отказать</button>
         </span>
       </div>`;
   }

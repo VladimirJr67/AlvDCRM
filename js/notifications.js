@@ -113,6 +113,7 @@ async function showNativeNotification(title, body, opts) {
 
 // Создать уведомление для пользователя (например, при назначении задачи).
 // opts.silent — не дублировать попап и звук (их уже показал вызывающий код).
+// opts.clientId — связанная карточка клиента (кнопка «Перейти к клиенту»).
 function notifyUser(userId, title, message, taskId, opts) {
   const o = opts || {};
   const maxId = notifications.reduce((m, n) => Math.max(m, n.id || 0), 0);
@@ -122,6 +123,7 @@ function notifyUser(userId, title, message, taskId, opts) {
     title: title,
     message: message,
     taskId: taskId || null,
+    clientId: o.clientId != null ? o.clientId : null,
     read: false,
     position: notifySettings().position,
     sound: notifySettings().sound,
@@ -179,6 +181,7 @@ function renderNotifications() {
                 <div style="font-weight:600;font-size:13px;color:#111;">${escapeHtml(n.title)}</div>
                 <div style="font-size:12px;color:#6b7280;margin-top:2px;">${escapeHtml(n.message)}</div>
                 <div style="font-size:11px;color:#9ca3af;margin-top:4px;">${formatDateTime(n.createdAt)}</div>
+                ${n.clientId != null ? `<button type="button" class="btn btn-sm btn-secondary" style="margin-top:8px;" onclick="event.stopPropagation(); openNotificationClient(${n.id})">Перейти к клиенту</button>` : ''}
               </div>
               <div style="flex-shrink:0;">
                 ${n.read
@@ -205,7 +208,21 @@ function openNotification(id) {
   if (n.taskId) {
     const t = tasks.find(x => x.id === n.taskId);
     if (t) openTaskModal(t);
+  } else if (n.clientId != null) {
+    openNotificationClient(id);
   }
+}
+
+// Перейти к клиенту из уведомления: отмечаем прочитанным и открываем карточку.
+function openNotificationClient(id) {
+  const n = notifications.find(x => x.id === id);
+  if (!n) return;
+  if (!n.read) {
+    n.read = true;
+    saveNotifications();
+  }
+  renderNotifications();
+  if (n.clientId != null) openClientCard(n.clientId);
 }
 
 function markAllNotificationsRead() {

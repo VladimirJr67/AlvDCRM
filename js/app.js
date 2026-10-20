@@ -236,6 +236,8 @@ async function enterApp() {
   startPolling();
   // Проверка напоминаний: в назначенное время показывает всплывающее уведомление.
   startReminderWatcher();
+  // «Крон» дедлайнов задач: уведомление за час до срока (см. js/tasks.js).
+  if (typeof startTaskDeadlineWatcher === 'function') startTaskDeadlineWatcher();
 }
 
 // Переход в раздел по имени (используется кнопками и всплывающими уведомлениями).
@@ -800,6 +802,25 @@ function injectModals() {
       </div>
     </div>
 
+    <div class="modal-overlay" id="clientTasksModal" onclick="if(event.target===this)closeModal('clientTasksModal')">
+      <div class="modal" style="width:640px;max-width:94vw;">
+        <div class="modal-head">
+          <h2 id="clientTasksModalTitle">Задачи по клиенту</h2>
+          <button type="button" class="modal-close-icon" onclick="closeModal('clientTasksModal')" title="Закрыть" aria-label="Закрыть">✕</button>
+        </div>
+        <input type="hidden" id="clientTasksClientId">
+        <div class="notes-head">
+          <span>Незакрытые задачи <span class="cc-count" id="clientTasksModalCount"></span></span>
+        </div>
+        <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:auto;max-height:50vh;">
+          <table class="admin-table">
+            <thead><tr><th>Название</th><th>Статус</th><th>Дедлайн</th><th style="text-align:right;">Действия</th></tr></thead>
+            <tbody id="clientTasksTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <div class="modal-overlay" id="matrixAccountingModal" onclick="if(event.target===this)closeModal('matrixAccountingModal')">
       <div class="modal" style="width:520px;max-width:94vw;">
         <div class="modal-head">
@@ -1030,6 +1051,9 @@ function renderSection(section) {
   // Разделы администрирования скроллятся на корневом контейнере (скроллбар
   // у правого края окна), а их контент остаётся по центру за счёт max-width.
   main.classList.toggle('admin-scroll', section.startsWith('admin'));
+  // «Уведомления» скроллятся тем же корневым контейнером: список длинный и
+  // без этого до самых первых (старых) записей не добраться.
+  main.classList.toggle('section-scroll', section === 'notifications');
 
   if (section === 'clients') {
     main.innerHTML = `
@@ -1069,6 +1093,8 @@ function renderSection(section) {
                       title="Все комментарии по клиенту: добавление, отметки, правка">Особые отметки <span class="count" id="notesCount"></span></button>
               <button class="btn btn-sm btn-secondary" onclick="openClientMatrices(selectedClientId)"
                       title="Матрицы, привязанные к этому клиенту">Матрицы клиента <span class="count" id="clientMatricesCount"></span></button>
+              <button class="btn btn-sm btn-secondary" onclick="openClientTasks(selectedClientId)"
+                      title="Незакрытые задачи по клиенту">Задачи по клиенту <span class="count" id="clientTasksCount"></span></button>
             </div>
             <button class="btn btn-sm" id="contactsAddBtn" onclick="openContactModal(selectedClientId)">+ Добавить</button>
           </div>

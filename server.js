@@ -723,6 +723,9 @@ function normalizeDb(db) {
     if (!('fromManagerId' in r)) r.fromManagerId = null;
     if (!('toManagerId' in r)) r.toManagerId = null;
     if (typeof r.reason !== 'string') r.reason = '';
+    // Старые запросы создавались с явным адресатом: помечаем их режим «target»,
+    // чтобы решения по ним работали по прежней логике.
+    if (!('mode' in r)) r.mode = 'target';
     if (TRANSFER_STATUSES.indexOf(r.status) < 0) r.status = 'pending';
     if (!('createdAt' in r)) r.createdAt = new Date().toISOString();
     if (!('decidedAt' in r)) r.decidedAt = null;

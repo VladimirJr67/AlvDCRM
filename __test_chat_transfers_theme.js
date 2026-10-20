@@ -226,8 +226,8 @@ function asUser(login) {
   asUser('lead'); // id 4 — адресат
   check('у адресата запрос виден как входящий', run('incomingTransferRequests().length') === 1);
   const deciderPlaque = run('pendingTransferHtml(clients[1])');
-  check('адресат видит «Подтвердить / Отклонить»',
-    /Подтвердить/.test(deciderPlaque) && /Отклонить/.test(deciderPlaque) &&
+  check('адресат видит «Перенести / Отказать»',
+    /Перенести/.test(deciderPlaque) && /Отказать/.test(deciderPlaque) &&
     /decideTransferFromCard\(1, true\)/.test(deciderPlaque));
 
   res = run('acceptTransferRequest(1)');
@@ -275,6 +275,77 @@ function asUser(login) {
   check('администратор передаёт клиента сразу', run('clients[0].createdBy') === 4,
     'владелец: ' + run('clients[0].createdBy'));
   check('прямая передача без ошибок', alerts.length === 0, alerts.join(' / '));
+
+  /* ========== 2b. Запрос на перенос текущему владельцу (новый порядок) ========== */
+  // Менеджер видит «Запрос на перенос» у чужого клиента; выбора менеджера нет —
+  // запрос уходит текущему владельцу, он решает «Перенести / Отказать».
+  run(`
+    clients = [
+      { id: 1, orgName: 'ООО Ромашка', createdBy: 2, responsibleManagerId: 2, contacts: [], history: [] },
+      { id: 2, orgName: 'АО Василёк', createdBy: 3, responsibleManagerId: 3, contacts: [], history: [] }
+    ];
+    clientTransferRequests = [];
+    notifications = [];
+  `);
+  asUser('manager2'); // id 3 просит клиента 1 (владелец — id 2)
+  res = run('createClientTransferRequest(1, "Нужен для сделки")');
+  check('запрос уходит текущему владельцу без выбора менеджера',
+    res.ok === true && run('clientTransferRequests[0].mode') === 'owner' &&
+    run('clientTransferRequests[0].toManagerId') === 2 &&
+    run('clientTransferRequests[0].fromManagerId') === 3);
+  check('клиент остаётся у владельца до решения', run('clients[0].createdBy') === 2);
+  check('уведомление владельцу содержит ссылку на клиента',
+    run('notifications').some(n => n.userId === 2 && n.clientId === 1 && /перенос/i.test(n.title)));
+
+  asUser('manager'); // id 2 — владелец
+  check('владелец видит входящий запрос', run('incomingTransferRequests().length') === 1);
+  const ownerPlaque = run('pendingTransferHtml(clients[0])');
+  check('владельцу доступны «Перенести / Отказать»',
+    /Перенести/.test(ownerPlaque) && /Отказать/.test(ownerPlaque));
+
+  res = run('acceptTransferRequest(clientTransferRequests[0].id)');
+  check('после «Перенести» клиент перешёл инициатору',
+    res.ok === true && run('clients[0].createdBy') === 3);
+  check('инициатор уведомлён, что клиент у него',
+    run('notifications').some(n => n.userId === 3 && n.clientId === 1 && /передан вам/i.test(n.title)));
+  check('владелец уведомлён о передаче',
+    run('notifications').some(n => n.userId === 2 && n.clientId === 1 && /принят/i.test(n.title)));
+
+  // Отказ: клиент остаётся у владельца, оба участника уведомлены.
+  run(`
+    clientTransferRequests = []; notifications = [];
+    clients[1].createdBy = 4; clients[1].responsibleManagerId = 4;
+  `);
+  asUser('manager'); // id 2 просит клиента 2 (владелец — руководитель id 4)
+  res = run('createClientTransferRequest(2, "")');
+  check('второй запрос на перенос создан', res.ok === true);
+  asUser('lead'); // id 4 — владелец, отказывает
+  res = run('rejectTransferRequest(clientTransferRequests[0].id)');
+  check('после «Отказать» клиент остаётся у владельца',
+    res.ok === true && run('clients[1].createdBy') === 4);
+  check('инициатор уведомлён об отказе',
+    run('notifications').some(n => n.userId === 2 && /отклон/i.test(n.title)));
+  check('владелец уведомлён об отказе',
+    run('notifications').some(n => n.userId === 4 && /отклон/i.test(n.title)));
+
+  // Кнопка «Перейти к клиенту» в разделе уведомлений.
+  asUser('manager');
+  run('renderNotifications()');
+  check('в уведомлении есть кнопка «Перейти к клиенту»',
+    /Перейти к клиенту/.test(html('mainContent')) && /openNotificationClient\(/.test(html('mainContent')));
+
+  // Себе уведомление о своём клиенте не отправляем.
+  asUser('manager');
+  run('function closeModal() {}');
+  run(`
+    notifications = [];
+    selectedClientId = null;
+    document.getElementById('clientId').value = '';
+    document.getElementById('orgName').value = 'Моя новая фирма';
+    saveClient({ preventDefault() {} });
+  `);
+  check('о своём клиенте уведомление себе не отправляется', run('notifications').length === 0,
+    'уведомлений: ' + run('notifications').length);
 
   /* ================= 3. Тёмная тема ================= */
   asUser('manager');

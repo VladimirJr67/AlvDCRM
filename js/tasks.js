@@ -2014,6 +2014,118 @@ function setTaskStatus(task, status) {
   return { ok: true };
 }
 
+/* ===== Задачи по клиенту (карточка клиента) ===== */
+
+// Задача открыта: она не в завершающем столбце и назначение не «Выполнено».
+function isTaskOpen(task) {
+  if (!task) return false;
+  if (task.assignmentStatus === 'completed') return false;
+  return !isCompletedColumnId(task.status);
+}
+
+// Незакрытые задачи конкретного клиента.
+function clientOpenTasks(clientId) {
+  if (clientId == null || clientId === '') return [];
+  return tasks.filter(t => String(t.clientId) === String(clientId) && isTaskOpen(t));
+}
+
+// Подпись статуса задачи: для назначенной — статус назначения, иначе столбец.
+function taskStatusLabel(task) {
+  const col = taskColumns.find(c => c.id === task.status);
+  if (task.assignedTo != null && task.assignmentStatus) {
+    const info = assignmentStatusInfo(task.assignmentStatus);
+    return info ? info.label : (col ? col.name : '—');
+  }
+  return col ? col.name : '—';
+}
+
+function updateClientTasksCount(clientId) {
+  const el = document.getElementById('clientTasksCount');
+  if (!el) return;
+  const count = clientId != null ? clientOpenTasks(clientId).length : 0;
+  el.textContent = count ? `(${count})` : '';
+}
+
+// Окно «Задачи по клиенту»: только незакрытые задачи.
+function openClientTasks(clientId) {
+  const client = clients.find(c => c.id === clientId);
+  if (!client) { alert('Сначала выберите клиента'); return; }
+  document.getElementById('clientTasksClientId').value = clientId;
+  document.getElementById('clientTasksModalTitle').textContent = 'Задачи по клиенту — ' + (client.orgName || '');
+  renderClientTasksList(clientId);
+  document.getElementById('clientTasksModal').classList.add('active');
+}
+
+function renderClientTasksList(clientId) {
+  const tbody = document.getElementById('clientTasksTableBody');
+  const modalCount = document.getElementById('clientTasksModalCount');
+  const list = clientOpenTasks(clientId).sort((a, b) =>
+    new Date(a.deadline || 0) - new Date(b.deadline || 0));
+  if (modalCount) modalCount.textContent = list.length ? `(${list.length})` : '';
+  updateClientTasksCount(clientId);
+  if (!tbody) return;
+
+  if (!list.length) {
+    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#9ca3af;padding:24px;">Незакрытых задач нет</td></tr>';
+    return;
+  }
+  tbody.innerHTML = list.map(t => `
+    <tr>
+      <td><strong>${escapeHtml(t.title || '—')}</strong></td>
+      <td>${escapeHtml(taskStatusLabel(t))}</td>
+      <td>${escapeHtml(t.deadline ? formatDate(t.deadline) : '—')}</td>
+      <td style="text-align:right;white-space:nowrap;">
+        <button class="btn-icon-btn" onclick="closeModal('clientTasksModal'); openTaskModal(tasks.find(x=>x.id===${t.id}))" title="Открыть задачу">Открыть</button>
+      </td>
+    </tr>`).join('');
+}
+
+/* ===== Напоминание о дедлайне задачи (за 1 час) =====
+   Отдельного серверного планировщика в проекте нет: «крон» — клиентский
+   таймер, как у напоминаний (js/reminders.js). Каждый браузер проверяет
+   задачи, где текущий пользователь — владелец или исполнитель, и один раз
+   на каждый дедлайн присылает уведомление за час до срока. */
+
+const TASK_DEADLINE_WARN_MS = 60 * 60 * 1000;
+let taskDeadlineWatchTimer = null;
+
+function taskDeadlineRecipients(task) {
+  const list = [];
+  if (task && task.ownerId != null) list.push(task.ownerId);
+  if (task && task.assignedTo != null && task.assignedTo !== task.ownerId) list.push(task.assignedTo);
+  return [...new Set(list)];
+}
+
+function startTaskDeadlineWatcher() {
+  if (taskDeadlineWatchTimer) return;
+  checkTaskDeadlineReminders();
+  taskDeadlineWatchTimer = setInterval(checkTaskDeadlineReminders, 60000);
+}
+
+function checkTaskDeadlineReminders() {
+  if (!currentUser) return 0;
+  const now = Date.now();
+  const me = currentUser.id;
+  let sent = 0;
+  (tasks || []).forEach(t => {
+    const dl = parseDeadline(t && t.deadline);
+    if (!dl || !isTaskOpen(t)) return;
+    const ms = dl.getTime() - now;
+    if (ms <= 0 || ms > TASK_DEADLINE_WARN_MS) return;
+    if (taskDeadlineRecipients(t).indexOf(me) === -1) return;
+    // Уже напоминали этому пользователю по этому дедлайну — не дублируем.
+    if (!t.deadlineNotifiedBy || typeof t.deadlineNotifiedBy !== 'object') t.deadlineNotifiedBy = {};
+    if (t.deadlineNotifiedBy[me] === t.deadline) return;
+
+    notifyUser(me, 'Приближается дедлайн задачи',
+      'До дедлайна задачи «' + (t.title || '—') + '» остался 1 час.', t.id);
+    t.deadlineNotifiedBy[me] = t.deadline;
+    sent++;
+  });
+  if (sent) saveTasks();
+  return sent;
+}
+
 function formatDate(dateStr) {
   if (!dateStr) return '—';
   const d = new Date(dateStr);
