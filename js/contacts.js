@@ -2,10 +2,22 @@ let contacts = [];
 let currentContactsSubsection = 'internal';
 let contactsDepartmentFilter = '';
 
+// Внутренние и мобильные контакты — общий справочник компании, поэтому
+// менять его (добавлять, импортировать, редактировать, удалять) могут
+// только администратор, руководитель и разработчик. Менеджеры видят
+// справочник только для просмотра и поиска.
+function canManageDirectoryContacts() {
+  return isAdmin() || isLead();
+}
+
 function renderContacts() {
   const main = document.getElementById('mainContent');
   const filteredContacts = contacts.filter(c => c.type === currentContactsSubsection);
-  const titles = { internal: 'Внутренние номера', mobile: 'Мобильные телефоны' };
+  const canManage = canManageDirectoryContacts();
+  const titles = {
+    internal: 'Телефонный справочник — внутренние номера',
+    mobile: 'Телефонный справочник — мобильные телефоны'
+  };
   // Уникальные отделы текущего подраздела для выпадающего фильтра.
   const departments = [...new Set(filteredContacts.map(c => (c.department || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ru'));
   if (!departments.includes(contactsDepartmentFilter)) contactsDepartmentFilter = '';
@@ -16,8 +28,8 @@ function renderContacts() {
         <div class="contacts-header">
           <h2>${titles[currentContactsSubsection]}</h2>
           <div style="display:flex;gap:8px;">
-            <button class="btn btn-secondary" onclick="document.getElementById('contactsFileInput').click()" title="Колонки файла: ФИО, Отдел, номер, должность">Импорт из Excel</button>
-            <button class="btn" onclick="openContactItemModal()">+ Добавить контакт</button>
+            ${canManage ? `<button class="btn btn-secondary" onclick="document.getElementById('contactsFileInput').click()" title="Колонки файла: ФИО, Отдел, номер, должность">Импорт из Excel</button>
+            <button class="btn" onclick="openContactItemModal()">+ Добавить контакт</button>` : ''}
           </div>
         </div>
         <input type="file" id="contactsFileInput" accept=".xlsx,.xls,.csv" style="display:none" onchange="importContactsFromExcel(event)">
@@ -69,14 +81,18 @@ function renderContactsList() {
       <div class="contact-dept">${escapeHtml(c.department || '—')}</div>
       <div class="contact-number">${escapeHtml(c.number)}</div>
       <div class="contact-actions">
-        <button class="btn btn-sm btn-secondary" onclick="editContactItem(${c.id})">Изменить</button>
-        <button class="btn btn-sm btn-danger" onclick="deleteContactItem(${c.id})">Удалить</button>
+        ${canManageDirectoryContacts() ? `<button class="btn btn-sm btn-secondary" onclick="editContactItem(${c.id})">Изменить</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteContactItem(${c.id})">Удалить</button>` : ''}
       </div>
     </div>
   `).join('');
 }
 
 function openContactItemModal(contact = null) {
+  if (!canManageDirectoryContacts()) {
+    alert('Добавлять и изменять справочник контактов может только администратор или руководитель.');
+    return;
+  }
   document.getElementById('contactItemModalTitle').textContent = contact ? 'Редактировать контакт' : 'Добавить контакт';
   document.getElementById('contactItemId').value = contact?.id || '';
   document.getElementById('contactItemType').value = currentContactsSubsection;
@@ -89,6 +105,7 @@ function openContactItemModal(contact = null) {
 
 function saveContactItem(e) {
   e.preventDefault();
+  if (!canManageDirectoryContacts()) return;
   const id = document.getElementById('contactItemId').value;
   const type = document.getElementById('contactItemType').value;
   const data = {
@@ -115,11 +132,13 @@ function saveContactItem(e) {
 }
 
 function editContactItem(id) {
+  if (!canManageDirectoryContacts()) return;
   const c = contacts.find(x => x.id === id);
   if (c) openContactItemModal(c);
 }
 
 function deleteContactItem(id) {
+  if (!canManageDirectoryContacts()) return;
   if (!confirm('Удалить контакт?')) return;
   contacts = contacts.filter(c => c.id !== id);
   saveContacts(contacts);
@@ -133,6 +152,7 @@ function deleteContactItem(id) {
    или «Мобильные». */
 
 async function importContactsFromExcel(event) {
+  if (!canManageDirectoryContacts()) { event.target.value = ''; return; }
   const file = event.target.files && event.target.files[0];
   event.target.value = '';
   if (!file) return;

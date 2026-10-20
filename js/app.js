@@ -73,7 +73,7 @@ function buildSidebar() {
   html += addItem('tasks', 'Задачи', { badge: 'tasksMenuBadge' });
   html += addItem('reminders', 'Напоминания');
   html += addItem('news', 'Новости', { badge: 'newsMenuBadge' });
-  html += addItem('contacts', 'Контакты', { submenu: [
+  html += addItem('contacts', 'Телефонный справочник', { submenu: [
     { section: 'contacts-internal', label: 'Внутренние' },
     { section: 'contacts-mobile', label: 'Мобильные' }
   ] });
@@ -1065,7 +1065,7 @@ function renderSection(section) {
                 <h2>Контактные лица</h2>
                 <span class="count" id="contactsCount"></span>
               </div>
-              <button class="btn btn-sm btn-secondary" onclick="openClientNotes(selectedClientId)"
+              <button class="btn btn-sm btn-secondary" id="notesBtn" onclick="openClientNotes(selectedClientId)"
                       title="Все комментарии по клиенту: добавление, отметки, правка">Особые отметки <span class="count" id="notesCount"></span></button>
               <button class="btn btn-sm btn-secondary" onclick="openClientMatrices(selectedClientId)"
                       title="Матрицы, привязанные к этому клиенту">Матрицы клиента <span class="count" id="clientMatricesCount"></span></button>

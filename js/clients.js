@@ -64,21 +64,13 @@ function canEditClient(client) {
   return canWriteToClient(client);
 }
 
-// Контактные лица — полная зона менеджера: добавление, правка и удаление
-// доступны любому пользователю. Ограничения менеджера касаются только
-// удаления самого клиента и импорта/шаблона/экспорта.
-function canManageContacts() {
-  return !!currentUser;
-}
-
-function canAddContact() {
-  return canManageContacts();
-}
-
-// Комментарий может править его автор или администратор.
-function canEditComment(entry) {
+// Комментарий может править его автор или администратор. Для менеджера
+// дополнительно требуется, чтобы клиент был его собственным: чужую карточку
+// (и её историю) менеджер не меняет — только читает.
+function canEditComment(entry, client) {
   if (!currentUser || !entry) return false;
   if (isAdmin()) return true;
+  if (client && client.createdBy !== currentUser.id) return false;
   return entry.authorId ? entry.authorId === currentUser.id : entry.manager === currentUser.login;
 }
 
@@ -340,10 +332,12 @@ function renderClientContacts(id) {
 
   const countEl = document.getElementById('contactsCount');
   const addBtn = document.getElementById('contactsAddBtn');
+  const notesBtn = document.getElementById('notesBtn');
 
   if (!id) {
     if (countEl) countEl.textContent = '';
     if (addBtn) addBtn.disabled = true;
+    if (notesBtn) notesBtn.disabled = true;
     panel.innerHTML = `<div class="placeholder"><h2>Выберите клиента</h2><p>Кликните на строку в таблице, чтобы увидеть контактные лица</p></div>`;
     return;
   }
@@ -352,15 +346,16 @@ function renderClientContacts(id) {
   if (!client) return;
 
   const contacts = client.contacts || [];
-  // Добавлять контактные лица может только владелец клиента или администратор;
-  // правка и удаление — как раньше (см. canManageContacts).
+  // Контактные лица — часть карточки клиента: менять их может только владелец
+  // или администратор. Менеджер видит чужих клиентов только для чтения.
   const canAdd = canWriteToClient(client);
-  const canManage = canManageContacts();
+  const canManage = canWriteToClient(client);
   const editable = canWriteToClient(client);
   // Индекс мог устареть, если контактное лицо удалили.
   if (selectedContactIdx !== null && !contacts[selectedContactIdx]) selectedContactIdx = null;
   if (countEl) countEl.textContent = contacts.length ? `(${contacts.length})` : '';
   if (addBtn) addBtn.disabled = !canAdd;
+  if (notesBtn) notesBtn.disabled = !canManage;
   updateClientNotesCount(client);
   if (typeof updateClientMatricesCount === 'function') updateClientMatricesCount(client.id);
 
@@ -555,7 +550,7 @@ function renderHistoryBlock(client, editable) {
         : `<div class="history-scroll">${history.map(h => historyEntryHtml(h, {
             clientId: client.id,
             idx: (client.history || []).indexOf(h),
-            canEdit: canEditComment(h)
+            canEdit: canEditComment(h, client)
           })).join('')}</div>`}
     </div>
   `;
@@ -594,7 +589,7 @@ function openAllHistoryModal(clientId) {
                   <td>${escapeHtml(h.manager || '—')}</td>
                   <td><div class="history-comment">${escapeHtml(h.comment)}</div></td>
                   <td style="text-align:right;">
-                    ${canEditComment(h)
+                    ${canEditComment(h, client)
                       ? `<button class="btn-icon-btn" onclick="editCommentFromHistory(${client.id}, ${idx})" title="Редактировать комментарий">Изменить</button>`
                       : ''}
                   </td>
@@ -830,6 +825,20 @@ function openClientModal(client = null) {
 
   hideCitySuggestions();
   setInnStatus('');
+
+  // Чужого клиента менеджер открывает только для просмотра: поля read-only,
+  // кнопка «Сохранить» скрыта. Страховка на случай, если форма открыта в обход
+  // кнопки «Редактировать» (она у чужой карточки не показывается).
+  const form = document.querySelector('#clientModal form');
+  if (form) {
+    const readOnly = !!(client && !canWriteToClient(client));
+    form.querySelectorAll('input, select, textarea').forEach(el => {
+      if (el.id !== 'clientId') el.disabled = readOnly;
+    });
+    const submitBtn = form.querySelector('button[type="submit"]');
+    if (submitBtn) submitBtn.style.display = readOnly ? 'none' : '';
+  }
+
   document.getElementById('clientModal').classList.add('active');
 }
 
@@ -957,8 +966,12 @@ function returnToClientCard() {
 }
 
 function openContactModal(clientId) {
-  if (!canAddContact()) { alert('Сначала войдите в систему'); return; }
   if (!clientId) { alert('Сначала выберите клиента'); return; }
+  const client = clients.find(c => c.id === clientId);
+  if (!canWriteToClient(client)) {
+    alert('Добавлять контактные лица может только владелец клиента или администратор.');
+    return;
+  }
   document.getElementById('contactClientId').value = clientId;
   document.getElementById('contactModalTitle').textContent = 'Добавить контактное лицо';
   document.getElementById('editContactIdx').value = '';
@@ -972,12 +985,12 @@ function openContactModal(clientId) {
 }
 
 function editClientContact(clientId, idx) {
-  if (!canManageContacts()) {
-    alert('Сначала войдите в систему.');
+  const client = clients.find(c => c.id === clientId);
+  if (!client || !canWriteToClient(client)) {
+    alert('Редактировать контактные лица может только владелец клиента или администратор.');
     return;
   }
-  const client = clients.find(c => c.id === clientId);
-  if (!client || !client.contacts[idx]) return;
+  if (!client.contacts[idx]) return;
   const ct = client.contacts[idx];
   document.getElementById('contactClientId').value = clientId;
   document.getElementById('contactModalTitle').textContent = 'Редактировать контактное лицо';
@@ -1026,12 +1039,12 @@ function saveContact(e) {
 }
 
 function deleteContact(clientId, idx) {
-  if (!confirm('Удалить контактное лицо?')) return;
   const client = clients.find(c => c.id === clientId);
-  if (!client || !canManageContacts()) {
-    alert('Сначала войдите в систему.');
+  if (!client || !canWriteToClient(client)) {
+    alert('Удалять контактные лица может только владелец клиента или администратор.');
     return;
   }
+  if (!confirm('Удалить контактное лицо?')) return;
   client.contacts.splice(idx, 1);
   saveClients(clients);
   renderClientContacts(clientId);
@@ -1088,8 +1101,9 @@ function openHistoryModal(clientId, editIdx) {
 
   if (editing) {
     const entry = client ? (client.history || [])[parseInt(editIdx, 10)] : null;
-    // Править можно только свой комментарий (или любой — администратору).
-    if (entry && !canEditComment(entry)) {
+    // Править можно только свой комментарий (или любой — администратору);
+    // у чужого клиента менеджер комментарии не редактирует вовсе.
+    if (entry && !canEditComment(entry, client)) {
       alert('Править комментарий может его автор или администратор.');
       return;
     }
@@ -1455,7 +1469,7 @@ function saveHistory(e) {
   if (editIdx !== '') {
     const entry = client.history[parseInt(editIdx, 10)];
     if (!entry) return;
-    if (!canEditComment(entry)) {
+    if (!canEditComment(entry, client)) {
       alert('Править комментарий может его автор или администратор.');
       return;
     }
@@ -1678,6 +1692,11 @@ function saveSpecialNotes() {
 function openClientNotes(clientId) {
   const client = clients.find(c => c.id === clientId);
   if (!client) { alert('Сначала выберите клиента'); return; }
+  // Чужих клиентов менеджер не меняет: заметки доступны владельцу и администратору.
+  if (!canWriteToClient(client)) {
+    alert('Особые отметки доступны только для своих клиентов.');
+    return;
+  }
   document.getElementById('notesClientId').value = clientId;
   document.getElementById('notesModalTitle').textContent = 'Особые отметки — ' + (client.orgName || '');
   resetNotesForm();

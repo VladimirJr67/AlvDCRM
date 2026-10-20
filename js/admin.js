@@ -1441,7 +1441,7 @@ function injectAdminModals() {
             <div class="form-row"><div class="form-group"><label>Должность</label>
               <input type="text" id="userPosition" placeholder="Например, менеджер по продажам">
             </div></div>
-            <div class="form-row"><div class="form-group"><label>Пароль *</label><input type="password" id="userPassword" required></div></div>
+            <div class="form-row"><div class="form-group"><label>Пароль *</label><input type="text" id="userPassword" required></div></div>
             <div class="form-row">
               <div class="form-group"><label>Роль</label>
                 <select id="userRole">
