@@ -210,50 +210,44 @@ function asUser(login) {
     /Всего|задач в периоде/.test(html('mainContent')));
   check('в ленте видны счётчики', /task-calendar-count/.test(html('mainContent')));
 
-  /* ================= 2. Отслеживание руководителем ================= */
+  /* ================= 2. Отслеживание: только назначенные мной задачи ================= */
   asUser('lead');
   check('руководитель — отслеживающий', run('isTaskTracker()') === true);
   asUser('manager');
   check('менеджер не отслеживает', run('isTaskTracker()') === false);
   run('renderTracking()');
   check('менеджеру раздел отслеживания закрыт', /Доступ запрещён/.test(html('mainContent')));
-  check('менеджер не может взять сотрудника на отслеживание', run('startTrackingUser(3)').ok === false);
+  check('менеджер не может отправить задачу в отслеживание', run('sendTaskToTracking(4)').ok === false);
 
   asUser('lead');
-  const started = run('startTrackingUser(2)');
-  check('руководитель взял сотрудника на отслеживание', started.ok === true, JSON.stringify(started));
-  check('сотрудник отмечен в профиле', JSON.stringify(run('users.find(u => u.id === 2).trackedBy')) === '[4]');
-  check('взяты все текущие задачи сотрудника',
-    run('tasks.filter(t => t.ownerId === 2).every(t => t.trackingBy.indexOf(4) > -1)') === true);
-  check('чужие задачи не затронуты', run('tasks.find(t => t.id === 4).trackingBy.length') === 0);
-  check('список отслеживаемых сотрудников', JSON.stringify(run('trackedUsers().map(u => u.id)')) === '[2]');
+  check('до кнопки в отслеживании пусто', run('sharedTrackingTasks().length') === 0);
+  const sentToTracking = run('sendTaskToTracking(4)');
+  check('руководитель отправил задачу менеджера в отслеживание', sentToTracking.ok === true &&
+    run('tasks.find(t => t.id === 4).trackingBy').indexOf(4) > -1);
+  check('повторно отправить нельзя', run('sendTaskToTracking(4)').ok === false);
+  check('задача попала в отслеживание', run('sharedTrackingTasks().some(t => t && t.id === 4)') === true);
+  run('renderTracking()');
+  check('раздел отслеживания показывает задачу', /Задача коллеги/.test(html('mainContent')));
+  check('в разделе нет «Взять на отслеживание»', !/Взять на отслеживание/.test(html('mainContent')));
 
-  // Новые задачи сотрудника получают наблюдателя автоматически
+  // Автозадача создаётся без наблюдателей: отслеживание теперь адресное.
   run(`addAutoTask({ title: 'Новая задача сотрудника', status: 'in_progress', ownerId: 2 })`);
-  const autoTask = run('tasks[tasks.length - 1]');
-  check('новая задача сотрудника сразу с наблюдателем',
-    autoTask.trackingBy.indexOf(4) > -1, 'trackingBy=' + JSON.stringify(autoTask.trackingBy));
 
   // Прогресс
   const progress = run('userTaskProgress(2)');
   check('прогресс: всего задач', progress.total === 5, 'всего: ' + progress.total);
   check('прогресс: завершено и в работе', progress.done === 1 && progress.active === 4,
     'выполнено ' + progress.done + ', в работе ' + progress.active);
-  check('прогресс: просрочено', progress.overdue === 1, 'просрочено: ' + progress.overdue);
+  // Дедлайны задач 1/2/5 фиксированные: какие из них уже в прошлом, зависит
+  // от реальной даты запуска — считаем ожидание так же, как код.
+  const expectedOverdue = ['2026-10-07T09:30', '2026-10-07T14:00', '2026-09-10T10:00']
+    .filter(s => new Date(s).getTime() < Date.now()).length;
+  check('прогресс: просрочено', progress.overdue === expectedOverdue,
+    'просрочено: ' + progress.overdue + ', ожидалось: ' + expectedOverdue);
   check('прогресс: процент выполнения', progress.percent === 20, 'процент: ' + progress.percent);
   check('прогресс: разбивка по столбцам', progress.byColumn.length === 2 &&
     progress.byColumn[0].name === 'В работе' && progress.byColumn[0].count === 4,
     JSON.stringify(progress.byColumn.map(c => c.name + ':' + c.count)));
-
-  run('renderTracking()');
-  check('раздел показывает прогресс сотрудника', /Иванов Иван/.test(html('mainContent')) &&
-    /выполнено 1 из 5/.test(html('mainContent')) && /Просрочено/.test(html('mainContent')));
-
-  const stopped = run('stopTrackingUser(2)');
-  check('отслеживание снимается', stopped.ok === true &&
-    JSON.stringify(run('users.find(u => u.id === 2).trackedBy')) === '[]');
-  check('наблюдатели убраны из задач',
-    run('tasks.every(t => t.trackingBy.indexOf(4) === -1)') === true);
 
   /* ================= 3. Задача-ссылка «Отработка ссылки» ================= */
   asUser('manager');

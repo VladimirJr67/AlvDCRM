@@ -641,10 +641,33 @@ function injectModals() {
             <div id="taskClientLink" style="display:none;font-size:13px;color:#6b7280;padding:8px;background:#f9fafb;border-radius:6px;margin-top:8px;"></div>
           </div>
           <div class="modal-actions">
+            <button type="button" class="btn btn-secondary" id="taskCloseBtn" style="display:none;margin-right:auto;"
+                    onclick="openTaskCloseConfirm(parseInt(document.getElementById('taskId').value, 10))">Закрыть задачу</button>
             <button type="button" class="btn btn-secondary" onclick="closeModal('taskModal')">Отмена</button>
             <button type="submit" class="btn">Сохранить</button>
           </div>
         </form>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="taskCloseConfirmModal" onclick="if(event.target===this)closeTaskConfirmModal()">
+      <div class="modal" style="width:480px;max-width:94vw;">
+        <div class="modal-head">
+          <h2>Закрыть задачу?</h2>
+          <button type="button" class="modal-close-icon" onclick="closeTaskConfirmModal()" title="Отмена" aria-label="Отмена">✕</button>
+        </div>
+        <input type="hidden" id="taskCloseConfirmId">
+        <div class="form-section">
+          <div id="taskCloseConfirmTitle" style="font-size:13px;color:#1f2937;margin-bottom:12px;"></div>
+          <div class="form-group">
+            <label>Комментарий (необязательно)</label>
+            <textarea id="taskCloseConfirmComment" rows="3" placeholder="Что сделано"></textarea>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="closeTaskConfirmModal()">Отмена</button>
+          <button type="button" class="btn" onclick="confirmTaskClose()">Закрыть задачу</button>
+        </div>
       </div>
     </div>
 

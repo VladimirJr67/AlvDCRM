@@ -35,6 +35,8 @@ const ASSIGNMENT_STATUSES = [
   { value: 'completed', label: 'Выполнено', color: '#10b981' }
 ];
 
+const TASK_CALENDAR_MODE_KEY = 'alvid_crm_task_calendar_mode';
+
 function loadTasks() {
   const saved = localStorage.getItem('alvid_crm_tasks');
   tasks = saved ? JSON.parse(saved) : [];
@@ -45,6 +47,12 @@ function loadTasks() {
   } else {
     taskColumns = DEFAULT_COLUMNS.map((c, i) => ({ ...c, order: i }));
     saveTaskColumns();
+  }
+
+  // Выбранный период (День/Неделя/Месяц) запоминаем между визитами.
+  const savedMode = localStorage.getItem(TASK_CALENDAR_MODE_KEY);
+  if (savedMode && TASK_CALENDAR_MODES.some(m => m.id === savedMode)) {
+    taskCalendarMode = savedMode;
   }
 }
 
@@ -483,17 +491,21 @@ function isTaskCompleted(task) {
   return taskCompletedColumnIds().indexOf(task.status) > -1;
 }
 
-// Счётчик показывает активные задачи: завершённые в него не попадают,
-// иначе он не отражает объём незакрытой работы.
+// Счётчик показывает активные задачи выбранного периода (День/Неделя/Месяц):
+// цифра должна соответствовать тому, что видно на доске, а не всей базе.
+// Завершённые в него не попадают — он отражает объём незакрытой работы.
 function updateTasksMenuBadge() {
   const badge = document.getElementById('tasksMenuBadge');
   if (!badge) return;
-  const visible = visibleTasks();
+  const period = (typeof taskCalendarPeriodRange === 'function')
+    ? taskCalendarPeriodRange(taskCalendarMode, taskCalendarAnchor)
+    : null;
+  const visible = visibleTasks().filter(t => !period || taskInRange(t, period.from, period.to));
   const active = visible.filter(t => !isTaskCompleted(t));
   const done = visible.length - active.length;
   const overdue = active.filter(t => taskOverdue(t)).length;
   badge.innerHTML =
-    `<span class="menu-badge-count" title="Активных задач: ${active.length}. Завершено: ${done}">${active.length}</span>` +
+    `<span class="menu-badge-count" title="Активных задач за период: ${active.length}. Завершено: ${done}">${active.length}</span>` +
     `<span class="menu-badge-count menu-badge-overdue" title="Просрочено">${overdue}</span>`;
 }
 
@@ -786,6 +798,8 @@ function taskCalendarBandsWithCounts() {
 function setTaskCalendarMode(mode) {
   taskCalendarMode = TASK_CALENDAR_MODES.some(m => m.id === mode) ? mode : 'week';
   taskCalendarPick = null;
+  // Запоминаем период: при следующем входе раздел откроется на нём же.
+  try { localStorage.setItem(TASK_CALENDAR_MODE_KEY, taskCalendarMode); } catch (e) { /* приватный режим */ }
   renderTasks();
 }
 
@@ -948,16 +962,12 @@ function stopTrackingUser(userId) {
   return { ok: true };
 }
 
-// Новая задача сотрудника: руководители, которые его отслеживают, попадают
-// в trackingBy автоматически.
+// Отслеживание больше не назначается «скопом» на всех менеджеров (П.16):
+// задача попадает в отслеживание адресно — кнопкой «Отправить в отслеживание».
+// Функция оставлена точкой совместимости для старых вызовов.
 function syncTrackingForTask(task) {
   if (!task) return task;
-  const ownerId = task.ownerId != null ? task.ownerId : (currentUser ? currentUser.id : null);
-  if (ownerId == null) return task;
-  const watchers = trackersForUser(ownerId);
-  if (!watchers.length) return task;
-  task.trackingBy = Array.isArray(task.trackingBy) ? task.trackingBy : [];
-  watchers.forEach(id => { if (task.trackingBy.indexOf(id) === -1) task.trackingBy.push(id); });
+  if (!Array.isArray(task.trackingBy)) task.trackingBy = [];
   return task;
 }
 
@@ -989,10 +999,54 @@ function userTaskProgress(userId) {
 let trackingAssigneeFilter = '';
 let trackingStatusFilter = '';
 
+// Задача, которую текущий пользователь взял в отслеживание кнопкой
+// «Отправить в отслеживание» (его id лежит в trackingBy).
+function isTaskTrackedByMe(task) {
+  const me = currentUser ? currentUser.id : null;
+  if (!me || !task || !Array.isArray(task.trackingBy)) return false;
+  return task.trackingBy.indexOf(me) > -1;
+}
+
+// Отправить в отслеживание может администратор, руководитель или разработчик —
+// и только чужую задачу (свою он и так ведёт в канбане).
+function canSendTaskToTracking(task) {
+  if (!currentUser || !task) return false;
+  if (!(isAdmin() || isLead())) return false;
+  if (isTaskTrackedByMe(task)) return false;
+  if (task.ownerId === currentUser.id) return false;
+  if (task.assignedBy === currentUser.id) return false;
+  return true;
+}
+
+function sendTaskToTracking(taskId) {
+  const t = tasks.find(x => x.id === taskId);
+  if (!t) return { ok: false, error: 'Задача не найдена' };
+  if (!canSendTaskToTracking(t)) return { ok: false, error: 'Эту задачу нельзя отправить в отслеживание' };
+  if (!Array.isArray(t.trackingBy)) t.trackingBy = [];
+  t.trackingBy.push(currentUser.id);
+  t.trackingSentAt = new Date().toISOString();
+  t.trackingSentBy = currentUser.id;
+  saveTasks();
+  return { ok: true };
+}
+
+// Кнопка «Отправить в отслеживание» из списка задач менеджера (Анализ).
+function sendTaskToTrackingFromUi(taskId, managerId, statusId) {
+  const res = sendTaskToTracking(taskId);
+  if (!res.ok) { alert(res.error); return; }
+  if (typeof openAdminTaskList === 'function' && managerId != null) {
+    openAdminTaskList(managerId, statusId || null);
+  }
+  if (typeof currentSection === 'string' && currentSection === 'tracking') renderTracking();
+  else if (typeof currentSection === 'string' && currentSection === 'tasks') renderTasks();
+}
+
+// «Отслеживание задач»: задачи, назначенные текущим пользователем, плюс те,
+// что он отправил в отслеживание. Наблюдение «за всеми менеджерами» убрано.
 function sharedTrackingTasks() {
   const me = currentUser ? currentUser.id : null;
   return tasks
-    .filter(t => isSharedTask(t) && t.assignedBy === me)
+    .filter(t => (isSharedTask(t) && t.assignedBy === me) || isTaskTrackedByMe(t))
     .filter(t => !trackingAssigneeFilter || String(t.assignedTo) === String(trackingAssigneeFilter))
     .filter(t => !trackingStatusFilter || t.assignmentStatus === trackingStatusFilter)
     .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
@@ -1004,6 +1058,13 @@ function setTrackingFilter(kind, value) {
   renderTracking();
 }
 
+// Подпись статуса задачи в отслеживании: статус назначения, иначе столбец.
+function trackingTaskStatusLabel(t) {
+  if (t.assignmentStatus) return assignmentStatusInfo(t.assignmentStatus).label;
+  const col = taskColumns.find(c => c.id === t.status);
+  return col ? col.name : '—';
+}
+
 function renderTracking() {
   const main = document.getElementById('mainContent');
   if (!main) return;
@@ -1013,112 +1074,52 @@ function renderTracking() {
     return;
   }
 
-  const sharedList = sharedTrackingTasks();
+  const list = sharedTrackingTasks();
   const userOpts = users.map(u => `<option value="${u.id}"${String(trackingAssigneeFilter) === String(u.id) ? ' selected' : ''}>${escapeHtml(u.name || u.login)}</option>`).join('');
   // Фильтр статусов «Отслеживания задач» показывает реальные статусы
-  // назначенных задач (Не принято / Принято / В работе / Выполнено), а не
-  // столбцы канбана (В работе, Размещён заказ, Встреча, Звонок и т.п.).
+  // назначенных задач (Не принято / Принято / В работе / Выполнено).
   const statusOpts = ASSIGNMENT_STATUSES.map(s => `<option value="${s.value}"${trackingStatusFilter === s.value ? ' selected' : ''}>${escapeHtml(s.label)}</option>`).join('');
-
-  const sharedTable = `
-    <div class="orders-analysis-title" style="margin-top:22px;">Назначенные задачи (${sharedList.length})</div>
-    <div class="orders-filters">
-      <label>Исполнитель <select onchange="setTrackingFilter('assignee', this.value)"><option value="">Все</option>${userOpts}</select></label>
-      <label>Статус <select onchange="setTrackingFilter('status', this.value)"><option value="">Все</option>${statusOpts}</select></label>
-    </div>
-    <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:auto;margin-bottom:24px;">
-      <table class="admin-table">
-        <thead><tr><th>Название</th><th>Исполнитель</th><th>Статус</th><th>Дедлайн</th><th style="text-align:right;">Действия</th></tr></thead>
-        <tbody>
-          ${sharedList.length ? sharedList.map(t => {
-            const assignee = findUserById(t.assignedTo);
-            const statusInfo = assignmentStatusInfo(t.assignmentStatus);
-            return `<tr style="cursor:default;">
-              <td><strong>${escapeHtml(t.title || '—')}</strong></td>
-              <td>${escapeHtml(assignee ? (assignee.name || assignee.login) : '—')}</td>
-              <td>${escapeHtml(statusInfo ? statusInfo.label : (t.status || '—'))}</td>
-              <td>${escapeHtml(t.deadline ? formatDate(t.deadline) : '—')}</td>
-              <td style="text-align:right;white-space:nowrap;">
-                <button class="btn-icon-btn" onclick="openTaskModal(tasks.find(x=>x.id===${t.id}))" title="Информация о задаче">Информация</button>
-                <button class="btn-icon-btn" onclick="deleteTask(${t.id})" title="Удалить">Удалить</button>
-              </td>
-            </tr>`;
-          }).join('') : `<tr><td colspan="5" style="text-align:center;color:#9ca3af;padding:40px;">Назначенных задач нет</td></tr>`}
-        </tbody>
-      </table>
-    </div>`;
-
-  const tracked = trackedUsers();
-  const candidates = users.filter(u => u.id !== (currentUser ? currentUser.id : null) &&
-    (u.trackedBy || []).indexOf(currentUser.id) === -1);
-
-  const cardHtml = u => {
-    const p = userTaskProgress(u.id);
-    return `
-      <div class="tracking-card">
-        <div class="tracking-card-head">
-          <div>
-            <div class="tracking-name">${escapeHtml(u.name || u.login)}</div>
-            <div class="tracking-role">${escapeHtml(userPositionLabel(u))}</div>
-          </div>
-          <button type="button" class="btn btn-sm btn-secondary" onclick="stopTrackingFromUi(${u.id})">Снять отслеживание</button>
-        </div>
-        <div class="tracking-progress">
-          <div class="tracking-bar"><span style="width:${p.percent}%;"></span></div>
-          <div class="tracking-percent">выполнено ${p.done} из ${p.total} · ${p.percent}%</div>
-        </div>
-        <div class="tracking-stats">
-          <span>Всего: <strong>${p.total}</strong></span>
-          <span>В работе: <strong>${p.active}</strong></span>
-          <span class="${p.overdue ? 'tracking-overdue' : ''}">Просрочено: <strong>${p.overdue}</strong></span>
-        </div>
-        ${p.byColumn.length ? `<div class="tracking-columns">
-          ${p.byColumn.map(c => `<span class="tracking-column-chip" style="border-color:${c.color};"><i style="background:${c.color};"></i>${escapeHtml(c.name)}: <strong>${c.count}</strong></span>`).join('')}
-        </div>` : '<div class="field-hint">Задач у сотрудника пока нет.</div>'}
-      </div>`;
-  };
 
   main.innerHTML = `
     <div class="orders-page">
       <div class="orders-head">
         <h1>Отслеживание задач</h1>
-        <div class="tracking-add">
-          <select id="trackingUserSelect">
-            <option value="">— выберите сотрудника —</option>
-            ${candidates.map(u => `<option value="${u.id}">${escapeHtml(u.name || u.login)} (${escapeHtml(userPositionLabel(u))})</option>`).join('')}
-          </select>
-          <button type="button" class="btn" onclick="startTrackingFromUi()">Взять на отслеживание</button>
-        </div>
       </div>
       <p class="field-hint" style="margin-bottom:16px;">
-        Руководитель видит прогресс по сотруднику: сколько задач всего, что в работе
-        и что просрочено. Отслеживаемый сотрудник попадает в список наблюдателей
-        своих текущих и будущих задач.
+        Здесь только задачи, которые вы назначили, и задачи, которые вы
+        отправили в отслеживание (кнопка «Отправить в отслеживание» в задачах
+        менеджеров). Следить «за всеми менеджерами» больше нельзя.
       </p>
-      ${sharedTable}
-      ${tracked.length === 0 ? `
-        <div class="empty-state" style="padding:60px 20px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;">
-          <p>Пока никто не отслеживается.</p>
-          <p style="font-size:12px;color:#9ca3af;margin-top:6px;">Выберите сотрудника выше и нажмите «Взять на отслеживание».</p>
-        </div>
-      ` : tracked.map(cardHtml).join('')}
+      <div class="orders-analysis-title">Задачи в отслеживании (${list.length})</div>
+      <div class="orders-filters">
+        <label>Исполнитель <select onchange="setTrackingFilter('assignee', this.value)"><option value="">Все</option>${userOpts}</select></label>
+        <label>Статус <select onchange="setTrackingFilter('status', this.value)"><option value="">Все</option>${statusOpts}</select></label>
+      </div>
+      <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:auto;margin-bottom:24px;">
+        <table class="admin-table">
+          <thead><tr><th>Название</th><th>Исполнитель</th><th>Статус</th><th>Дедлайн</th><th style="text-align:right;">Действия</th></tr></thead>
+          <tbody>
+            ${list.length ? list.map(t => {
+              const assignee = findUserById(t.assignedTo != null ? t.assignedTo : t.ownerId);
+              const mineAssigned = isSharedTask(t) && t.assignedBy === (currentUser ? currentUser.id : null);
+              const tracked = isTaskTrackedByMe(t) && !mineAssigned;
+              return `<tr style="cursor:default;">
+                <td><strong>${escapeHtml(t.title || '—')}</strong>${tracked ? ' <span class="badge" style="background:#e0f2fe;color:#075985;">в отслеживании</span>' : ''}</td>
+                <td>${escapeHtml(assignee ? (assignee.name || assignee.login) : '—')}</td>
+                <td>${escapeHtml(trackingTaskStatusLabel(t))}</td>
+                <td>${escapeHtml(t.deadline ? formatDate(t.deadline) : '—')}</td>
+                <td style="text-align:right;white-space:nowrap;">
+                  <button class="btn-icon-btn" onclick="openTaskModal(tasks.find(x=>x.id===${t.id}))" title="Информация о задаче">Информация</button>
+                  ${canSendTaskToTracking(t) ? `<button class="btn-icon-btn" onclick="sendTaskToTrackingFromUi(${t.id})" title="Отправить в отслеживание">В отслеживание</button>` : ''}
+                  <button class="btn-icon-btn" onclick="deleteTask(${t.id})" title="Удалить">Удалить</button>
+                </td>
+              </tr>`;
+            }).join('') : `<tr><td colspan="5" style="text-align:center;color:#9ca3af;padding:40px;">Задач в отслеживании нет</td></tr>`}
+          </tbody>
+        </table>
+      </div>
     </div>
   `;
-}
-
-function startTrackingFromUi() {
-  const select = document.getElementById('trackingUserSelect');
-  const userId = select ? select.value : '';
-  if (!userId) { alert('Выберите сотрудника'); return; }
-  const res = startTrackingUser(userId);
-  if (!res.ok) { alert(res.error); return; }
-  renderTracking();
-}
-
-function stopTrackingFromUi(userId) {
-  const res = stopTrackingUser(userId);
-  if (!res.ok) { alert(res.error); return; }
-  renderTracking();
 }
 
 function renderTasks() {
@@ -1332,7 +1333,7 @@ function renderTaskCard(task, col) {
 
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
         ${task.deadline ? `<span style="font-size:11px;color:${isOverdue ? '#ef4444' : '#6b7280'};font-weight:${isOverdue ? '600' : '400'};">${formatDate(task.deadline)}</span>` : ''}
-        ${client ? `<span style="font-size:11px;color:#3b82f6;">${escapeHtml(client.orgName)}</span>` : ''}
+        ${client ? `<span onclick="event.stopPropagation(); openClientCard(${client.id})" title="Открыть карточку клиента" style="font-size:11px;color:#3b82f6;cursor:pointer;text-decoration:underline;">${escapeHtml(client.orgName)}</span>` : ''}
         ${col.coop ? `<span style="font-size:11px;color:#0ea5e9;">от ${escapeHtml(taskOwnerName(task))}</span>` : ''}
       </div>
 
@@ -1372,7 +1373,10 @@ function renderTaskCard(task, col) {
           ${assignees.slice(0, 3).map(a => `<div style="width:22px;height:22px;border-radius:50%;background:#3b82f6;color:#fff;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;" title="${escapeHtml(a.name)}">${a.initials}</div>`).join('')}
           ${assignees.length > 3 ? `<div style="width:22px;height:22px;border-radius:50%;background:#e5e7eb;color:#6b7280;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;">+${assignees.length-3}</div>` : ''}
         </div>
-        ${contact ? `<div style="font-size:10px;color:#9ca3af;">${escapeHtml(contact.name.split(' ')[0])}</div>` : ''}
+        <div style="display:flex;align-items:center;gap:6px;">
+          ${(typeof canSendTaskToTracking === 'function' && canSendTaskToTracking(task)) ? `<button onclick="event.stopPropagation(); sendTaskToTrackingFromUi(${task.id})" title="Добавить задачу в моё отслеживание" style="background:none;border:1px solid #bae6fd;color:#0369a1;cursor:pointer;font-size:10px;padding:2px 6px;border-radius:10px;white-space:nowrap;">В отслеживание</button>` : ''}
+          ${contact ? `<div style="font-size:10px;color:#9ca3af;">${escapeHtml(contact.name.split(' ')[0])}</div>` : ''}
+        </div>
       </div>
     </div>
   `;
@@ -1579,6 +1583,14 @@ function openTaskModal(task = null, clientId = null, defaultColumn = null) {
   if (logRow) logRow.style.display = showStatusLog ? '' : 'none';
   if (logEl) logEl.innerHTML = renderStatusLog(task);
 
+  // Кнопка «Закрыть задачу»: для существующей незакрытой задачи, которую
+  // можно закрыть (задача-ссылка требует галочки «Ссылка отработана»).
+  const closeTaskBtn = document.getElementById('taskCloseBtn');
+  if (closeTaskBtn) {
+    const canCloseNow = !!(task && !isCompletedColumnId(task.status) && taskCanBeClosed(task));
+    closeTaskBtn.style.display = canCloseNow ? '' : 'none';
+  }
+
   document.getElementById('taskModal').classList.add('active');
 }
 
@@ -1629,13 +1641,16 @@ function onTaskAssignChange() {
 }
 
 // Скрыть выбор клиента и показать его подписью (клиент уже известен).
+// Название компании кликабельно — открывает карточку клиента.
 function setTaskClientFieldLocked(client) {
   const group = document.getElementById('taskClientGroup');
   const fixed = document.getElementById('taskClientFixed');
   if (group) group.style.display = client ? 'none' : '';
   if (fixed) {
     fixed.style.display = client ? 'block' : 'none';
-    fixed.innerHTML = client ? `Клиент: <strong>${escapeHtml(client.orgName)}</strong>` : '';
+    fixed.innerHTML = client
+      ? `Клиент: <a href="#" onclick="event.preventDefault(); openClientCard(${client.id});" title="Открыть карточку клиента">${escapeHtml(client.orgName)}</a>`
+      : '';
   }
 }
 
@@ -1803,6 +1818,16 @@ function saveTask(e) {
     linkUrl: kind === 'link' ? (linkEl ? linkEl.value.trim() : '') : ''
   };
 
+  // Дубли по времени: на одно и то же время (дата + час/минуты) вторая
+  // активная задача не создаётся — иначе на доске появляются «близнецы».
+  if (!id && data.deadline) {
+    const same = taskAtSameTime(data.deadline);
+    if (same) {
+      alert('У вас уже есть задача на это время, выберите другое.');
+      return;
+    }
+  }
+
   // Задачу-ссылку нельзя закрыть, пока не отмечена галочка на карточке.
   const linkWorkedOff = current ? !!current.linkWorkedOff : false;
   if (kind === 'link' && isCompletedColumnId(data.status) && !linkWorkedOff) {
@@ -1967,6 +1992,55 @@ function cancelTaskClose() {
   closeModal('taskCloseModal');
 }
 
+/* ===== Закрытие задачи с подтверждением =====
+   Отдельный вариант закрытия: кнопка «Закрыть задачу» в карточке открывает
+   модалку подтверждения с полем комментария. Правила закрытия (задача-ссылка,
+   активность) соблюдаются через setTaskStatus(). */
+
+function openTaskCloseConfirm(taskId) {
+  const t = tasks.find(x => x.id === taskId);
+  if (!t) return;
+  if (isCompletedColumnId(t.status)) { alert('Задача уже закрыта.'); return; }
+  if (!taskCanBeClosed(t)) { alert(taskClosureBlockMessage(t)); return; }
+  document.getElementById('taskCloseConfirmId').value = taskId;
+  const titleEl = document.getElementById('taskCloseConfirmTitle');
+  if (titleEl) titleEl.innerHTML = 'Задача: <strong>' + escapeHtml(t.title || '—') + '</strong>';
+  const commentEl = document.getElementById('taskCloseConfirmComment');
+  if (commentEl) commentEl.value = '';
+  document.getElementById('taskCloseConfirmModal').classList.add('active');
+}
+
+// Подтверждение закрытия: переводим задачу в завершающий столбец и, если
+// комментарий заполнен, сохраняем его как комментарий к закрытию.
+function confirmTaskClose() {
+  const idEl = document.getElementById('taskCloseConfirmId');
+  if (!idEl) return { ok: false, error: 'Задача не выбрана' };
+  const t = tasks.find(x => x.id === parseInt(idEl.value, 10));
+  if (!t) return { ok: false, error: 'Задача не найдена' };
+  const target = taskCompletedColumnIds()[0];
+  if (!target) { alert('Нет завершающего столбца для закрытия задачи.'); return { ok: false, error: 'Нет завершающего столбца' }; }
+  const res = setTaskStatus(t, target);
+  if (!res.ok) { alert(res.error); return res; }
+
+  const commentEl = document.getElementById('taskCloseConfirmComment');
+  const comment = commentEl ? commentEl.value.trim() : '';
+  if (comment) {
+    t.closeComment = comment;
+    t.closedAt = new Date().toISOString();
+    t.closedBy = currentUser ? currentUser.id : null;
+  }
+
+  saveTasks();
+  closeModal('taskCloseConfirmModal');
+  closeModal('taskModal');
+  refreshAfterTaskChange();
+  return { ok: true };
+}
+
+function closeTaskConfirmModal() {
+  closeModal('taskCloseConfirmModal');
+}
+
 /* ===== Дедлайны с временем ===== */
 
 // Парсинг дедлайна с учётом времени. Поддерживает "YYYY-MM-DD" (только дата —
@@ -1990,6 +2064,41 @@ function taskOverdue(task) {
   const dl = parseDeadline(task.deadline);
   if (!dl) return false;
   return dl < new Date();
+}
+
+// Ключ срока «дата + час + минуты»: секунды при сравнении не важны.
+function deadlineKey(value) {
+  const d = parseDeadline(value);
+  if (!d) return '';
+  const p = n => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) +
+    'T' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+
+// Сколько дней осталось до дедлайна задачи: 0 — сегодня, отрицательное —
+// просрочено. null — срок не задан.
+function taskDaysLeft(task) {
+  const dl = parseDeadline(task && task.deadline);
+  if (!dl) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const day = new Date(dl);
+  day.setHours(0, 0, 0, 0);
+  return Math.round((day - today) / 86400000);
+}
+
+// Активная задача текущего пользователя, уже стоящая на то же время.
+// Нужна для запрета дублей при создании задачи (П.10).
+function taskAtSameTime(deadline) {
+  const key = deadlineKey(deadline);
+  if (!key) return null;
+  const me = currentUser ? currentUser.id : null;
+  return tasks.find(t => {
+    if (!t || isTaskCompleted(t)) return false;
+    if (t.assignmentStatus === 'completed') return false;
+    if (t.ownerId !== me && t.assignedTo !== me) return false;
+    return deadlineKey(t.deadline) === key;
+  }) || null;
 }
 
 // Установка статуса задачи с фиксацией момента перехода (для аналитики по датам).

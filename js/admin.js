@@ -1097,7 +1097,7 @@ function renderAdminStats() {
   return `
     <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:25px;">
       <div class="stat-card"><div class="stat-value" style="color:#1a3a5c">${total}</div><div class="stat-label">Всего задач (все пользователи)</div></div>
-      <div class="stat-card"><div class="stat-value" style="color:#ef4444">${overdue}</div><div class="stat-label">Просрочено (дедлайн &lt; сегодня)</div></div>
+      <div class="stat-card" onclick="openAdminOverdueTasks()" style="cursor:pointer;" title="Показать список просроченных задач"><div class="stat-value" style="color:#ef4444">${overdue}</div><div class="stat-label">Просрочено (дедлайн &lt; сегодня) — нажмите для списка</div></div>
     </div>
 
     <h3 style="font-size:15px;font-weight:600;color:#374151;margin-bottom:12px;">Срез по менеджерам</h3>
@@ -1223,25 +1223,61 @@ function formatDateAdmin(value) {
   return d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
-// Модалка со списком задач конкретного менеджера (опционально по столбцу).
-function openAdminTaskList(managerId, statusId) {
-  const manager = findUserById(managerId);
-  if (!manager) return;
+// Ячейка «Дней до задачи» с заливкой: красный — просрочено, жёлтый — 1-2 дня,
+// зелёный — больше двух дней.
+function taskDaysCellHtml(task) {
+  const days = taskDaysLeft(task);
+  if (days === null) return '<td style="background:#f9fafb;color:#9ca3af;text-align:center;">—</td>';
+  let bg = '#dcfce7', fg = '#15803d';
+  if (days < 0) { bg = '#fee2e2'; fg = '#b91c1c'; }
+  else if (days <= 2) { bg = '#fef9c3'; fg = '#a16207'; }
+  return `<td style="background:${bg};color:${fg};font-weight:600;text-align:center;" title="Дней до дедлайна">${days}</td>`;
+}
+
+// Кнопка «Отправить в отслеживание» в задачах менеджеров (админ/рук/разраб).
+function adminTrackButtonHtml(t) {
+  if (typeof canSendTaskToTracking !== 'function') return '';
+  if (!canSendTaskToTracking(t)) {
+    return (typeof isTaskTrackedByMe === 'function' && isTaskTrackedByMe(t))
+      ? '<span class="field-hint">в отслеживании</span>' : '';
+  }
+  return `<button class="btn-icon-btn" onclick="event.stopPropagation(); sendTaskToTrackingFromUi(${t.id})" title="Отправить в отслеживание">В отслеживание</button>`;
+}
+
+// Список задач: конкретного менеджера (опционально по столбцу) или все
+// просроченные (opts.overdue = true). В таблице — столбец «Дней до задачи».
+function openAdminTaskList(managerId, statusId, opts) {
+  const o = opts || {};
   const content = document.getElementById('adminTasksListContent');
   if (!content) return;
 
-  let list = tasks.filter(t => taskManager(t).id === managerId);
-  let filterLabel = 'Все задачи';
-  if (statusId) {
-    const col = taskColumns.find(c => c.id === statusId);
-    if (col) list = list.filter(t => t.status === col.id);
-    filterLabel = col ? col.name : '—';
+  let list;
+  let title;
+  let subtitle;
+  if (o.overdue) {
+    list = tasks.filter(t => taskOverdue(t));
+    title = 'Просроченные задачи';
+    subtitle = 'Все менеджеры';
+  } else {
+    const manager = findUserById(managerId);
+    if (!manager) return;
+    list = tasks.filter(t => taskManager(t).id === managerId);
+    title = 'Задачи менеджера';
+    subtitle = 'Менеджер: <strong>' + escapeHtml(manager.login) + '</strong>';
+    if (statusId) {
+      const col = taskColumns.find(c => c.id === statusId);
+      if (col) list = list.filter(t => t.status === col.id);
+      subtitle += ' · Тип: <strong>' + escapeHtml(col ? col.name : '—') + '</strong>';
+    }
   }
-  list.sort((a, b) => (a.deadline || '').localeCompare(b.deadline || ''));
+  list = list.slice().sort((a, b) => (a.deadline || '').localeCompare(b.deadline || ''));
+
+  const titleEl = document.getElementById('adminTasksModalTitle');
+  if (titleEl) titleEl.textContent = title;
 
   content.innerHTML = `
     <div style="margin-bottom:12px;font-size:13px;color:#6b7280;">
-      Менеджер: <strong>${escapeHtml(manager.login)}</strong> · Тип: <strong>${escapeHtml(filterLabel)}</strong> · Задач: ${list.length}
+      ${subtitle} · Задач: ${list.length}
     </div>
     ${list.length === 0 ? `
       <div class="empty-state" style="padding:40px 20px;"><p>Нет задач</p></div>
@@ -1250,7 +1286,7 @@ function openAdminTaskList(managerId, statusId) {
         <div class="table-body" style="max-height:50vh;">
           <table>
             <thead><tr>
-              <th>Менеджер</th><th>Клиент</th><th>Тип задачи</th><th>Комментарий</th><th>Дедлайн</th>
+              <th>Менеджер</th><th>Клиент</th><th>Тип задачи</th><th>Комментарий</th><th>Дедлайн</th><th>Дней до задачи</th><th style="text-align:right;">Действия</th>
             </tr></thead>
             <tbody>
               ${list.map(t => {
@@ -1263,6 +1299,11 @@ function openAdminTaskList(managerId, statusId) {
                   <td>${escapeHtml(col ? col.name : '—')}</td>
                   <td><div class="history-comment">${escapeHtml(t.description || t.title || '—')}</div></td>
                   <td style="color:${isOverdue ? '#ef4444' : '#6b7280'};font-weight:${isOverdue ? '600' : '400'};">${t.deadline ? formatDate(t.deadline) : '—'}</td>
+                  ${taskDaysCellHtml(t)}
+                  <td style="text-align:right;white-space:nowrap;">
+                    ${o.overdue ? `<button class="btn-icon-btn" onclick="event.stopPropagation(); closeModal('adminTasksModal'); openTaskModal(tasks.find(x=>x.id===${t.id}))" title="Открыть задачу">Открыть</button>` : ''}
+                    ${adminTrackButtonHtml(t)}
+                  </td>
                 </tr>`;
               }).join('')}
             </tbody>
@@ -1274,6 +1315,11 @@ function openAdminTaskList(managerId, statusId) {
   document.getElementById('adminTasksModal').classList.add('active');
 }
 
+// Клик по карточке «Просрочено»: список всех просроченных задач.
+function openAdminOverdueTasks() {
+  openAdminTaskList(null, null, { overdue: true });
+}
+
 // Экспорт всех задач в Excel (XLSX) в реальном времени.
 function exportAdminReport() {
   if (typeof XLSX === 'undefined') {
@@ -1283,12 +1329,14 @@ function exportAdminReport() {
   const rows = tasks.map(t => {
     const client = t.clientId ? clients.find(c => c.id === t.clientId) : null;
     const col = taskColumns.find(c => c.id === t.status);
+    const days = taskDaysLeft(t);
     return {
       'Менеджер': taskManager(t).login,
       'Клиент': client ? client.orgName : '—',
       'Тип задачи': col ? col.name : '—',
       'Комментарий': (t.description || t.title || '').replace(/\s+/g, ' ').trim(),
       'Дедлайн': t.deadline ? formatDate(t.deadline) : '—',
+      'Дней до задачи': days === null ? '—' : days,
       'Просрочена': taskOverdue(t) ? 'Да' : 'Нет'
     };
   });
@@ -1421,11 +1469,11 @@ function injectAdminModals() {
 
   const html = `
     <div class="modal-overlay" id="adminTasksModal" onclick="if(event.target===this)closeModal('adminTasksModal')">
-      <div class="modal" style="width:820px;max-width:94vw;">
+      <div class="modal" style="width:900px;max-width:94vw;">
         <div style="display:flex;justify-content:flex-end;margin-bottom:6px;">
           <button type="button" class="btn btn-sm btn-secondary" onclick="closeModal('adminTasksModal')">Закрыть</button>
         </div>
-        <h2 style="margin-bottom:15px;">Задачи менеджера</h2>
+        <h2 id="adminTasksModalTitle" style="margin-bottom:15px;">Задачи менеджера</h2>
         <div id="adminTasksListContent"></div>
       </div>
     </div>
