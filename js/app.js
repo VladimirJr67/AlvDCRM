@@ -886,6 +886,43 @@ function injectModals() {
       </div>
     </div>
 
+    <div class="modal-overlay" id="orderEditModal" onclick="if(event.target===this)closeModal('orderEditModal')">
+      <div class="modal" style="width:560px;max-width:94vw;">
+        <div class="modal-head">
+          <h2 id="orderEditModalTitle">Редактировать заказ</h2>
+          <button type="button" class="modal-close-icon" onclick="closeModal('orderEditModal')" title="Закрыть" aria-label="Закрыть">✕</button>
+        </div>
+        <input type="hidden" id="orderEditId">
+        <div class="form-section">
+          <div class="form-row">
+            <div class="form-group client-typeahead-group">
+              <label>Клиент</label>
+              <input type="text" id="orderEditClientSearch" placeholder="Начните вводить название компании…" autocomplete="off"
+                     oninput="onOrderEditClientInput(this.value)" onfocus="onOrderEditClientInput(this.value)"
+                     style="width:100%;padding:7px 9px;border:1px solid #d0d5dd;border-radius:5px;font-size:12px;">
+              <div class="client-typeahead-dropdown" id="orderEditClientDropdown"></div>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Кол-во кг</label><input type="number" id="orderEditKg" step="any" oninput="updateOrderEditPrice()"></div>
+            <div class="form-group"><label>Состояние поставки</label><select id="orderEditCondition"></select></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Общая стоимость</label><input type="number" id="orderEditCost" step="any" oninput="updateOrderEditPrice()"></div>
+            <div class="form-group">
+              <label>Стоимость за кг</label>
+              <div id="orderEditPricePerKg" style="padding:7px 9px;border:1px solid #e5e7eb;border-radius:5px;font-size:12.5px;background:#f9fafb;color:#374151;">—</div>
+            </div>
+          </div>
+          <div class="form-row"><div class="form-group"><label>Номер СП</label><input type="text" id="orderEditSpecification" placeholder="Например, СП2125.1"></div></div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('orderEditModal')">Отмена</button>
+          <button type="button" class="btn" onclick="saveOrderFromModal()">Сохранить</button>
+        </div>
+      </div>
+    </div>
+
     <div class="modal-overlay" id="profileModal" onclick="if(event.target===this)closeModal('profileModal')">
       <div class="modal" style="width:580px;max-width:94vw;">
         <div class="modal-head">
@@ -1327,6 +1364,12 @@ document.addEventListener('click', (e) => {
     selectTaskClient(id, name);
   } else if (searchInput && searchInput.id === 'reminderClientSearch') {
     selectReminderClient(id, name);
+  } else if (searchInput && searchInput.id === 'orderClientFilterInput') {
+    selectOrdersClientFilter(id, name);
+  } else if (searchInput && searchInput.id === 'matrixClientFilterInput') {
+    selectMatricesClientFilter(id, name);
+  } else if (searchInput && searchInput.id === 'orderEditClientSearch') {
+    selectOrderEditClient(id, name);
   }
 });
 

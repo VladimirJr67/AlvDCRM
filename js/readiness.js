@@ -152,6 +152,10 @@ function orderReadinessCellHtml(order) {
         <span class="badge" style="background:${info.color}1f;color:${info.color};">${escapeHtml(record.status || info.label)}</span>
         ${stale}
       </span>
+      <span class="readiness-qty" style="font-size:11px;color:#374151;"
+            title="Обеспечено профилей (отпрессовано, на складе) из плана">
+        обеспечено: ${escapeHtml(readinessNumberText(record.stockQty))} из ${escapeHtml(readinessNumberText(record.planQty))}
+      </span>
       <span class="readiness-date">${escapeHtml(readinessAsOfText())}</span>
     </button>`;
 }
@@ -295,7 +299,7 @@ function openReadinessCard(orderId) {
 
     <div class="readiness-totals">
       <div class="readiness-total"><span>План, кол-во</span><strong>${escapeHtml(readinessNumberText(record.planQty))}</strong></div>
-      <div class="readiness-total"><span>На складе</span><strong>${escapeHtml(readinessNumberText(record.stockQty))}</strong></div>
+      <div class="readiness-total"><span>На складе (отпрессовано)</span><strong>${escapeHtml(readinessNumberText(record.stockQty))}</strong></div>
       <div class="readiness-total"><span>Отгружено</span><strong>${escapeHtml(readinessNumberText(record.shippedQty))}</strong></div>
       <div class="readiness-total"><span>Готовность</span><strong>${escapeHtml(readinessPercentText(record.readiness))}</strong></div>
     </div>

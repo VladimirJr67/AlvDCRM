@@ -131,8 +131,8 @@ function asUser(login) {
   check('вкладка «Матрицы»: статистика по статусам',
     /Всего матриц/.test(html('ordersTabBody')) && /Поступила/.test(html('ordersTabBody')) &&
     /Отписана/.test(html('ordersTabBody')));
-  check('вкладка «Матрицы»: свои фильтры (клиент, покрытие, статус)',
-    /setMatricesFilter\('client'/.test(html('ordersTabBody')) &&
+  check('вкладка «Матрицы»: свои фильтры (поиск клиента, покрытие, статус)',
+    /matrixClientFilterInput/.test(html('ordersTabBody')) &&
     /setMatricesFilter\('coverage'/.test(html('ordersTabBody')) &&
     /setMatricesFilter\('status'/.test(html('ordersTabBody')));
   check('в «Матрицах» нет «Среднего чека»', !/средн\w* чек/i.test(html('ordersTabBody')));

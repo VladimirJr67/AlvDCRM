@@ -84,6 +84,25 @@ function visibleMatrices() {
   return matrices.filter(m => m.createdBy === currentUser.id);
 }
 
+// «Заказанная» матрица — запись из раздела «Заказы/Матрицы» (создана
+// активностью «Заказ матриц» или вручную во вкладке «Матрицы»). Записи
+// справочника из «Учёта матриц» и карточки клиента (source: 'manual')
+// к заказам не относятся и во вкладке «Матрицы» не показываются.
+// Старые записи без поля source считаем заказанными.
+function isOrderedMatrix(m) {
+  return !!m && m.source !== 'manual';
+}
+
+function orderedMatrices() {
+  return visibleMatrices().filter(isOrderedMatrix);
+}
+
+// Импорт/удаление справочника матриц — только админ, руководитель и
+// разработчик (isAdmin() включает разработчика).
+function canManageMatrixAccounting() {
+  return isAdmin() || isLead();
+}
+
 function matrixInPeriod(m) {
   if (!matricesDateFrom && !matricesDateTo) return true;
   const day = String(m.date || '').slice(0, 10);
@@ -94,7 +113,7 @@ function matrixInPeriod(m) {
 }
 
 function filteredMatrices() {
-  return visibleMatrices()
+  return orderedMatrices()
     .filter(matrixInPeriod)
     .filter(m => !matricesClientFilter || String(m.clientId) === String(matricesClientFilter))
     .filter(m => !matricesCoverageFilter || (m.coating || '') === matricesCoverageFilter)
@@ -125,22 +144,59 @@ function resetMatricesFilters() {
 // чтобы старые матрицы с нестандартным покрытием тоже фильтровались.
 function matrixCoverageOptions() {
   const list = MATRIX_COVERAGES.slice();
-  visibleMatrices().forEach(m => {
+  orderedMatrices().forEach(m => {
     const c = (m.coating || '').trim();
     if (c && list.indexOf(c) === -1) list.push(c);
   });
   return list;
 }
 
-// Клиенты, по которым есть видимые матрицы.
+// Клиенты, по которым есть видимые заказанные матрицы.
 function matrixClientOptions() {
   const map = {};
-  visibleMatrices().forEach(m => {
+  orderedMatrices().forEach(m => {
     if (m.clientId) map[m.clientId] = m.clientName || ('Клиент #' + m.clientId);
   });
   return Object.keys(map)
     .map(id => ({ id: id, name: map[id] }))
     .sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+}
+
+/* ===== Поиск клиента с автокомплитом (фильтр вкладки «Матрицы») ===== */
+
+function matrixClientFilterPickerHtml() {
+  const selected = matricesClientFilter
+    ? clients.find(c => String(c.id) === String(matricesClientFilter))
+    : null;
+  return `
+    <label>Клиент
+      <span class="client-typeahead-group" style="display:inline-block;">
+        <input type="text" id="matrixClientFilterInput" autocomplete="off" placeholder="Все клиенты"
+               style="width:200px;box-sizing:border-box;" value="${escapeHtml(selected ? (selected.orgName || '') : '')}"
+               oninput="onMatrixClientFilterInput(this.value)" onfocus="onMatrixClientFilterInput(this.value)">
+        <div class="client-typeahead-dropdown" id="matrixClientFilterDropdown"></div>
+      </span>
+    </label>`;
+}
+
+function onMatrixClientFilterInput(query) {
+  const dd = document.getElementById('matrixClientFilterDropdown');
+  if (!dd) return;
+  const q = String(query || '').trim().toLowerCase();
+  const list = clients
+    .filter(c => !q || String(c.orgName || '').toLowerCase().includes(q))
+    .slice(0, 30);
+  dd.innerHTML = list.length
+    ? list.map(c => `<div class="client-typeahead-item" data-id="${c.id}" data-name="${escapeHtml(c.orgName || '')}">${escapeHtml(c.orgName || ('Клиент #' + c.id))}</div>`).join('')
+    : '<div class="client-typeahead-item" style="color:#9ca3af;cursor:default;">Ничего не найдено</div>';
+  dd.style.display = 'block';
+}
+
+function selectMatricesClientFilter(id, name) {
+  const dd = document.getElementById('matrixClientFilterDropdown');
+  if (dd) dd.style.display = 'none';
+  matricesClientFilter = id != null ? String(id) : '';
+  renderMatricesTab();
 }
 
 /* ===== Вкладка «Матрицы» ===== */
@@ -150,17 +206,15 @@ function renderMatricesTab() {
   if (!host) return;
 
   const list = filteredMatrices().sort((a, b) => new Date(b.date || b.createdAt || 0) - new Date(a.date || a.createdAt || 0));
-  // Считаем по доступным пользователю записям: у нового аккаунта база не пуста,
-  // но его собственных матриц в ней нет.
-  const mine = visibleMatrices();
+  // Считаем по доступным пользователю заказанным матрицам: у нового аккаунта
+  // база не пуста, но его собственных матриц в ней нет.
+  const mine = orderedMatrices();
   const periodSet = !!(matricesDateFrom || matricesDateTo);
   const filtersSet = periodSet || !!matricesClientFilter || !!matricesCoverageFilter ||
     !!matricesStatusFilter || matricesUserFilter !== 'all';
   const received = list.filter(m => m.status === 'Поступила').length;
   const writtenOff = list.filter(m => m.status === 'Отписана').length;
 
-  const clientOpts = matrixClientOptions().map(c =>
-    `<option value="${c.id}"${String(matricesClientFilter) === String(c.id) ? ' selected' : ''}>${escapeHtml(c.name)}</option>`).join('');
   const coverageOpts = matrixCoverageOptions().map(c =>
     `<option value="${escapeHtml(c)}"${matricesCoverageFilter === c ? ' selected' : ''}>${escapeHtml(c)}</option>`).join('');
   const userOpts = users.map(u =>
@@ -175,12 +229,7 @@ function renderMatricesTab() {
             ${userOpts}
           </select>
         </label>` : ''}
-      <label>Клиент
-        <select onchange="setMatricesFilter('client', this.value)">
-          <option value="">Все клиенты</option>
-          ${clientOpts}
-        </select>
-      </label>
+      ${matrixClientFilterPickerHtml()}
       <label>Покрытие
         <select onchange="setMatricesFilter('coverage', this.value)">
           <option value="">Все покрытия</option>
@@ -321,7 +370,7 @@ function saveMatrixFromModal(e) {
     Object.assign(m, data);
     saveMatrices();
   } else {
-    addMatrix(data);
+    addMatrix(Object.assign({}, data, { source: 'order' }));
   }
 
   closeModal('matrixModal');
@@ -507,6 +556,8 @@ function renderMatrixAccounting() {
   const main = document.getElementById('mainContent');
   if (!main) return;
   const canAdd = isAdmin() || (typeof can === 'function' && can('matrices.create'));
+  // Импорт и удаление шифров — только администратор, руководитель и разработчик.
+  const canManage = canManageMatrixAccounting();
   const list = matrixAccountingList();
 
   main.innerHTML = `
@@ -515,9 +566,13 @@ function renderMatrixAccounting() {
         <h1>Учёт матриц</h1>
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
           <input type="text" class="search-bar" placeholder="Поиск по шифру, клиенту, весу…" value="${escapeHtml(matrixAccountingSearch)}" oninput="setMatrixAccountingSearch(this.value)" style="width:300px;max-width:100%;margin-bottom:0;">
+          ${canManage ? `<input type="file" id="matrixAccountingFileInput" accept=".xlsx,.xls,.csv" style="display:none" onchange="importMatricesFromExcel(event)">
+          <button class="btn btn-secondary" onclick="document.getElementById('matrixAccountingFileInput').click()" title="Колонки файла: Клиент, Шифр, Вес за м/п, Пресс">Импорт</button>
+          <button class="btn btn-secondary" onclick="downloadMatricesTemplate()" title="Скачать шаблон импорта матриц">Шаблон</button>` : ''}
           ${canAdd ? '<button class="btn" onclick="openMatrixAccountingModal()">+ Добавить матрицу</button>' : ''}
         </div>
       </div>
+      <div id="matrixAccountingImportResult" style="display:none;margin-bottom:12px;padding:8px 12px;border-radius:6px;font-size:13px;"></div>
 
       <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:auto;">
         <table class="admin-table">
@@ -532,6 +587,7 @@ function renderMatrixAccounting() {
             ${list.length ? list.map(m => {
               const c = m.clientId ? clients.find(x => x.id === m.clientId) : null;
               const clientName = c ? (c.orgName || c.name || '') : '';
+              const canEditRow = canManage || (currentUser && m.createdBy === currentUser.id);
               return `
               <tr style="cursor:default;">
                 <td style="padding-left:16px;">${m.clientId && clientName
@@ -541,8 +597,8 @@ function renderMatrixAccounting() {
                 <td>${escapeHtml(m.weightPerM || '—')}</td>
                 <td>${escapeHtml(m.press || '—')}</td>
                 <td style="text-align:right;white-space:nowrap;">
-                  ${canAdd ? `<button class="btn-icon-btn" onclick="openMatrixAccountingModal(${m.id})" title="Изменить матрицу">Изменить</button>
-                  <button class="btn-icon-btn" onclick="deleteMatrixAccounting(${m.id})" title="Удалить матрицу">Удалить</button>` : ''}
+                  ${canEditRow ? `<button class="btn-icon-btn" onclick="openMatrixAccountingModal(${m.id})" title="Изменить матрицу">Изменить</button>` : ''}
+                  ${canManage ? `<button class="btn-icon-btn" onclick="deleteMatrixAccounting(${m.id})" title="Удалить матрицу">Удалить</button>` : ''}
                 </td>
               </tr>`;
             }).join('') : `<tr><td colspan="5" style="text-align:center;color:#9ca3af;padding:40px;">Список пуст</td></tr>`}
@@ -604,12 +660,142 @@ function saveMatrixAccounting(e) {
 }
 
 function deleteMatrixAccounting(id) {
+  if (!canManageMatrixAccounting()) {
+    alert('Удалять шифры может только администратор или руководитель.');
+    return;
+  }
   const m = (matrices || []).find(x => x.id === id);
   if (!m) return;
   if (!confirm(`Удалить матрицу «${m.cipher || '—'}»?`)) return;
   matrices = (matrices || []).filter(x => x.id !== id);
   saveMatrices();
   renderMatrixAccounting();
+}
+
+/* ===== Импорт матриц из Excel =====
+   Формат файла: Клиент, Шифр, Вес за м/п, Пресс (шаблон скачивается кнопкой
+   «Шаблон»). Строки добавляются в справочник как ручные матрицы (source:
+   'manual'), поэтому вкладка «Заказы/Матрицы» их как заказ не показывает. */
+
+const MATRIX_IMPORT_ALIASES = {
+  client: ['клиент', 'клиент (компания)', 'организация', 'компания', 'client'],
+  cipher: ['шифр', 'шифр матрицы', 'cipher'],
+  weight: ['вес за м/п', 'вес за мп', 'вес м/п', 'вес', 'weight'],
+  press: ['пресс', 'press']
+};
+
+const MATRIX_IMPORT_COLUMNS = ['Клиент', 'Шифр', 'Вес за м/п', 'Пресс'];
+
+function matrixImportCell(v) {
+  if (v === null || v === undefined) return '';
+  return String(v).trim().replace(/\s+/g, ' ');
+}
+
+// Разбор строк таблицы: колонки ищем по заголовку, если его нет — по порядку
+// «Клиент, Шифр, Вес за м/п, Пресс».
+function buildMatricesFromRows(rows) {
+  const result = [];
+  if (!rows || !rows.length) return result;
+
+  const header = (rows[0] || []).map(v => matrixImportCell(v).toLowerCase());
+  const map = {};
+  Object.keys(MATRIX_IMPORT_ALIASES).forEach(key => {
+    const idx = header.findIndex(h => h && MATRIX_IMPORT_ALIASES[key].indexOf(h) > -1);
+    if (idx > -1) map[key] = idx;
+  });
+  const hasHeader = Object.keys(map).length > 0;
+  const start = hasHeader ? 1 : 0;
+  const col = {
+    client: map.client !== undefined ? map.client : 0,
+    cipher: map.cipher !== undefined ? map.cipher : 1,
+    weight: map.weight !== undefined ? map.weight : 2,
+    press: map.press !== undefined ? map.press : 3
+  };
+
+  for (let i = start; i < rows.length; i++) {
+    const row = rows[i] || [];
+    const cipher = matrixImportCell(row[col.cipher]);
+    if (!cipher) continue;
+    const clientName = matrixImportCell(row[col.client]);
+    const client = clientName
+      ? clients.find(c => String(c.orgName || '').trim().toLowerCase() === clientName.toLowerCase())
+      : null;
+    result.push({
+      cipher: cipher,
+      clientId: client ? client.id : null,
+      clientName: client ? (client.orgName || clientName) : clientName,
+      weight: matrixImportCell(row[col.weight]),
+      press: matrixImportCell(row[col.press])
+    });
+  }
+  return result;
+}
+
+async function importMatricesFromExcel(event) {
+  if (!canManageMatrixAccounting()) {
+    if (event && event.target) event.target.value = '';
+    return;
+  }
+  const file = event && event.target && event.target.files && event.target.files[0];
+  if (event && event.target) event.target.value = '';
+  if (!file) return;
+
+  try {
+    const rows = await parseSpreadsheetFile(file);
+    const imported = buildMatricesFromRows(rows);
+    if (!imported.length) {
+      renderMatrixAccounting();
+      showMatrixAccountingImportResult('В файле не найдено строк с шифром. Колонки: Клиент, Шифр, Вес за м/п, Пресс.', true);
+      return;
+    }
+    imported.forEach(r => addMatrix({
+      cipher: r.cipher,
+      clientId: r.clientId,
+      clientName: r.clientName,
+      weightPerM: r.weight,
+      press: r.press,
+      source: 'manual',
+      createdBy: currentUser ? currentUser.id : null
+    }));
+    renderMatrixAccounting();
+    showMatrixAccountingImportResult('Импортировано матриц: ' + imported.length, false);
+  } catch (err) {
+    renderMatrixAccounting();
+    showMatrixAccountingImportResult('Ошибка при импорте: ' + (err && err.message ? err.message : err), true);
+  }
+}
+
+// Шаблон импорта: колонки Клиент, Шифр, Вес за м/п, Пресс и пример заполнения.
+function downloadMatricesTemplate() {
+  if (!canManageMatrixAccounting()) {
+    alert('Шаблон импорта доступен администратору или руководителю.');
+    return;
+  }
+  if (typeof XLSX === 'undefined') {
+    alert('Библиотека экспорта Excel не загружена.');
+    return;
+  }
+  const example = {
+    'Клиент': 'ООО «Пример»',
+    'Шифр': 'ШФ-101',
+    'Вес за м/п': '1.25',
+    'Пресс': '7/8'
+  };
+  const ws = XLSX.utils.json_to_sheet([example], { header: MATRIX_IMPORT_COLUMNS });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Матрицы');
+  XLSX.writeFile(wb, 'Шаблон_импорта_матриц.xlsx');
+}
+
+function showMatrixAccountingImportResult(text, isError) {
+  const el = document.getElementById('matrixAccountingImportResult');
+  if (!el) return;
+  el.style.display = 'block';
+  el.style.background = isError ? '#fee2e2' : '#d1fae5';
+  el.style.color = isError ? '#991b1b' : '#065f46';
+  el.textContent = text;
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => { el.style.display = 'none'; }, 9000);
 }
 
 // Экспорт в Excel — только администратор; выгружается текущая выборка.

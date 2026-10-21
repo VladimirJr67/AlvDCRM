@@ -168,6 +168,29 @@ function setOrdersPeriodToday() {
   renderOrders();
 }
 
+// «Месяц»: показать заказы за текущий календарный месяц.
+function ordersMonthBounds() {
+  const now = new Date();
+  const p = n => String(n).padStart(2, '0');
+  const iso = d => d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  return {
+    from: iso(new Date(now.getFullYear(), now.getMonth(), 1)),
+    to: iso(new Date(now.getFullYear(), now.getMonth() + 1, 0))
+  };
+}
+
+function setOrdersPeriodMonth() {
+  const range = ordersMonthBounds();
+  ordersDateFrom = range.from;
+  ordersDateTo = range.to;
+  renderOrders();
+}
+
+function ordersMonthFilterActive() {
+  const range = ordersMonthBounds();
+  return ordersDateFrom === range.from && ordersDateTo === range.to;
+}
+
 function resetOrdersFilters() {
   ordersClientFilter = '';
   ordersCoverageFilter = '';
@@ -197,6 +220,149 @@ function orderClientOptions() {
   return Object.keys(map)
     .map(id => ({ id: id, name: map[id] }))
     .sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+}
+
+/* ===== Поиск клиента с автокомплитом (фильтр вкладки «Заказы») ===== */
+
+function orderClientFilterPickerHtml() {
+  const selected = ordersClientFilter
+    ? clients.find(c => String(c.id) === String(ordersClientFilter))
+    : null;
+  return `
+    <label>Клиент
+      <span class="client-typeahead-group" style="display:inline-block;">
+        <input type="text" id="orderClientFilterInput" autocomplete="off" placeholder="Все клиенты"
+               style="width:200px;box-sizing:border-box;" value="${escapeHtml(selected ? (selected.orgName || '') : '')}"
+               oninput="onOrderClientFilterInput(this.value)" onfocus="onOrderClientFilterInput(this.value)">
+        <div class="client-typeahead-dropdown" id="orderClientFilterDropdown"></div>
+      </span>
+    </label>`;
+}
+
+function onOrderClientFilterInput(query) {
+  const dd = document.getElementById('orderClientFilterDropdown');
+  if (!dd) return;
+  const q = String(query || '').trim().toLowerCase();
+  const list = clients
+    .filter(c => !q || String(c.orgName || '').toLowerCase().includes(q))
+    .slice(0, 30);
+  dd.innerHTML = list.length
+    ? list.map(c => `<div class="client-typeahead-item" data-id="${c.id}" data-name="${escapeHtml(c.orgName || '')}">${escapeHtml(c.orgName || ('Клиент #' + c.id))}</div>`).join('')
+    : '<div class="client-typeahead-item" style="color:#9ca3af;cursor:default;">Ничего не найдено</div>';
+  dd.style.display = 'block';
+}
+
+function selectOrdersClientFilter(id, name) {
+  const dd = document.getElementById('orderClientFilterDropdown');
+  if (dd) dd.style.display = 'none';
+  ordersClientFilter = id != null ? String(id) : '';
+  renderOrders();
+}
+
+/* ===== Редактирование заказа (П.26) ===== */
+
+// Менеджер правит только свои заказы; администратор, руководитель и
+// разработчик — любые.
+function canEditOrder(order) {
+  if (!currentUser || !order) return false;
+  return isAdmin() || isLead() || order.createdBy === currentUser.id;
+}
+
+let selectedOrderEditClientId = null;
+
+function orderConditionOptionsHtml(selected) {
+  const list = ORDER_CONDITIONS.slice();
+  const s = String(selected || '').trim();
+  if (s && list.indexOf(s) === -1) list.push(s);
+  return list.map(v => `<option value="${escapeHtml(v)}"${v === s ? ' selected' : ''}>${escapeHtml(v)}</option>`).join('');
+}
+
+function openOrderEditModal(orderId) {
+  const o = orders.find(x => x.id === orderId);
+  if (!o) return;
+  if (!canEditOrder(o)) {
+    alert('Редактировать чужой заказ может только администратор или руководитель.');
+    return;
+  }
+  document.getElementById('orderEditId').value = o.id;
+  selectedOrderEditClientId = o.clientId || null;
+  document.getElementById('orderEditClientSearch').value = o.clientName || '';
+  document.getElementById('orderEditKg').value = o.kg === null || o.kg === undefined ? '' : o.kg;
+  document.getElementById('orderEditCondition').innerHTML = orderConditionOptionsHtml(o.condition);
+  document.getElementById('orderEditCost').value = o.cost === null || o.cost === undefined ? '' : o.cost;
+  document.getElementById('orderEditSpecification').value = o.specification || '';
+  updateOrderEditPrice();
+  const title = document.getElementById('orderEditModalTitle');
+  if (title) title.textContent = 'Редактировать заказ №' + o.id;
+  document.getElementById('orderEditModal').classList.add('active');
+}
+
+// Стоимость за кг пересчитывается на лету: общая стоимость / кол-во кг.
+function updateOrderEditPrice() {
+  const kg = document.getElementById('orderEditKg').value;
+  const cost = document.getElementById('orderEditCost').value;
+  const el = document.getElementById('orderEditPricePerKg');
+  if (!el) return;
+  const perKg = orderPricePerKg(kg, cost);
+  el.textContent = perKg === null ? '—' : fmtMoney(perKg);
+}
+
+function onOrderEditClientInput(query) {
+  const dd = document.getElementById('orderEditClientDropdown');
+  if (!dd) return;
+  const q = String(query || '').trim().toLowerCase();
+  const list = clients
+    .filter(c => !q || String(c.orgName || '').toLowerCase().includes(q))
+    .slice(0, 30);
+  dd.innerHTML = list.length
+    ? list.map(c => `<div class="client-typeahead-item" data-id="${c.id}" data-name="${escapeHtml(c.orgName || '')}">${escapeHtml(c.orgName || ('Клиент #' + c.id))}</div>`).join('')
+    : '<div class="client-typeahead-item" style="color:#9ca3af;cursor:default;">Ничего не найдено</div>';
+  dd.style.display = 'block';
+}
+
+function selectOrderEditClient(id, name) {
+  selectedOrderEditClientId = id != null ? id : null;
+  const dd = document.getElementById('orderEditClientDropdown');
+  if (dd) dd.style.display = 'none';
+  const input = document.getElementById('orderEditClientSearch');
+  if (input) input.value = name || '';
+}
+
+function saveOrderFromModal(e) {
+  if (e && e.preventDefault) e.preventDefault();
+  const id = parseInt(document.getElementById('orderEditId').value, 10);
+  const o = orders.find(x => x.id === id);
+  if (!o) { alert('Заказ не найден'); return; }
+  if (!canEditOrder(o)) {
+    alert('Редактировать чужой заказ может только администратор или руководитель.');
+    return;
+  }
+
+  const kgRaw = String(document.getElementById('orderEditKg').value || '').trim();
+  const costRaw = String(document.getElementById('orderEditCost').value || '').trim();
+  const kg = kgRaw === '' ? null : Number(kgRaw);
+  const cost = costRaw === '' ? null : Number(costRaw);
+  if (kg !== null && !isFinite(kg)) { alert('Укажите корректное кол-во кг'); return; }
+  if (cost !== null && !isFinite(cost)) { alert('Укажите корректную стоимость'); return; }
+
+  const nameRaw = String(document.getElementById('orderEditClientSearch').value || '').trim();
+  const client = selectedOrderEditClientId
+    ? clients.find(c => c.id === selectedOrderEditClientId)
+    : null;
+
+  o.clientId = client ? client.id : null;
+  o.clientName = client ? (client.orgName || '') : nameRaw;
+  o.kg = kg;
+  o.cost = cost;
+  o.avgPrice = orderPricePerKg(kg, cost);
+  o.condition = document.getElementById('orderEditCondition').value;
+  o.specification = String(document.getElementById('orderEditSpecification').value || '').trim();
+  o.specificationKey = normalizeSpecificationKey(o.specification);
+
+  saveOrders();
+  closeModal('orderEditModal');
+  renderOrders();
+  if (typeof refreshReadinessForVisibleOrders === 'function') refreshReadinessForVisibleOrders();
 }
 
 /* ===== Раздел «Заказы» ===== */
@@ -252,8 +418,6 @@ function renderOrdersTab() {
   const periodSet = !!(ordersDateFrom || ordersDateTo);
   const filtersSet = periodSet || !!ordersClientFilter || !!ordersCoverageFilter || ordersUserFilter !== 'all';
 
-  const clientOpts = orderClientOptions().map(c =>
-    `<option value="${c.id}"${String(ordersClientFilter) === String(c.id) ? ' selected' : ''}>${escapeHtml(c.name)}</option>`).join('');
   const coverageOpts = orderCoverageOptions().map(c =>
     `<option value="${escapeHtml(c)}"${ordersCoverageFilter === c ? ' selected' : ''}>${escapeHtml(c)}</option>`).join('');
   const userOpts = users.map(u =>
@@ -268,12 +432,7 @@ function renderOrdersTab() {
               ${userOpts}
             </select>
           </label>` : ''}
-        <label>Клиент
-          <select onchange="setOrdersFilter('client', this.value)">
-            <option value="">Все клиенты</option>
-            ${clientOpts}
-          </select>
-        </label>
+        ${orderClientFilterPickerHtml()}
         <label>Покрытие
           <select onchange="setOrdersFilter('coverage', this.value)">
             <option value="">Все покрытия</option>
@@ -287,6 +446,7 @@ function renderOrdersTab() {
           <input type="date" value="${escapeHtml(ordersDateTo || '')}" onchange="setOrdersFilter('to', this.value)">
         </label>
         <button class="btn btn-sm btn-secondary" onclick="setOrdersPeriodToday()">Сегодня</button>
+        <button class="btn btn-sm ${ordersMonthFilterActive() ? '' : 'btn-secondary'}" onclick="setOrdersPeriodMonth()" title="Показать заказы за текущий месяц">Месяц</button>
         ${filtersSet ? '<button class="btn btn-sm btn-secondary" onclick="resetOrdersFilters()">Сбросить</button>' : ''}
         ${isAdmin() ? '<button class="btn btn-sm" onclick="exportOrdersExcel()">Экспорт заказов в Excel</button>' : ''}
       </div>
@@ -336,6 +496,7 @@ function renderOrdersTab() {
                     <td>${orderSpecificationCellHtml(o, canEditSpec)}</td>
                     <td>${orderReadinessCellHtml(o)}</td>
                     <td style="text-align:right;white-space:nowrap;">
+                      ${canEditOrder(o) ? `<button class="btn-icon-btn" onclick="openOrderEditModal(${o.id})" title="Редактировать заказ">Изменить</button>` : ''}
                       ${canDelete ? `<button class="btn-icon-btn" onclick="deleteOrder(${o.id})" title="Удалить заказ">Удалить</button>` : ''}
                     </td>
                   </tr>`;
@@ -394,6 +555,8 @@ function exportOrdersExcel() {
       'Стоимость заказа': o.cost !== null && o.cost !== undefined ? o.cost : '—',
       'СП': o.specification || '—',
       'Готовность, %': readiness && readiness.readiness != null ? readiness.readiness : '—',
+      'Обеспечено, кол-во (отпрессовано)': readiness && readiness.stockQty != null ? readiness.stockQty : '—',
+      'План, кол-во': readiness && readiness.planQty != null ? readiness.planQty : '—',
       'Статус готовности': readiness ? readiness.status : 'нет данных',
       'Плановая дата готовности': readiness ? (readiness.planReadyDate || '—') : '—'
     };
