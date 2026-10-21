@@ -2,7 +2,7 @@
    __test_tasks_calendar.js — проверка доски задач.
 
    Модули выполняются в vm с заглушкой DOM: вызываются настоящие функции
-   js/tasks.js и js/reminders.js.
+   js/tasks.js.
 
    Критерий:
      календарь задач с пластами по периоду (день/неделя/месяц) и количеством;
@@ -119,7 +119,7 @@ sandbox.playNotifySound = () => {};
 const context = vm.createContext(sandbox);
 const read = f => fs.readFileSync(path.join(__dirname, 'js', f), 'utf8');
 ['data.js', 'storage.js', 'users.js', 'interactionTypes.js', 'dictionaries.js', 'profile.js',
- 'notifications.js', 'geo.js', 'reminders.js', 'tasks.js', 'orders.js', 'matrices.js', 'clients.js']
+ 'notifications.js', 'geo.js', 'tasks.js', 'orders.js', 'matrices.js', 'clients.js']
   .forEach(f => vm.runInContext(read(f), context, { filename: f }));
 
 const run = code => vm.runInContext(code, context);
@@ -357,27 +357,6 @@ function asUser(login) {
   check('стрелки по центру рабочей зоны', /\.board-scroll-btn\s*\{[^}]*top:\s*50%/.test(css) &&
     /translateY\(-50%\)/.test(css));
   check('центр учитывает полосу прокрутки', /\.board-scroll-btn\s*\{\s*top:\s*calc\(50% - 5px\)/.test(css));
-
-  /* ================= 5. Попап напоминания ================= */
-  run('reminders = [{ id: 1, title: "Позвонить", description: "обсудить", date: todayISO(), time: "00:00", color: "#f59e0b", scope: "self", clientId: null, completed: false, createdBy: 2, notifiedAt: null }]');
-  let completeCalls = 0;
-  run('toggleReminderComplete = function(){ __testCompleteCalls = (__testCompleteCalls || 0) + 1; };');
-  run('showReminderPopup(reminders[0])');
-
-  const popup = lastCreatedElement;
-  const reminderSrc = read('reminders.js');
-  check('в попапе кнопка «Закрыть»', /toast-close-action">Закрыть/.test(reminderSrc));
-  check('кнопки «Выполнено» в попапе больше нет', !/toast-done/.test(reminderSrc));
-
-  // Нажатие кнопки закрывает попап, но не отмечает напоминание выполненным
-  const hostChildren = [];
-  popup.parentNode = { removeChild() {} };
-  popup.__buttons['.toast-close-action'].onclick();
-  check('кнопка закрывает попап', popup.parentNode === null);
-  check('напоминание остаётся невыполненным',
-    run('reminders[0].completed') === false &&
-    run('typeof __testCompleteCalls === "number" ? __testCompleteCalls : 0') === 0);
-  check('отметка «выполнено» доступна в разделе', run('typeof toggleReminderComplete') === 'function');
 
   console.log(failures ? `\n  Провалов: ${failures}` : '\n  Все проверки доски задач пройдены');
   process.exitCode = failures ? 1 : 0;

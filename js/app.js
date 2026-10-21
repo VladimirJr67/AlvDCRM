@@ -8,7 +8,7 @@ let pollingStarted = false;
 
 // Разделы, которые можно открыть ссылкой /?section=… (проверяются при старте).
 const STARTABLE_SECTIONS = [
-  'orders', 'matrix-accounting', 'clients', 'tasks', 'reminders', 'news', 'contacts',
+  'orders', 'matrix-accounting', 'clients', 'tasks', 'news', 'contacts',
   'contacts-internal', 'contacts-mobile', 'notifications', 'chat', 'tracking',
   'manager-tools', 'admin-analysis', 'admin-users', 'admin-task-columns',
   'admin-readiness', 'admin-interaction-types', 'admin-integrations', 'admin-permissions',
@@ -34,7 +34,6 @@ const MENU_ICONS = {
   'matrix-accounting': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>',
   clients: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>',
   tasks: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>',
-  reminders: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg>',
   contacts: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/><path d="M2 21v-2a4 4 0 013-3.87M8 3.13a4 4 0 010 7.75"/></svg>',
   notifications: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg>',
   news: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 22h16a2 2 0 002-2V4a2 2 0 00-2-2H8a2 2 0 00-2 2v16a2 2 0 01-2 2zm0 0a2 2 0 01-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8M15 18h-5M10 6h8v4h-8z"/></svg>',
@@ -71,7 +70,6 @@ function buildSidebar() {
   html += addItem('matrix-accounting', 'Учёт матриц');
   html += addItem('clients', 'Клиенты');
   html += addItem('tasks', 'Задачи', { badge: 'tasksMenuBadge' });
-  html += addItem('reminders', 'Напоминания');
   html += addItem('news', 'Новости', { badge: 'newsMenuBadge' });
   html += addItem('contacts', 'Телефонный справочник', { submenu: [
     { section: 'contacts-internal', label: 'Внутренние' },
@@ -234,8 +232,6 @@ async function enterApp() {
 
   renderSection(currentSection);
   startPolling();
-  // Проверка напоминаний: в назначенное время показывает всплывающее уведомление.
-  startReminderWatcher();
   // «Крон» дедлайнов задач: уведомление за час до срока (см. js/tasks.js).
   if (typeof startTaskDeadlineWatcher === 'function') startTaskDeadlineWatcher();
 }
@@ -506,56 +502,6 @@ function injectModals() {
           </div>
           <div class="modal-actions">
             <button type="button" class="btn btn-secondary" onclick="closeModal('contactItemModal')">Отмена</button>
-            <button type="submit" class="btn">Сохранить</button>
-          </div>
-        </form>
-      </div>
-    </div>
-
-    <div class="modal-overlay" id="reminderModal">
-      <div class="modal" style="width:660px;">
-        <div class="modal-head">
-          <h2 id="reminderModalTitle">Новое напоминание</h2>
-          <button type="button" class="modal-close-icon" onclick="closeModal('reminderModal')" title="Закрыть" aria-label="Закрыть">✕</button>
-        </div>
-        <form onsubmit="saveReminder(event)">
-          <input type="hidden" id="reminderId">
-          <input type="hidden" id="reminderClientId">
-          <div class="form-section">
-            <div class="form-row"><div class="form-group"><label>Название *</label><input type="text" id="reminderTitle" required></div></div>
-            <div class="form-row"><div class="form-group"><label>Описание</label><textarea id="reminderDescription" rows="3"></textarea></div></div>
-            <div class="form-row">
-              <div class="form-group"><label>Дата *</label><input type="date" id="reminderDate" required></div>
-              <div class="form-group"><label>Время *</label><input type="time" id="reminderTime" required></div>
-            </div>
-            <div class="form-row">
-              <div class="form-group">
-                <label>Тип напоминания</label>
-                <div class="scope-switch">
-                  <label class="scope-option"><input type="radio" name="reminderScope" value="self" checked onchange="onReminderScopeChange()"><span>Для себя</span></label>
-                  <label class="scope-option"><input type="radio" name="reminderScope" value="client" onchange="onReminderScopeChange()"><span>Для клиента</span></label>
-                </div>
-                <div style="font-size:11px;color:#9ca3af;margin-top:5px;">Личные напоминания видите только вы.</div>
-              </div>
-              <div class="form-group">
-                <label>Важность</label>
-                <select id="reminderLevel"></select>
-                <div style="font-size:11px;color:#9ca3af;margin-top:5px;">Цвет индикатора в карточке клиента.</div>
-              </div>
-            </div>
-            <div class="form-row" id="reminderClientRow" style="display:none;">
-              <div class="form-group client-typeahead-group">
-                <label>Клиент (компания) *</label>
-                <input type="text" id="reminderClientSearch" placeholder="Начните вводить название компании..." autocomplete="off"
-                       oninput="onReminderClientSearch()" onfocus="onReminderClientSearch()">
-                <div class="client-typeahead-dropdown" id="reminderClientDropdown"></div>
-              </div>
-            </div>
-            <div id="reminderClientLink" style="display:none;font-size:13px;color:#6b7280;padding:8px;background:#f9fafb;border-radius:6px;margin-top:8px;"></div>
-            <div class="linked-client-line" id="reminderClientFixed" style="display:none;"></div>
-          </div>
-          <div class="modal-actions">
-            <button type="button" class="btn btn-secondary" onclick="closeModal('reminderModal')">Отмена</button>
             <button type="submit" class="btn">Сохранить</button>
           </div>
         </form>
@@ -1174,8 +1120,6 @@ function renderSection(section) {
     if (section === 'contacts-internal') currentContactsSubsection = 'internal';
     if (section === 'contacts-mobile') currentContactsSubsection = 'mobile';
     renderContacts();
-  } else if (section === 'reminders') {
-    renderReminders();
   } else if (section === 'orders') {
     renderOrders();
   } else if (section === 'matrix-accounting') {
@@ -1288,73 +1232,6 @@ function onTaskClientChange() {
   }
 }
 
-// Выбранная компания в модалке напоминания (id).
-let selectedReminderClientId = null;
-
-// Инициализация поля «Клиент (компания)» в модалке напоминания.
-function initReminderClientSearch() {
-  const input = document.getElementById('reminderClientSearch');
-  if (!input) return;
-  const cid = document.getElementById('reminderClientId').value;
-  const client = cid ? clients.find(c => c.id === parseInt(cid)) : null;
-  selectedReminderClientId = client ? client.id : null;
-  input.value = client ? client.orgName : '';
-}
-
-// Поиск по компаниям (typeahead) в модалке напоминания.
-function onReminderClientSearch() {
-  const input = document.getElementById('reminderClientSearch');
-  const dropdown = document.getElementById('reminderClientDropdown');
-  const q = (input.value || '').trim().toLowerCase();
-
-  if (!q) {
-    selectedReminderClientId = null;
-    document.getElementById('reminderClientId').value = '';
-    const link = document.getElementById('reminderClientLink');
-    if (link) link.style.display = 'none';
-    dropdown.style.display = 'none';
-    return;
-  }
-
-  const matches = clients.filter(c => (c.orgName || '').toLowerCase().includes(q)).slice(0, 20);
-  if (matches.length === 0) {
-    dropdown.style.display = 'none';
-    return;
-  }
-  dropdown.innerHTML = matches.map(c => `
-    <div class="client-typeahead-item" data-id="${c.id}" data-name="${escapeHtml(c.orgName)}">${escapeHtml(c.orgName)}</div>
-  `).join('');
-  dropdown.style.display = 'block';
-}
-
-// Клик по выпадающему списку напоминания.
-function selectReminderClient(id, name) {
-  selectedReminderClientId = id;
-  document.getElementById('reminderClientId').value = id;
-  document.getElementById('reminderClientSearch').value = name;
-  document.getElementById('reminderClientDropdown').style.display = 'none';
-  updateReminderClientLink();
-}
-
-// Обновить видимую привязку компании (ссылку-блок) в модалке напоминания.
-function updateReminderClientLink() {
-  const link = document.getElementById('reminderClientLink');
-  if (!link) return;
-  const cid = selectedReminderClientId;
-  if (!cid) {
-    link.style.display = 'none';
-    link.innerHTML = '';
-    return;
-  }
-  const client = clients.find(c => c.id === cid);
-  if (!client) {
-    link.style.display = 'none';
-    return;
-  }
-  link.style.display = 'block';
-  link.innerHTML = `<strong>${escapeHtml(client.orgName)}</strong> <button type="button" onclick="unlinkReminderFromClient()" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:12px;margin-left:6px;">убрать</button>`;
-}
-
 // Глобальный делегированный клик по выпадающим спискам typeahead (компании).
 document.addEventListener('click', (e) => {
   const item = e.target.closest('.client-typeahead-item');
@@ -1366,8 +1243,6 @@ document.addEventListener('click', (e) => {
   const searchInput = container.querySelector('input');
   if (searchInput && searchInput.id === 'taskClientSearch') {
     selectTaskClient(id, name);
-  } else if (searchInput && searchInput.id === 'reminderClientSearch') {
-    selectReminderClient(id, name);
   } else if (searchInput && searchInput.id === 'orderClientFilterInput') {
     selectOrdersClientFilter(id, name);
   } else if (searchInput && searchInput.id === 'matrixClientFilterInput') {
@@ -1464,7 +1339,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   loadDictionaries();
   seedDictionariesFromData();
   loadTasks();
-  loadReminders();
   loadNotifications();
   loadOrders();
   loadMatrices();

@@ -9,7 +9,6 @@ const STORAGE_KEYS = {
   contacts: 'alvid_crm_contacts',
   tasks: 'alvid_crm_tasks',
   taskColumns: 'alvid_crm_task_columns',
-  reminders: 'alvid_crm_reminders',
   users: 'alvid_crm_users',
   notifications: 'alvid_crm_notifications',
   interactionTypes: 'alvid_crm_interaction_types',

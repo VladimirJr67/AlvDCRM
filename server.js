@@ -344,7 +344,6 @@ const DEFAULT_DB = {
   // Внутренние чаты: менеджеры и руководители.
   chatManagers: [],
   chatLeads: [],
-  reminders: [],
   notifications: [],
   interactionTypes: [],
   orders: [],
@@ -505,7 +504,8 @@ function normalizeDb(db) {
   d.contacts = asArray(d.contacts);
   d.tasks = asArray(d.tasks);
   d.taskColumns = asArray(d.taskColumns);
-  d.reminders = asArray(d.reminders);
+  // Раздел «Напоминания» удалён: коллекция больше не нужна.
+  delete d.reminders;
   d.notifications = asArray(d.notifications);
   d.orders = asArray(d.orders);
   d.orgTypes = asArray(d.orgTypes);

@@ -77,7 +77,7 @@ const sandbox = {
 const context = vm.createContext(sandbox);
 const read = f => fs.readFileSync(path.join(__dirname, 'js', f), 'utf8');
 ['data.js', 'storage.js', 'users.js', 'interactionTypes.js', 'dictionaries.js', 'profile.js',
- 'notifications.js', 'geo.js', 'reminders.js', 'tasks.js', 'orders.js', 'matrices.js',
+ 'notifications.js', 'geo.js', 'tasks.js', 'orders.js', 'matrices.js',
  'clients.js', 'admin.js'].forEach(f => {
   vm.runInContext(read(f), context, { filename: f });
 });

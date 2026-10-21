@@ -270,7 +270,7 @@ function renderClientsTable() {
       ? (countryName(c.orgCountry) || c.orgCountry)
       : '';
     html += `<tr onclick="selectClient(${c.id})" ondblclick="openClientCard(${c.id})" class="${selectedClientId === c.id ? 'selected' : ''}">
-      <td><strong>${escapeHtml(c.orgName)}</strong>${clientReminderDotHtml(c.id)}</td>
+      <td><strong>${escapeHtml(c.orgName)}</strong></td>
       <td><span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:12px;height:12px;background:${st.color};border-radius:2px;display:inline-block;flex-shrink:0;"></span>${escapeHtml(st.label)}</span></td>
       <td>${escapeHtml(c.orgDirection || '—')}</td>
       <td>${escapeHtml(c.orgCity || '—')}${otherCountry ? ` <span style="color:#9ca3af;font-size:11px;">(${escapeHtml(otherCountry)})</span>` : ''}</td>
@@ -671,13 +671,11 @@ function renderClientCard(id) {
               <span>ID: ${client.id}</span>
               <span class="cc-sep">|</span>
               <span>Менеджер: <strong>${escapeHtml(managerName)}</strong></span>
-              ${clientReminderBadgeHtml(client.id)}
             </div>
           </div>
           ${canWrite ? `
           <div class="cc-actions">
             <button class="btn btn-sm btn-secondary" onclick="openTaskModalWithClient(${client.id})">+ Задача</button>
-            <button class="btn btn-sm btn-secondary" onclick="openCardReminderModal(${client.id})">+ Напоминание</button>
             <button class="btn btn-sm btn-secondary${specialNotesFor(client.id).length ? ' notes-alert' : ''}" onclick="openClientNotes(${client.id})">Особые отметки</button>
           </div>` : ''}
         </div>
@@ -1127,6 +1125,11 @@ function openHistoryModal(clientId, editIdx) {
   const editIdxEl = document.getElementById('historyEditIdx');
   const commentEl = document.getElementById('historyComment');
   const submitBtn = document.querySelector('#historyModal button[type="submit"]');
+
+  // Поле «Комментарий» всегда открывается чистым: при добавлении ничего не
+  // подставляем (ни текст прошлой записи, ни заголовок), при правке — только
+  // текст редактируемой записи ниже.
+  if (commentEl) commentEl.value = '';
 
   if (editing) {
     const entry = client ? (client.history || [])[parseInt(editIdx, 10)] : null;
@@ -2117,6 +2120,14 @@ function formatDate(isoString) {
   return d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
+// Та же подпись даты и времени — общая для новостей, чата и уведомлений
+// (раньше жила в модуле «Напоминания», который удалён).
+function formatDateTime(isoString) {
+  if (!isoString) return '—';
+  const d = new Date(isoString);
+  return d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
 function escapeHtml(s) {
   if (!s) return '';
   return s.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
@@ -2126,12 +2137,6 @@ function escapeHtml(s) {
 // а поле «Клиент (компания)» внутри скрыто — клиент уже известен.
 function openTaskModalWithClient(clientId) {
   openTaskModal(null, clientId);
-}
-
-// Напоминание из карточки клиента: тип сразу «Для клиента»,
-// поле выбора клиента скрыто.
-function openCardReminderModal(clientId) {
-  openReminderModal(null, clientId);
 }
 
 /* ===== Умный ввод города =====

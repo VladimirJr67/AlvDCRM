@@ -51,7 +51,6 @@ function rehydrateAll(db) {
   clientTransferRequests = db.clientTransferRequests || [];
   chatManagers = db.chatManagers || [];
   chatLeads = db.chatLeads || [];
-  reminders = db.reminders || [];
   notifications = db.notifications || [];
   interactionTypes = db.interactionTypes || [];
   orders = db.orders || [];
@@ -81,7 +80,6 @@ function assembleDb() {
     clientTransferRequests: clientTransferRequests || [],
     chatManagers: chatManagers || [],
     chatLeads: chatLeads || [],
-    reminders: reminders || [],
     notifications: notifications || [],
     interactionTypes: interactionTypes || [],
     orders: orders || [],

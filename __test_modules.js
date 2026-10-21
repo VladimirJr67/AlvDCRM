@@ -59,7 +59,7 @@ console.log('модулей загружено: ' + order.length + ', ошибо
 const needed = ['renderTasks', 'renderTaskCalendarHtml', 'taskCalendarBandsWithCounts', 'pickTaskCalendarBand',
   'shiftTaskCalendar', 'setTaskCalendarMode', 'renderTracking', 'startTrackingUser', 'stopTrackingUser',
   'userTaskProgress', 'trackersForUser', 'toggleLinkWorkedOff', 'taskCanBeClosed', 'setTaskStatus',
-  'animateBoardScroll', 'scrollTaskBoard', 'showReminderPopup', 'unlinkReminderFromClient',
+  'animateBoardScroll', 'scrollTaskBoard',
   'renderChat', 'renderTransfers', 'renderOrders', 'renderMatricesTab', 'applyTheme', 'showNativeNotification',
   'readinessForOrder', 'orderReadinessCellHtml', 'orderSpecificationCellHtml', 'openReadinessCard',
   'refreshReadinessForVisibleOrders', 'normalizeSpecificationKey', 'renderAdminReadiness', 'uploadReadinessFile'];
