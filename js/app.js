@@ -1101,9 +1101,9 @@ function renderSection(section) {
               </div>
               <button class="btn btn-sm btn-secondary" id="notesBtn" onclick="openClientNotes(selectedClientId)"
                       title="Все комментарии по клиенту: добавление, отметки, правка">Особые отметки <span class="count" id="notesCount"></span></button>
-              <button class="btn btn-sm btn-secondary" onclick="openClientMatrices(selectedClientId)"
+              <button class="btn btn-sm btn-secondary" id="matricesBtn" onclick="openClientMatrices(selectedClientId)"
                       title="Матрицы, привязанные к этому клиенту">Матрицы клиента <span class="count" id="clientMatricesCount"></span></button>
-              <button class="btn btn-sm btn-secondary" onclick="openClientTasks(selectedClientId)"
+              <button class="btn btn-sm btn-secondary" id="tasksBtn" onclick="openClientTasks(selectedClientId)"
                       title="Незакрытые задачи по клиенту">Задачи по клиенту <span class="count" id="clientTasksCount"></span></button>
             </div>
             <button class="btn btn-sm" id="contactsAddBtn" onclick="openContactModal(selectedClientId)">+ Добавить</button>
@@ -1249,6 +1249,8 @@ document.addEventListener('click', (e) => {
     selectMatricesClientFilter(id, name);
   } else if (searchInput && searchInput.id === 'orderEditClientSearch') {
     selectOrderEditClient(id, name);
+  } else if (searchInput && searchInput.id === 'adminTaskListClientInput') {
+    selectAdminTaskListClient(id, name);
   }
 });
 
@@ -1348,8 +1350,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Сессия: основная — серверная (httpOnly cookie), запасная — локальная
   // (режим file://). Перезагрузка страницы не разлогинивает: сервер
   // подтверждает вход по refresh-токену и обновляет access-токен сам.
+  // Если в LocalStorage остался след сессии, сразу скрываем форму входа —
+  // при F5 логин не «мигает». Если сервер сессию не подтвердит — покажем её.
+  const hadLocalSession = typeof getSession === 'function' && !!getSession();
+  if (hadLocalSession) {
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('app').style.display = 'flex';
+  }
   if (await restoreSession()) {
     await enterApp();
     startSessionKeepAlive();
+  } else if (hadLocalSession) {
+    document.getElementById('loginScreen').style.display = 'flex';
+    document.getElementById('app').style.display = 'none';
   }
 });

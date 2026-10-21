@@ -992,6 +992,7 @@ let adminAnalysisTab = 'stats';   // 'stats' | 'comments'
 let adminCommentTagFilter = 'all'; // 'all' | 'forSelf' | 'forReport' — фильтр по отметке
 let adminAnalysisDateFrom = null; // начало периода фильтра по датам
 let adminAnalysisDateTo = null;   // конец периода фильтра по датам
+let adminManagerFilter = 'all';   // 'all' | id менеджера — фильтр Анализа по менеджеру
 
 // Фильтр по периоду для задач и комментариев: сравнивается дата (YYYY-MM-DD).
 function inAnalysisRange(dateStr) {
@@ -1022,6 +1023,9 @@ function renderAdminAnalysis() {
       <button class="btn ${adminAnalysisTab === 'comments' ? '' : 'btn-secondary'}" onclick="setAdminAnalysisTab('comments')">Лента комментариев</button>
     </div>`;
 
+  const managerOpts = users.map(u =>
+    `<option value="${u.id}"${String(adminManagerFilter) === String(u.id) ? ' selected' : ''}>${escapeHtml(u.name || u.login)}</option>`).join('');
+
   const dateBar = `
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:20px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:10px 14px;flex-wrap:wrap;">
       <span style="font-size:13px;color:#4b5563;font-weight:500;">Период:</span>
@@ -1033,6 +1037,14 @@ function renderAdminAnalysis() {
              style="padding:6px 9px;border:1px solid #d0d5dd;border-radius:5px;font-size:12px;outline:none;">
       <button class="btn btn-sm btn-secondary" onclick="setAdminAnalysisDateRange('${today}','${today}')">Сегодня</button>
       ${(from || to) ? `<button class="btn btn-sm btn-secondary" onclick="setAdminAnalysisDateRange('','')">Сбросить</button>` : ''}
+      <span style="font-size:13px;color:#4b5563;font-weight:500;margin-left:8px;">Менеджер:</span>
+      <select id="adminManagerFilter" onchange="setAdminManagerFilter(this.value)"
+              style="padding:6px 9px;border:1px solid #d0d5dd;border-radius:5px;font-size:12px;outline:none;">
+        <option value="all"${adminManagerFilter === 'all' ? ' selected' : ''}>Все менеджеры</option>
+        ${managerOpts}
+      </select>
+      <button class="btn btn-sm ${adminManagerFilter === 'all' ? 'btn-secondary' : ''}" onclick="resetAdminManagerFilter()"
+              title="Показать данные по всем менеджерам">Все задачи</button>
       ${adminAnalysisTab === 'comments' ? `
         <span style="font-size:13px;color:#4b5563;font-weight:500;margin-left:8px;">Отметка:</span>
         <select onchange="setAdminCommentTagFilter(this.value)" style="padding:6px 9px;border:1px solid #d0d5dd;border-radius:5px;font-size:12px;outline:none;">
@@ -1075,12 +1087,37 @@ function setAdminAnalysisDateRange(from, to) {
   renderAdminAnalysis();
 }
 
+// Фильтр Анализа по менеджеру. «Все задачи» — сброс к общей картине.
+function setAdminManagerFilter(value) {
+  adminManagerFilter = value || 'all';
+  renderAdminAnalysis();
+}
+
+function resetAdminManagerFilter() {
+  adminManagerFilter = 'all';
+  renderAdminAnalysis();
+}
+
+// Задачи, ограниченные выбранным менеджером (для карточек статистики).
+function analysisManagerScoped(list) {
+  if (adminManagerFilter === 'all') return list;
+  const uid = parseInt(adminManagerFilter, 10);
+  return list.filter(t => taskManager(t).id === uid);
+}
+
+function adminManagerFilterLabel() {
+  if (adminManagerFilter === 'all') return 'все пользователи';
+  const u = findUserById(parseInt(adminManagerFilter, 10));
+  return u ? (u.name || u.login) : 'выбранный менеджер';
+}
+
 // Статистика по задачам (срез по менеджерам). При заданном периоде учитываются
 // задачи, перешедшие в текущий статус (или созданные) в этом периоде.
 function renderAdminStats() {
   const all = tasks.filter(t => inAnalysisRange(taskRangeDate(t)));
-  const total = all.length;
-  const overdue = all.filter(t => taskOverdue(t)).length;
+  const scoped = analysisManagerScoped(all);
+  const total = scoped.length;
+  const overdue = scoped.filter(t => taskOverdue(t)).length;
 
   // Столбцы берём из актуального набора глобальных столбцов (по порядку).
   // Удалённых нет, новые появляются сразу — без жёсткого списка статусов.
@@ -1096,12 +1133,12 @@ function renderAdminStats() {
 
   return `
     <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:25px;">
-      <div class="stat-card"><div class="stat-value" style="color:#1a3a5c">${total}</div><div class="stat-label">Всего задач (все пользователи)</div></div>
-      <div class="stat-card" onclick="openAdminOverdueTasks()" style="cursor:pointer;" title="Показать список просроченных задач"><div class="stat-value" style="color:#ef4444">${overdue}</div><div class="stat-label">Просрочено (дедлайн &lt; сегодня) — нажмите для списка</div></div>
+      <div class="stat-card"><div class="stat-value" style="color:#1a3a5c">${total}</div><div class="stat-label">Всего задач (${escapeHtml(adminManagerFilterLabel())})</div></div>
+      <div class="stat-card" onclick="openAdminOverdueTasks()" style="cursor:pointer;" title="Показать список просроченных задач"><div class="stat-value" style="color:#ef4444">${overdue}</div><div class="stat-label">Просрочено (${escapeHtml(adminManagerFilterLabel())}) — нажмите для списка</div></div>
     </div>
 
     <h3 style="font-size:15px;font-weight:600;color:#374151;margin-bottom:12px;">Срез по менеджерам</h3>
-    <p style="font-size:12px;color:#9ca3af;margin-bottom:12px;">Кликните по цифре, чтобы увидеть задачи менеджера.</p>
+    <p style="font-size:12px;color:#9ca3af;margin-bottom:12px;">Кликните по цифре, чтобы увидеть задачи менеджера за выбранный период.</p>
     <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:auto;">
       <table class="admin-table">
         <thead><tr>
@@ -1111,9 +1148,9 @@ function renderAdminStats() {
         <tbody>
           ${managerRows.length ? managerRows.map(r => `
             <tr>
-              <td class="manager-name" onclick="openAdminTaskList(${r.user.id})" title="Все задачи менеджера">${escapeHtml(r.user.login)}</td>
+              <td class="manager-name" onclick="openAdminTaskList(${r.user.id}, null, { period: true })" title="Все задачи менеджера за выбранный период">${escapeHtml(r.user.name || r.user.login)}</td>
               ${r.counts.map((c, i) => `
-                <td class="stat-cell" onclick="openAdminTaskList(${r.user.id}, '${escapeHtml(statusCols[i].id)}')" title="${escapeHtml(statusCols[i].name)}">${c}</td>
+                <td class="stat-cell" onclick="openAdminTaskList(${r.user.id}, '${escapeHtml(statusCols[i].id)}', { period: true })" title="${escapeHtml(statusCols[i].name)}">${c}</td>
               `).join('')}
             </tr>
           `).join('') : `
@@ -1126,12 +1163,14 @@ function renderAdminStats() {
 }
 
 // Лента комментариев: комментарии за выбранный период (по умолчанию — сегодня).
-// Фильтр по отметке: «Для себя» / «Для отчёта» / все.
+// Фильтры: по отметке («Для себя» / «Для отчёта») и по менеджеру.
 function commentsForRange() {
+  const managerUser = adminManagerFilter !== 'all' ? findUserById(parseInt(adminManagerFilter, 10)) : null;
   const result = [];
   clients.forEach(c => {
     (c.history || []).forEach(h => {
       if (!inAnalysisRange(h.date)) return;
+      if (managerUser && h.manager !== managerUser.login) return;
       const tags = commentTagsList(h.tags);
       if (adminCommentTagFilter !== 'all' && tags.indexOf(adminCommentTagFilter) === -1) return;
       result.push({
@@ -1244,40 +1283,100 @@ function adminTrackButtonHtml(t) {
   return `<button class="btn-icon-btn" onclick="event.stopPropagation(); sendTaskToTrackingFromUi(${t.id})" title="Отправить в отслеживание">В отслеживание</button>`;
 }
 
-// Список задач: конкретного менеджера (опционально по столбцу) или все
-// просроченные (opts.overdue = true). В таблице — столбец «Дней до задачи».
+/* ===== Список задач менеджера (окно) =====
+   Открывается из «Среза по менеджерам» и карточки «Просрочено». По умолчанию
+   показывает задачи только за выбранный период Анализа; в окне есть фильтр
+   по клиенту и сброс. */
+
+let adminTaskListState = { managerId: null, statusId: null, overdue: false, period: true, clientId: null };
+
 function openAdminTaskList(managerId, statusId, opts) {
   const o = opts || {};
+  adminTaskListState = {
+    managerId: managerId != null ? managerId : null,
+    statusId: statusId || null,
+    overdue: !!o.overdue,
+    period: o.period !== false,
+    clientId: o.clientId != null ? o.clientId : null
+  };
+  renderAdminTaskList();
+}
+
+function setAdminTaskListClientFilter(clientId) {
+  adminTaskListState.clientId = clientId != null ? clientId : null;
+  renderAdminTaskList();
+  // Сброс фильтра — очищаем и поле поиска.
+  if (clientId == null) {
+    const input = document.getElementById('adminTaskListClientInput');
+    if (input) input.value = '';
+  }
+}
+
+function selectAdminTaskListClient(id, name) {
+  const dd = document.getElementById('adminTaskListClientDropdown');
+  if (dd) dd.style.display = 'none';
+  const input = document.getElementById('adminTaskListClientInput');
+  if (input && name) input.value = name;
+  setAdminTaskListClientFilter(id);
+}
+
+function onAdminTaskListClientInput(query) {
+  const dd = document.getElementById('adminTaskListClientDropdown');
+  if (!dd) return;
+  const q = String(query || '').trim().toLowerCase();
+  const list = clients
+    .filter(c => !q || String(c.orgName || '').toLowerCase().includes(q))
+    .slice(0, 30);
+  dd.innerHTML = list.length
+    ? list.map(c => `<div class="client-typeahead-item" data-id="${c.id}" data-name="${escapeHtml(c.orgName || '')}">${escapeHtml(c.orgName || ('Клиент #' + c.id))}</div>`).join('')
+    : '<div class="client-typeahead-item" style="color:#9ca3af;cursor:default;">Ничего не найдено</div>';
+  dd.style.display = 'block';
+}
+
+function renderAdminTaskList() {
   const content = document.getElementById('adminTasksListContent');
   if (!content) return;
+  const st = adminTaskListState;
 
-  let list;
-  let title;
-  let subtitle;
-  if (o.overdue) {
-    list = tasks.filter(t => taskOverdue(t));
-    title = 'Просроченные задачи';
-    subtitle = 'Все менеджеры';
-  } else {
-    const manager = findUserById(managerId);
-    if (!manager) return;
-    list = tasks.filter(t => taskManager(t).id === managerId);
-    title = 'Задачи менеджера';
-    subtitle = 'Менеджер: <strong>' + escapeHtml(manager.login) + '</strong>';
-    if (statusId) {
-      const col = taskColumns.find(c => c.id === statusId);
-      if (col) list = list.filter(t => t.status === col.id);
-      subtitle += ' · Тип: <strong>' + escapeHtml(col ? col.name : '—') + '</strong>';
-    }
-  }
-  list = list.slice().sort((a, b) => (a.deadline || '').localeCompare(b.deadline || ''));
+  let list = tasks.slice();
+  if (st.overdue) list = list.filter(t => taskOverdue(t));
+  if (st.managerId != null) list = list.filter(t => taskManager(t).id === st.managerId);
+  if (st.statusId) list = list.filter(t => t.status === st.statusId);
+  if (st.period) list = list.filter(t => inAnalysisRange(taskRangeDate(t)));
+  if (st.clientId != null) list = list.filter(t => String(t.clientId) === String(st.clientId));
+  list = list.sort((a, b) => (a.deadline || '').localeCompare(b.deadline || ''));
+
+  const manager = st.managerId != null ? findUserById(st.managerId) : null;
+  const statusCol = st.statusId ? taskColumns.find(c => c.id === st.statusId) : null;
+  const clientSel = st.clientId != null ? clients.find(c => c.id === st.clientId) : null;
 
   const titleEl = document.getElementById('adminTasksModalTitle');
-  if (titleEl) titleEl.textContent = title;
+  if (titleEl) titleEl.textContent = st.overdue ? 'Просроченные задачи' : 'Задачи менеджера';
+
+  const subtitleParts = [];
+  subtitleParts.push(manager
+    ? 'Менеджер: <strong>' + escapeHtml(manager.name || manager.login) + '</strong>'
+    : 'Все менеджеры');
+  if (statusCol) subtitleParts.push('Тип: <strong>' + escapeHtml(statusCol.name) + '</strong>');
+  if (st.period) subtitleParts.push('за период Анализа');
+  if (clientSel) subtitleParts.push('Клиент: <strong>' + escapeHtml(clientSel.orgName || '') + '</strong>');
 
   content.innerHTML = `
-    <div style="margin-bottom:12px;font-size:13px;color:#6b7280;">
-      ${subtitle} · Задач: ${list.length}
+    <div style="display:flex;align-items:flex-end;gap:10px;margin-bottom:12px;flex-wrap:wrap;font-size:13px;color:#6b7280;">
+      <div>
+        ${subtitleParts.join(' · ')} · Задач: ${list.length}
+      </div>
+      <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:#6b7280;margin-left:auto;">
+        Клиент
+        <span class="client-typeahead-group" style="display:inline-block;">
+          <input type="text" id="adminTaskListClientInput" autocomplete="off" placeholder="Фильтр по клиенту"
+                 style="width:200px;box-sizing:border-box;padding:6px 9px;border:1px solid #d0d5dd;border-radius:5px;font-size:12px;"
+                 value="${escapeHtml(clientSel ? (clientSel.orgName || '') : '')}"
+                 oninput="onAdminTaskListClientInput(this.value)" onfocus="onAdminTaskListClientInput(this.value)">
+          <div class="client-typeahead-dropdown" id="adminTaskListClientDropdown"></div>
+        </span>
+      </label>
+      ${st.clientId != null ? '<button class="btn btn-sm btn-secondary" onclick="setAdminTaskListClientFilter(null)">Все клиенты</button>' : ''}
     </div>
     ${list.length === 0 ? `
       <div class="empty-state" style="padding:40px 20px;"><p>Нет задач</p></div>
@@ -1293,15 +1392,16 @@ function openAdminTaskList(managerId, statusId, opts) {
                 const client = t.clientId ? clients.find(c => c.id === t.clientId) : null;
                 const col = taskColumns.find(c => c.id === t.status);
                 const isOverdue = taskOverdue(t);
+                const owner = taskManager(t);
                 return `<tr style="cursor:default;" onclick="event.stopPropagation()">
-                  <td><strong>${escapeHtml(taskManager(t).login)}</strong></td>
+                  <td><strong>${escapeHtml(owner.name || owner.login)}</strong></td>
                   <td>${escapeHtml(client ? client.orgName : '—')}</td>
                   <td>${escapeHtml(col ? col.name : '—')}</td>
                   <td><div class="history-comment">${escapeHtml(t.description || t.title || '—')}</div></td>
                   <td style="color:${isOverdue ? '#ef4444' : '#6b7280'};font-weight:${isOverdue ? '600' : '400'};">${t.deadline ? formatDate(t.deadline) : '—'}</td>
                   ${taskDaysCellHtml(t)}
                   <td style="text-align:right;white-space:nowrap;">
-                    ${o.overdue ? `<button class="btn-icon-btn" onclick="event.stopPropagation(); closeModal('adminTasksModal'); openTaskModal(tasks.find(x=>x.id===${t.id}))" title="Открыть задачу">Открыть</button>` : ''}
+                    ${st.overdue ? `<button class="btn-icon-btn" onclick="event.stopPropagation(); closeModal('adminTasksModal'); openTaskModal(tasks.find(x=>x.id===${t.id}))" title="Открыть задачу">Открыть</button>` : ''}
                     ${adminTrackButtonHtml(t)}
                   </td>
                 </tr>`;
@@ -1315,9 +1415,14 @@ function openAdminTaskList(managerId, statusId, opts) {
   document.getElementById('adminTasksModal').classList.add('active');
 }
 
-// Клик по карточке «Просрочено»: список всех просроченных задач.
+// Клик по карточке «Просрочено»: список просроченных задач с учётом
+// выбранного периода и менеджера.
 function openAdminOverdueTasks() {
-  openAdminTaskList(null, null, { overdue: true });
+  openAdminTaskList(
+    adminManagerFilter !== 'all' ? parseInt(adminManagerFilter, 10) : null,
+    null,
+    { overdue: true, period: true }
+  );
 }
 
 // Экспорт всех задач в Excel (XLSX) в реальном времени.

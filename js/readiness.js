@@ -86,6 +86,22 @@ function readinessNumberText(value) {
   return n.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
 }
 
+// «Обеспечено» — отпрессовано (на складе) + отправлено.
+// Штуки — из колонки количества (S), килограммы — из колонки веса (T).
+function readinessEnsuredQty(record) {
+  if (!record) return 0;
+  const stock = Number(record.stockQty) || 0;
+  const shipped = Number(record.shippedQty) || 0;
+  return Math.round((stock + shipped) * 1000) / 1000;
+}
+
+function readinessEnsuredWeight(record) {
+  if (!record) return 0;
+  const stock = Number(record.stockWeight) || 0;
+  const shipped = Number(record.shippedWeight) || 0;
+  return Math.round((stock + shipped) * 1000) / 1000;
+}
+
 // «данные на 18.09.2026 (не обновлялись 3 дня)» — срез старше суток помечаем.
 function readinessAsOfText() {
   if (!readinessAvailable()) return 'срез готовности не загружен';
@@ -153,8 +169,8 @@ function orderReadinessCellHtml(order) {
         ${stale}
       </span>
       <span class="readiness-qty" style="font-size:11px;color:#374151;"
-            title="Обеспечено профилей (отпрессовано, на складе) из плана">
-        обеспечено: ${escapeHtml(readinessNumberText(record.stockQty))} из ${escapeHtml(readinessNumberText(record.planQty))}
+            title="Обеспечено профилей: отпрессовано (на складе) и отправлено">
+        обеспечено: ${escapeHtml(readinessNumberText(readinessEnsuredQty(record)))} шт · ${escapeHtml(readinessNumberText(readinessEnsuredWeight(record)))} кг
       </span>
       <span class="readiness-date">${escapeHtml(readinessAsOfText())}</span>
     </button>`;
@@ -301,17 +317,21 @@ function openReadinessCard(orderId) {
       <div class="readiness-total"><span>План, кол-во</span><strong>${escapeHtml(readinessNumberText(record.planQty))}</strong></div>
       <div class="readiness-total"><span>На складе (отпрессовано)</span><strong>${escapeHtml(readinessNumberText(record.stockQty))}</strong></div>
       <div class="readiness-total"><span>Отгружено</span><strong>${escapeHtml(readinessNumberText(record.shippedQty))}</strong></div>
+      <div class="readiness-total"><span>Обеспечено, шт</span><strong>${escapeHtml(readinessNumberText(readinessEnsuredQty(record)))}</strong></div>
+      <div class="readiness-total"><span>Обеспечено, кг</span><strong>${escapeHtml(readinessNumberText(readinessEnsuredWeight(record)))}</strong></div>
       <div class="readiness-total"><span>Готовность</span><strong>${escapeHtml(readinessPercentText(record.readiness))}</strong></div>
     </div>
 
     <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:auto;margin-top:12px;">
       <table class="admin-table">
         <thead><tr>
-          <th>Шифр</th><th>Длина</th><th>Покрытие</th><th>План</th><th>На складе</th><th>Отгружено</th><th>Готовность</th><th>Статус</th>
+          <th>Шифр</th><th>Длина</th><th>Покрытие</th><th>План</th><th>На складе</th><th>Отгружено</th><th>Обеспечено, шт</th><th>Обеспечено, кг</th><th>Готовность</th><th>Статус</th>
         </tr></thead>
         <tbody>
           ${(record.positions || []).map(p => {
             const pInfo = readinessStatusInfo(p.statusCode);
+            const pQty = (Number(p.stockQty) || 0) + (Number(p.shippedQty) || 0);
+            const pWeight = Number(p.stockWeight) || 0;
             return `<tr style="cursor:default;">
               <td><strong>${escapeHtml(p.cipher || '—')}</strong></td>
               <td>${escapeHtml(p.length || '—')}</td>
@@ -319,10 +339,12 @@ function openReadinessCard(orderId) {
               <td>${escapeHtml(readinessNumberText(p.planQty))}</td>
               <td>${escapeHtml(readinessNumberText(p.stockQty))}</td>
               <td>${escapeHtml(readinessNumberText(p.shippedQty))}</td>
+              <td><strong>${escapeHtml(readinessNumberText(Math.round(pQty * 1000) / 1000))}</strong></td>
+              <td><strong>${escapeHtml(readinessNumberText(Math.round(pWeight * 1000) / 1000))}</strong></td>
               <td>${escapeHtml(readinessPercentText(p.readiness))}</td>
               <td><span class="badge" style="background:${pInfo.color}1f;color:${pInfo.color};">${escapeHtml(p.status || pInfo.label)}</span></td>
             </tr>`;
-          }).join('') || '<tr><td colspan="8" style="text-align:center;color:#9ca3af;padding:20px;">Позиций нет</td></tr>'}
+          }).join('') || '<tr><td colspan="10" style="text-align:center;color:#9ca3af;padding:20px;">Позиций нет</td></tr>'}
         </tbody>
         <tfoot>
           <tr>
@@ -330,6 +352,8 @@ function openReadinessCard(orderId) {
             <td><strong>${escapeHtml(readinessNumberText(record.planQty))}</strong></td>
             <td><strong>${escapeHtml(readinessNumberText(record.stockQty))}</strong></td>
             <td><strong>${escapeHtml(readinessNumberText(record.shippedQty))}</strong></td>
+            <td><strong>${escapeHtml(readinessNumberText(readinessEnsuredQty(record)))}</strong></td>
+            <td><strong>${escapeHtml(readinessNumberText(readinessEnsuredWeight(record)))}</strong></td>
             <td colspan="2"><strong>${escapeHtml(readinessPercentText(record.readiness))}</strong></td>
           </tr>
         </tfoot>

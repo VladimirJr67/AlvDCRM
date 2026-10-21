@@ -430,6 +430,11 @@ function updateClientMatricesCount(clientId) {
 function openClientMatrices(clientId) {
   const client = clients.find(c => c.id === clientId);
   if (!client) { alert('Сначала выберите клиента'); return; }
+  // Чужому менеджеру матрицы клиента недоступны.
+  if (typeof canViewClientExtras === 'function' && !canViewClientExtras(client)) {
+    alert('Матрицы клиента доступны владельцу клиента, администратору или руководителю.');
+    return;
+  }
   document.getElementById('clientMatricesClientId').value = clientId;
   document.getElementById('clientMatricesModalTitle').textContent = 'Матрицы клиента — ' + (client.orgName || '');
   resetClientMatrixForm();

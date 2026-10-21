@@ -36,6 +36,7 @@ const ASSIGNMENT_STATUSES = [
 ];
 
 const TASK_CALENDAR_MODE_KEY = 'alvid_crm_task_calendar_mode';
+const TASK_CALENDAR_ANCHOR_KEY = 'alvid_crm_task_calendar_anchor';
 
 function loadTasks() {
   const saved = localStorage.getItem('alvid_crm_tasks');
@@ -49,10 +50,16 @@ function loadTasks() {
     saveTaskColumns();
   }
 
-  // Выбранный период (День/Неделя/Месяц) запоминаем между визитами.
+  // Выбранный период (День/Неделя/Месяц) и конкретную дату запоминаем
+  // между визитами: после F5 задачи открываются на том же дне.
   const savedMode = localStorage.getItem(TASK_CALENDAR_MODE_KEY);
   if (savedMode && TASK_CALENDAR_MODES.some(m => m.id === savedMode)) {
     taskCalendarMode = savedMode;
+  }
+  const savedAnchor = localStorage.getItem(TASK_CALENDAR_ANCHOR_KEY);
+  if (savedAnchor) {
+    const d = new Date(savedAnchor);
+    if (!isNaN(d.getTime())) taskCalendarAnchor = d;
   }
 }
 
@@ -479,11 +486,19 @@ function visibleTasks() {
   return tasks.filter(t => t.ownerId === uid || t.assignedTo === uid || isCoAssignee(t, uid));
 }
 
-// Столбцы, задачи из которых считаются завершёнными.
+// Столбцы, задачи из которых считаются завершёнными. Ищем явные имена
+// (Завершены / Выполнено / Закрытые задачи / Готово и т.п.), а если их нет —
+// считаем завершающим последний столбец доски (на канбане справа — готово).
+const COMPLETED_COLUMN_RE = /заверш|выполн|закрыт|готово|сделан/i;
+
 function taskCompletedColumnIds() {
-  return taskColumns
-    .filter(c => c.id === 'completed' || c.name === 'Завершены')
+  const byName = taskColumns
+    .filter(c => c && (c.id === 'completed' || COMPLETED_COLUMN_RE.test(String(c.name || ''))))
     .map(c => c.id);
+  if (byName.length) return byName;
+  // Запасной вариант: последний столбец по порядку — он и есть «финиш».
+  const sorted = [...taskColumns].sort((a, b) => (a.order || 0) - (b.order || 0));
+  return sorted.length ? [sorted[sorted.length - 1].id] : [];
 }
 
 function isTaskCompleted(task) {
@@ -795,11 +810,19 @@ function taskCalendarBandsWithCounts() {
   });
 }
 
+// Сохранить выбранный период и дату (для восстановления после F5).
+function saveTaskCalendarState() {
+  try {
+    localStorage.setItem(TASK_CALENDAR_MODE_KEY, taskCalendarMode);
+    localStorage.setItem(TASK_CALENDAR_ANCHOR_KEY, new Date(taskCalendarAnchor || new Date()).toISOString());
+  } catch (e) { /* приватный режим */ }
+}
+
 function setTaskCalendarMode(mode) {
   taskCalendarMode = TASK_CALENDAR_MODES.some(m => m.id === mode) ? mode : 'week';
   taskCalendarPick = null;
   // Запоминаем период: при следующем входе раздел откроется на нём же.
-  try { localStorage.setItem(TASK_CALENDAR_MODE_KEY, taskCalendarMode); } catch (e) { /* приватный режим */ }
+  saveTaskCalendarState();
   renderTasks();
 }
 
@@ -810,12 +833,15 @@ function shiftTaskCalendar(delta) {
   else anchor.setDate(anchor.getDate() + delta * 7);
   taskCalendarAnchor = anchor;
   taskCalendarPick = null;
+  // Дата тоже запоминается — F5 вернёт на выбранный день.
+  saveTaskCalendarState();
   renderTasks();
 }
 
 function taskCalendarToday() {
   taskCalendarAnchor = new Date();
   taskCalendarPick = null;
+  saveTaskCalendarState();
   renderTasks();
 }
 
@@ -1014,7 +1040,6 @@ function canSendTaskToTracking(task) {
   if (!(isAdmin() || isLead())) return false;
   if (isTaskTrackedByMe(task)) return false;
   if (task.ownerId === currentUser.id) return false;
-  if (task.assignedBy === currentUser.id) return false;
   return true;
 }
 
@@ -1041,12 +1066,15 @@ function sendTaskToTrackingFromUi(taskId, managerId, statusId) {
   else if (typeof currentSection === 'string' && currentSection === 'tasks') renderTasks();
 }
 
-// «Отслеживание задач»: задачи, назначенные текущим пользователем, плюс те,
-// что он отправил в отслеживание. Наблюдение «за всеми менеджерами» убрано.
+// «Отслеживание задач»: задачи, которые пользователь отправил в отслеживание
+// кнопкой «Отправить в отслеживание». У администратора задачи не попадают
+// туда автоматически — только явно. Руководителю дополнительно видны задачи,
+// которые он назначил сам.
 function sharedTrackingTasks() {
   const me = currentUser ? currentUser.id : null;
+  const admin = isAdmin();
   return tasks
-    .filter(t => (isSharedTask(t) && t.assignedBy === me) || isTaskTrackedByMe(t))
+    .filter(t => isTaskTrackedByMe(t) || (!admin && isSharedTask(t) && t.assignedBy === me))
     .filter(t => !trackingAssigneeFilter || String(t.assignedTo) === String(trackingAssigneeFilter))
     .filter(t => !trackingStatusFilter || t.assignmentStatus === trackingStatusFilter)
     .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
@@ -1320,7 +1348,7 @@ function renderTaskCard(task, col) {
          onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.12)'"
          onmouseout="this.style.boxShadow='0 1px 3px rgba(0,0,0,0.08)'">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:6px;">
-        <div style="flex:1;min-width:0;font-size:13px;font-weight:500;color:#111;line-height:1.4;${task.status === 'completed' ? 'text-decoration:line-through;opacity:0.6;' : ''}">
+        <div style="flex:1;min-width:0;font-size:13px;font-weight:500;color:#111;line-height:1.4;${isCompletedColumnId(task.status) ? 'text-decoration:line-through;opacity:0.6;' : ''}">
           ${escapeHtml(task.title)}
         </div>
         <button onclick="event.stopPropagation(); deleteTask(${task.id})" title="Удалить задачу"
@@ -1641,7 +1669,9 @@ function onTaskAssignChange() {
 }
 
 // Скрыть выбор клиента и показать его подписью (клиент уже известен).
-// Название компании кликабельно — открывает карточку клиента.
+// Название компании кликабельно — открывает карточку клиента. Окно задачи
+// при этом закрывается, чтобы карточка клиента гарантированно оказалась
+// поверх (z-index карточки ниже модалок, открытых из неё).
 function setTaskClientFieldLocked(client) {
   const group = document.getElementById('taskClientGroup');
   const fixed = document.getElementById('taskClientFixed');
@@ -1649,7 +1679,7 @@ function setTaskClientFieldLocked(client) {
   if (fixed) {
     fixed.style.display = client ? 'block' : 'none';
     fixed.innerHTML = client
-      ? `Клиент: <a href="#" onclick="event.preventDefault(); openClientCard(${client.id});" title="Открыть карточку клиента">${escapeHtml(client.orgName)}</a>`
+      ? `Клиент: <a href="#" onclick="event.preventDefault(); closeModal('taskModal'); openClientCard(${client.id});" title="Открыть карточку клиента">${escapeHtml(client.orgName)}</a>`
       : '';
   }
 }
@@ -1982,6 +2012,13 @@ function submitTaskClose() {
   if (!Array.isArray(t.statusHistory)) t.statusHistory = [];
   t.statusHistory.push({ status: 'assigned:completed', label: 'Выполнено', at: now, by: currentUser ? currentUser.id : null });
 
+  // Задача реально закрывается: если есть завершающий столбец, переводим и
+  // её туда — она исчезает из активных, а не остаётся «в работе».
+  const completed = taskCompletedColumnIds();
+  if (completed.length && !isCompletedColumnId(t.status) && taskCanBeClosed(t)) {
+    setTaskStatus(t, completed[0]);
+  }
+
   saveTasks();
   closeModal('taskCloseModal');
   refreshAfterTaskChange();
@@ -2060,7 +2097,8 @@ function parseDeadline(deadline) {
 
 // Задача просрочена: дедлайн наступил (с учётом времени), задача не завершена.
 function taskOverdue(task) {
-  if (!task || task.status === 'completed') return false;
+  if (!task) return false;
+  if (isCompletedColumnId(task.status)) return false;
   const dl = parseDeadline(task.deadline);
   if (!dl) return false;
   return dl < new Date();
@@ -2159,6 +2197,11 @@ function updateClientTasksCount(clientId) {
 function openClientTasks(clientId) {
   const client = clients.find(c => c.id === clientId);
   if (!client) { alert('Сначала выберите клиента'); return; }
+  // Чужому менеджеру задачи клиента недоступны.
+  if (typeof canViewClientExtras === 'function' && !canViewClientExtras(client)) {
+    alert('Задачи по клиенту доступны владельцу клиента, администратору или руководителю.');
+    return;
+  }
   document.getElementById('clientTasksClientId').value = clientId;
   document.getElementById('clientTasksModalTitle').textContent = 'Задачи по клиенту — ' + (client.orgName || '');
   renderClientTasksList(clientId);

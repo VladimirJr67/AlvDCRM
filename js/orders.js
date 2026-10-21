@@ -555,7 +555,8 @@ function exportOrdersExcel() {
       'Стоимость заказа': o.cost !== null && o.cost !== undefined ? o.cost : '—',
       'СП': o.specification || '—',
       'Готовность, %': readiness && readiness.readiness != null ? readiness.readiness : '—',
-      'Обеспечено, кол-во (отпрессовано)': readiness && readiness.stockQty != null ? readiness.stockQty : '—',
+      'Обеспечено, шт': readiness ? readinessEnsuredQty(readiness) : '—',
+      'Обеспечено, кг': readiness ? readinessEnsuredWeight(readiness) : '—',
       'План, кол-во': readiness && readiness.planQty != null ? readiness.planQty : '—',
       'Статус готовности': readiness ? readiness.status : 'нет данных',
       'Плановая дата готовности': readiness ? (readiness.planReadyDate || '—') : '—'

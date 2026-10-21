@@ -199,12 +199,14 @@ const as = login => run(`currentUser = users.find(u => u.login === '${login}')`)
     readinessStatus = { available: true, asOfDate: '2026-10-01', ageDays: 0 };
     readinessByKey = {
       'СП-77': { specification: 'СП-77', status: 'В работе', statusCode: 'in_progress',
-                 readiness: 50, planQty: 1000, stockQty: 500, shippedQty: 0, positions: [], overdueDays: 0 }
+                 readiness: 50, planQty: 1000, stockQty: 500, shippedQty: 0,
+                 stockWeight: 125.5, shippedWeight: 24.5, positions: [], overdueDays: 0 }
     };
     readinessLookupKey = 'СП-77';
   `);
   const cell = run('orderReadinessCellHtml(orders.find(o => o.id === 1))');
-  check('в ячейке готовности есть отпрессованное кол-во', /обеспечено: 500 из/.test(cell), cell.slice(0, 120));
+  check('в ячейке готовности есть обеспечено штук (S)', /обеспечено: 500 шт/.test(cell), cell.slice(0, 160));
+  check('в ячейке готовности есть обеспечено КГ (T)', /150 кг/.test(cell), cell.slice(0, 160));
   check('ячейка помечена классом readiness-qty', /readiness-qty/.test(cell));
 
   /* ================= 6. Поиск клиента с автокомплитом (П.20) ================= */

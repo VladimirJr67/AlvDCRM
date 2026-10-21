@@ -58,6 +58,14 @@ function canWriteToClient(client) {
   return !!client && client.createdBy === currentUser.id;
 }
 
+// Дополнительные блоки карточки клиента («Матрицы клиента», «Задачи по
+// клиенту»): доступны владельцу клиента, администратору, руководителю и
+// разработчику. Чужому менеджеру они недоступны.
+function canViewClientExtras(client) {
+  if (!currentUser || !client) return false;
+  return isAdmin() || isLead() || client.createdBy === currentUser.id;
+}
+
 // Синоним: раньше по коду использовалось canEditClient, теперь единая
 // точка входа — canWriteToClient.
 function canEditClient(client) {
@@ -334,11 +342,15 @@ function renderClientContacts(id) {
   const countEl = document.getElementById('contactsCount');
   const addBtn = document.getElementById('contactsAddBtn');
   const notesBtn = document.getElementById('notesBtn');
+  const matricesBtn = document.getElementById('matricesBtn');
+  const tasksBtn = document.getElementById('tasksBtn');
 
   if (!id) {
     if (countEl) countEl.textContent = '';
     if (addBtn) addBtn.disabled = true;
     if (notesBtn) notesBtn.disabled = true;
+    if (matricesBtn) matricesBtn.disabled = true;
+    if (tasksBtn) tasksBtn.disabled = true;
     updateClientNotesCount(null);
     if (typeof updateClientTasksCount === 'function') updateClientTasksCount(null);
     panel.innerHTML = `<div class="placeholder"><h2>Выберите клиента</h2><p>Кликните на строку в таблице, чтобы увидеть контактные лица</p></div>`;
@@ -354,11 +366,16 @@ function renderClientContacts(id) {
   const canAdd = canWriteToClient(client);
   const canManage = canWriteToClient(client);
   const editable = canWriteToClient(client);
+  // «Матрицы клиента» и «Задачи по клиенту» — только владельцу, админу,
+  // руководителю и разработчику; чужому менеджеру кнопки заблокированы.
+  const extrasOk = canViewClientExtras(client);
   // Индекс мог устареть, если контактное лицо удалили.
   if (selectedContactIdx !== null && !contacts[selectedContactIdx]) selectedContactIdx = null;
   if (countEl) countEl.textContent = contacts.length ? `(${contacts.length})` : '';
   if (addBtn) addBtn.disabled = !canAdd;
   if (notesBtn) notesBtn.disabled = !canManage;
+  if (matricesBtn) matricesBtn.disabled = !extrasOk;
+  if (tasksBtn) tasksBtn.disabled = !extrasOk;
   updateClientNotesCount(client);
   if (typeof updateClientMatricesCount === 'function') updateClientMatricesCount(client.id);
   if (typeof updateClientTasksCount === 'function') updateClientTasksCount(client.id);
