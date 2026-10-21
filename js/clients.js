@@ -859,6 +859,10 @@ function openClientModal(client = null) {
     if (submitBtn) submitBtn.style.display = readOnly ? 'none' : '';
   }
 
+  // Создание нового клиента: если остался черновик (обрыв связи/перезагрузка),
+  // возвращаем введённые данные.
+  if (!client) restoreClientDraft();
+
   document.getElementById('clientModal').classList.add('active');
 }
 
@@ -952,6 +956,8 @@ function saveClient(e) {
   }
 
   saveClients(clients);
+  // Данные сохранены — черновик формы больше не нужен.
+  clearDraftValue(DRAFT_CLIENT_KEY);
   hideCitySuggestions();
   closeModal('clientModal');
   renderClientsTable();
@@ -1000,6 +1006,8 @@ function openContactModal(clientId) {
   document.getElementById('newContactPhoneMobile').value = '';
   document.getElementById('newContactEmail').value = '';
   document.getElementById('newContactMessengers').innerHTML = messengerCheckboxesHtml([]);
+  // Черновик контактного лица: восстанавливаем введённое до перезагрузки.
+  restoreContactDraft(clientId);
   document.getElementById('contactModal').classList.add('active');
 }
 
@@ -1053,6 +1061,8 @@ function saveContact(e) {
   }
   
   saveClients(clients);
+  // Контакт сохранён — черновик больше не нужен.
+  clearDraftValue(contactDraftKey(clientId));
   closeModal('contactModal');
   renderClientContacts(clientId);
 }
@@ -1346,6 +1356,8 @@ function resetOrderForm() {
   if (ciphers) ciphers.value = '';
   const coating = document.getElementById('matrixCoating');
   if (coating) coating.value = '';
+  // Дополнительные спецификации заказа убираем.
+  clearOrderSpecBlocks();
 }
 
 // Показываем нужный блок формы при выборе типа активности:
@@ -1405,6 +1417,253 @@ function recalcOrderCost() {
   priceEl.value = perKg === null ? '' : fmtMoney(perKg);
 }
 
+/* ===== Несколько спецификаций в одной активности (П.27) =====
+   Первая спецификация — основные поля формы (orderKg/orderCondition/
+   orderSpecification/orderCost), дополнительные добавляются кнопкой
+   «Добавить еще спецификацию» в блоки .order-spec-block. При сохранении
+   по каждой строке создаётся отдельный заказ в «Заказах». */
+
+function addOrderSpecBlock() {
+  const list = document.getElementById('orderSpecsList');
+  if (!list) return;
+  const block = document.createElement('div');
+  block.className = 'order-spec-block';
+  block.style.cssText = 'border:1px dashed #e5e7eb;border-radius:6px;padding:8px 10px;margin-top:8px;';
+  block.innerHTML = `
+    <div class="form-row">
+      <div class="form-group"><label>Кол-во кг</label>
+        <input type="number" class="order-spec-kg" min="0" step="0.01" oninput="recalcOrderSpecPrice(this)"></div>
+      <div class="form-group"><label>Состояние поставки</label>
+        <select class="order-spec-condition"><option value="">—</option>${orderConditionOptionsHtml('')}</select></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Номер СП</label>
+        <input type="text" class="order-spec-specification" placeholder="Например, СП43191" autocomplete="off"></div>
+      <div class="form-group"><label>Общая стоимость заказа</label>
+        <input type="number" class="order-spec-cost" min="0" step="0.01" oninput="recalcOrderSpecPrice(this)"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Стоимость за кг</label>
+        <input type="text" class="order-spec-price" readonly style="background:#f9fafb;color:#1a3a5c;font-weight:600;"></div>
+      <div class="form-group" style="justify-content:flex-end;display:flex;">
+        <button type="button" class="btn btn-sm btn-secondary" onclick="removeOrderSpecBlock(this)">Убрать спецификацию</button>
+      </div>
+    </div>`;
+  list.appendChild(block);
+}
+
+function recalcOrderSpecPrice(input) {
+  const block = input && input.closest ? input.closest('.order-spec-block') : null;
+  if (!block) return;
+  const kg = block.querySelector('.order-spec-kg');
+  const cost = block.querySelector('.order-spec-cost');
+  const price = block.querySelector('.order-spec-price');
+  if (!price) return;
+  const perKg = orderPricePerKg(kg ? kg.value : '', cost ? cost.value : '');
+  price.value = perKg === null ? '' : fmtMoney(perKg);
+}
+
+function removeOrderSpecBlock(button) {
+  const block = button && button.closest ? button.closest('.order-spec-block') : null;
+  if (block && block.parentNode) block.parentNode.removeChild(block);
+}
+
+function clearOrderSpecBlocks() {
+  const list = document.getElementById('orderSpecsList');
+  if (list) list.innerHTML = '';
+}
+
+// Все строки заказа из формы: основная + дополнительные спецификации.
+function collectOrderSpecs() {
+  const specs = [];
+  const num = v => {
+    const s = String(v == null ? '' : v).trim();
+    if (s === '') return null;
+    const n = Number(s);
+    return isFinite(n) ? n : null;
+  };
+
+  const kg = num(document.getElementById('orderKg').value);
+  const cost = num(document.getElementById('orderCost').value);
+  const conditionEl = document.getElementById('orderCondition');
+  const specificationEl = document.getElementById('orderSpecification');
+  const condition = conditionEl ? String(conditionEl.value || '').trim() : '';
+  const specification = specificationEl ? String(specificationEl.value || '').trim() : '';
+  if (kg !== null || cost !== null || specification) {
+    specs.push({ kg: kg, cost: cost, condition: condition, specification: specification, avgPrice: orderPricePerKg(kg, cost) });
+  }
+
+  const blocks = document.querySelectorAll('.order-spec-block');
+  Array.from(blocks || []).forEach(block => {
+    const kgEl = block.querySelector('.order-spec-kg');
+    const costEl = block.querySelector('.order-spec-cost');
+    const condEl = block.querySelector('.order-spec-condition');
+    const specEl = block.querySelector('.order-spec-specification');
+    const bkg = num(kgEl ? kgEl.value : '');
+    const bcost = num(costEl ? costEl.value : '');
+    const bcond = condEl ? String(condEl.value || '').trim() : '';
+    const bspec = specEl ? String(specEl.value || '').trim() : '';
+    if (bkg !== null || bcost !== null || bspec) {
+      specs.push({ kg: bkg, cost: bcost, condition: bcond, specification: bspec, avgPrice: orderPricePerKg(bkg, bcost) });
+    }
+  });
+  return specs;
+}
+
+// Текст комментария по одной строке заказа.
+function orderSpecComment(type, spec, index, total) {
+  const parts = [
+    'Кол-во кг — ' + (spec.kg === null ? '—' : fmtKg(spec.kg)),
+    'Состояние поставки — ' + (spec.condition || '—'),
+    'Общая стоимость — ' + (spec.cost === null ? '—' : fmtMoney(spec.cost)),
+    'Стоимость за кг — ' + (spec.avgPrice === null ? '—' : fmtMoney(spec.avgPrice))
+  ];
+  if (spec.specification) parts.push('СП — ' + spec.specification);
+  const prefix = total > 1 ? type + ' (спецификация ' + (index + 1) + ')' : type;
+  return prefix + ': ' + parts.join(', ');
+}
+
+/* ===== Черновики форм (П.29) =====
+   Несохранённые данные формы клиента и контактного лица сохраняются в
+   LocalStorage при вводе. Если страница перезагрузилась (обрыв связи, F5),
+   форма откроется с уже введёнными данными; после сохранения черновик
+   стирается. */
+
+const DRAFT_CLIENT_KEY = 'alvid_crm_draft_client';
+const DRAFT_CONTACT_PREFIX = 'alvid_crm_draft_contact_';
+
+function saveDraftValue(key, data) {
+  try { localStorage.setItem(key, JSON.stringify(data)); } catch (e) { /* приватный режим */ }
+}
+
+function readDraftValue(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) { return null; }
+}
+
+function clearDraftValue(key) {
+  try { localStorage.removeItem(key); } catch (e) { /* приватный режим */ }
+}
+
+function draftFieldValue(id) {
+  const el = document.getElementById(id);
+  return el ? String(el.value == null ? '' : el.value) : '';
+}
+
+function draftHasData(obj) {
+  return Object.keys(obj || {}).some(k => {
+    const v = obj[k];
+    if (Array.isArray(v)) return v.length > 0;
+    return String(v == null ? '' : v).trim() !== '';
+  });
+}
+
+// Черновик формы клиента — только для создания нового клиента.
+function saveClientDraft() {
+  const idEl = document.getElementById('clientId');
+  if (idEl && String(idEl.value || '').trim()) return; // правим существующего — черновик не нужен
+  const oldBaseCb = document.getElementById('orgOldBase');
+  const draft = {
+    orgName: draftFieldValue('orgName'),
+    orgCountry: draftFieldValue('orgCountry'),
+    orgCity: draftFieldValue('orgCity'),
+    orgDirection: draftFieldValue('orgDirection'),
+    orgAddress: draftFieldValue('orgAddress'),
+    orgPhones: draftFieldValue('orgPhones'),
+    orgStatus: draftFieldValue('orgStatus'),
+    orgEmails: draftFieldValue('orgEmails'),
+    orgWebsite: draftFieldValue('orgWebsite'),
+    orgInn: draftFieldValue('orgInn'),
+    orgOgrn: draftFieldValue('orgOgrn'),
+    oldBase: oldBaseCb ? !!oldBaseCb.checked : false,
+    oldBaseId: draftFieldValue('oldBaseId')
+  };
+  if (!draftHasData(draft)) { clearDraftValue(DRAFT_CLIENT_KEY); return; }
+  saveDraftValue(DRAFT_CLIENT_KEY, draft);
+}
+
+// Восстановить черновик в форме нового клиента. true — если что-то было.
+function restoreClientDraft() {
+  const draft = readDraftValue(DRAFT_CLIENT_KEY);
+  if (!draft || typeof draft !== 'object') return false;
+
+  const set = (id, value) => {
+    if (value === undefined || value === null) return;
+    const el = document.getElementById(id);
+    if (el) el.value = String(value);
+  };
+  set('orgName', draft.orgName);
+  set('orgCity', draft.orgCity);
+  set('orgDirection', draft.orgDirection);
+  set('orgAddress', draft.orgAddress);
+  set('orgPhones', draft.orgPhones);
+  set('orgEmails', draft.orgEmails);
+  set('orgWebsite', draft.orgWebsite);
+  set('orgInn', draft.orgInn);
+  set('orgOgrn', draft.orgOgrn);
+  set('oldBaseId', draft.oldBaseId);
+
+  const country = document.getElementById('orgCountry');
+  if (country && draft.orgCountry) country.value = String(draft.orgCountry);
+  const status = document.getElementById('orgStatus');
+  if (status && draft.orgStatus) status.value = String(draft.orgStatus);
+  const oldBaseCb = document.getElementById('orgOldBase');
+  if (oldBaseCb) oldBaseCb.checked = !!draft.oldBase;
+  if (typeof toggleOldBaseField === 'function') toggleOldBaseField();
+  return true;
+}
+
+function contactDraftKey(clientId) {
+  return DRAFT_CONTACT_PREFIX + clientId;
+}
+
+// Черновик формы контактного лица — только для добавления (не для правки).
+function saveContactDraft() {
+  const clientIdEl = document.getElementById('contactClientId');
+  const editEl = document.getElementById('editContactIdx');
+  const clientId = clientIdEl ? String(clientIdEl.value || '').trim() : '';
+  if (!clientId) return;
+  if (editEl && String(editEl.value || '').trim() !== '') return;
+
+  const box = document.getElementById('newContactMessengers');
+  const messengers = (box && box.querySelectorAll)
+    ? Array.from(box.querySelectorAll('input[type=checkbox]')).filter(cb => cb.checked).map(cb => cb.value)
+    : [];
+  const draft = {
+    name: draftFieldValue('newContactName'),
+    position: draftFieldValue('newContactPosition'),
+    phoneWork: draftFieldValue('newContactPhoneWork'),
+    phoneMobile: draftFieldValue('newContactPhoneMobile'),
+    email: draftFieldValue('newContactEmail'),
+    messengers: messengers
+  };
+  const key = contactDraftKey(clientId);
+  if (!draftHasData(draft)) { clearDraftValue(key); return; }
+  saveDraftValue(key, draft);
+}
+
+function restoreContactDraft(clientId) {
+  const draft = readDraftValue(contactDraftKey(clientId));
+  if (!draft || typeof draft !== 'object') return false;
+  const set = (id, value) => {
+    if (value === undefined || value === null) return;
+    const el = document.getElementById(id);
+    if (el) el.value = String(value);
+  };
+  set('newContactName', draft.name);
+  set('newContactPosition', draft.position);
+  set('newContactPhoneWork', draft.phoneWork);
+  set('newContactPhoneMobile', draft.phoneMobile);
+  set('newContactEmail', draft.email);
+  const box = document.getElementById('newContactMessengers');
+  if (box && typeof messengerCheckboxesHtml === 'function') {
+    box.innerHTML = messengerCheckboxesHtml(Array.isArray(draft.messengers) ? draft.messengers : []);
+  }
+  return true;
+}
+
 function saveHistory(e) {
   e.preventDefault();
   const clientId = parseInt(document.getElementById('historyClientId').value);
@@ -1418,6 +1677,7 @@ function saveHistory(e) {
   const type = document.getElementById('historyType').value;
   let comment = document.getElementById('historyComment').value.trim();
   let orderData = null;
+  let orderSpecs = [];
   let matrixData = null;
 
   // 1. Правило: активность закрывается только вместе со следующей датой.
@@ -1438,31 +1698,15 @@ function saveHistory(e) {
     }
   }
 
-  // 3. «Размещение заказа» (старая система): собираем параметры, формируем
-  //    текст комментария и создаём запись в модуле «Заказы». Стоимость за кг
-  //    считаем из суммы и веса. Комментарий остаётся в комментариях.
+  // 3. «Размещение заказа» (старая система): одна или несколько спецификаций
+  //    за одну активность. По каждой строке создаётся отдельный заказ.
+  //    Стоимость за кг считаем из суммы и веса. Комментарий остаётся в комментариях.
   if (isOrderType(type)) {
-    const conditionEl = document.getElementById('orderCondition');
-    const kgRaw = document.getElementById('orderKg').value;
-    const costRaw = document.getElementById('orderCost').value;
-    const specEl = document.getElementById('orderSpecification');
-
-    const kg = kgRaw === '' ? null : Number(kgRaw);
-    const cost = costRaw === '' ? null : Number(costRaw);
-    const condition = conditionEl ? conditionEl.value.trim() : '';
-    const specification = specEl ? specEl.value.trim() : '';
-    const avgPrice = orderPricePerKg(kg, cost);
-
-    orderData = { kg, condition, avgPrice, cost, specification };
-
-    const parts = [
-      'Кол-во кг — ' + (kg === null ? '—' : fmtKg(kg)),
-      'Состояние поставки — ' + (condition || '—'),
-      'Общая стоимость — ' + (cost === null ? '—' : fmtMoney(cost)),
-      'Стоимость за кг — ' + (avgPrice === null ? '—' : fmtMoney(avgPrice))
-    ];
-    if (specification) parts.push('СП — ' + specification);
-    const autoComment = type + ': ' + parts.join(', ');
+    const specs = collectOrderSpecs();
+    if (!specs.length) { alert('Заполните параметры заказа'); return; }
+    orderSpecs = specs;
+    orderData = specs[0];
+    const autoComment = specs.map((s, i) => orderSpecComment(type, s, i, specs.length)).join('\n');
     comment = comment || autoComment;
   }
 
@@ -1496,7 +1740,10 @@ function saveHistory(e) {
     entry.comment = comment;
     entry.tags = tags;
     entry.editedAt = new Date().toISOString();
-    if (orderData) entry.order = orderData;
+    if (orderSpecs.length) {
+      entry.order = orderSpecs[0];
+      entry.orders = orderSpecs.slice();
+    }
     applyActivityFields(entry, type, nextCheck.nextAt, boundColumnId || entry.columnId || null);
 
     // Если по активности уже создана задача — обновляем её срок и описание,
@@ -1526,7 +1773,8 @@ function saveHistory(e) {
     authorId: currentUser ? currentUser.id : null,
     comment: comment,
     tags: tags,
-    order: orderData
+    order: orderData,
+    orders: orderSpecs
   };
   applyActivityFields(entry, type, nextCheck.nextAt, boundColumnId);
 
@@ -1551,18 +1799,21 @@ function saveHistory(e) {
 
   saveClients(clients);
 
-  if (orderData) {
-    addOrder({
-      clientId: client.id,
-      clientName: client.orgName,
-      kg: orderData.kg,
-      condition: orderData.condition,
-      avgPrice: orderData.avgPrice,
-      cost: orderData.cost,
-      specification: orderData.specification || '',
-      date: new Date().toISOString(),
-      createdBy: currentUser ? currentUser.id : null,
-      comment: comment
+  // По каждой спецификации активности — отдельный заказ в «Заказах».
+  if (orderSpecs.length) {
+    orderSpecs.forEach(spec => {
+      addOrder({
+        clientId: client.id,
+        clientName: client.orgName,
+        kg: spec.kg,
+        condition: spec.condition,
+        avgPrice: spec.avgPrice,
+        cost: spec.cost,
+        specification: spec.specification || '',
+        date: new Date().toISOString(),
+        createdBy: currentUser ? currentUser.id : null,
+        comment: comment
+      });
     });
     // Номер СП мог появиться — сразу подтягиваем готовность по нему.
     if (typeof refreshReadinessForVisibleOrders === 'function') refreshReadinessForVisibleOrders();

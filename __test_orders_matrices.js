@@ -224,6 +224,7 @@ function asUser(login) {
   check('в форме видна дата последнего изменения', /Последнее изменение/.test(html('minPricesForm')));
 
   minPriceInputs = [makeMinPriceInput('Анод', 700), makeMinPriceInput('Сырой', 640), makeMinPriceInput('Покраска', 610)];
+  el('minPriceReason').value = 'плановая индексация';
   alerts.length = 0;
   run('saveMinPrices()');
   const stored = JSON.parse(store['alvid_crm_min_prices'] || '{}');
@@ -234,7 +235,21 @@ function asUser(login) {
   check('изменения попали в историю', history.length === 3 && history.every(h => h.updatedBy === 1),
     'записей: ' + history.length);
   check('история помнит прежнее значение', history[0].previous === null || history[0].previous !== undefined);
+  check('причина изменения сохранена в истории', history.every(h => h.reason === 'плановая индексация'),
+    JSON.stringify(history.map(h => h.reason)));
   check('синхронизация с сервером вызвана', saves.server > 0);
+
+  // Без причины цена не сохраняется.
+  minPriceInputs = [makeMinPriceInput('Анод', 999)];
+  el('minPriceReason').value = '';
+  alerts.length = 0;
+  run('saveMinPrices()');
+  check('без причины цена не меняется',
+    JSON.parse(store['alvid_crm_min_prices']).Анод.value === 700 && alerts.length === 1,
+    alerts.join(' / '));
+
+  minPriceInputs = [makeMinPriceInput('Анод', 700)];
+  el('minPriceReason').value = 'плановая индексация';
   minPriceInputs = [makeMinPriceInput('Анод', 700)];
   const historyBefore = JSON.parse(store['alvid_crm_min_prices_history']).length;
   run('saveMinPrices()');

@@ -116,21 +116,43 @@ function openMinPricesModal() {
         <label>${escapeHtml(key)} — цена за кг</label>
         <input type="number" min="0" step="0.01" data-min-price="${escapeHtml(key)}"
                value="${minPriceValue(key) === null ? '' : minPriceValue(key)}">
-        <div class="field-hint">Последнее изменение: ${escapeHtml(formatMinPriceDate(minPriceUpdatedAt(key)))}</div>
+        <div class="field-hint">Последнее изменение: ${escapeHtml(formatMinPriceDate(minPriceUpdatedAt(key)))}${
+          minPriceLastReason(key) ? ' · причина: ' + escapeHtml(minPriceLastReason(key)) : ''
+        }</div>
       </div>
-    </div>`).join('');
+    </div>`).join('') + `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Причина изменения *</label>
+        <textarea id="minPriceReason" rows="2" placeholder="Например, новый прайс поставщика"></textarea>
+        <div class="field-hint">
+          Обязательна при изменении цены — сохранится в «Истории изменения цен».
+        </div>
+      </div>
+    </div>`;
 
   document.getElementById('minPricesModal').classList.add('active');
+}
+
+// Причина последнего изменения цены — показывается в подсказке формы.
+function minPriceLastReason(key) {
+  const list = (minPriceHistory || []).filter(h => h && h.key === key && h.reason);
+  if (!list.length) return '';
+  list.sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+  return String(list[0].reason || '');
 }
 
 function saveMinPrices() {
   if (!isAdmin()) { alert('Цены меняет администратор.'); return; }
 
   const inputs = document.querySelectorAll('[data-min-price]');
+  const reasonEl = document.getElementById('minPriceReason');
+  const reason = reasonEl ? String(reasonEl.value || '').trim() : '';
   const now = new Date().toISOString();
   const authorId = currentUser ? currentUser.id : null;
-  let changed = 0;
 
+  // Сначала собираем изменения: причина обязательна, если цены меняются.
+  const changes = [];
   Array.from(inputs || []).forEach(input => {
     const key = input.dataset.minPrice;
     const raw = String(input.value == null ? '' : input.value).trim();
@@ -140,25 +162,36 @@ function saveMinPrices() {
     const previous = minPriceValue(key);
     const isChanged = (value === null && previous !== null) || (value !== null && value !== previous);
     if (!isChanged) return;
+    changes.push({ key: key, value: value, previous: previous });
+  });
 
-    // Каждое изменение пишем в историю: цена, дата, кто изменил.
+  if (!changes.length) {
+    renderMinPricesBlock();
+    closeModal('minPricesModal');
+    return;
+  }
+  if (!reason) {
+    alert('Укажите причину изменения цены — без неё цена не сохраняется.');
+    return;
+  }
+
+  changes.forEach(c => {
+    // Каждое изменение пишем в историю: цена, причина, дата, кто изменил.
     minPriceHistory.push({
       id: minPriceHistory.reduce((m, h) => Math.max(m, h.id || 0), 0) + 1,
-      key: key,
-      value: value,
-      previous: previous,
+      key: c.key,
+      value: c.value,
+      previous: c.previous,
+      reason: reason,
       updatedAt: now,
       updatedBy: authorId
     });
 
-    if (value === null) delete minPrices[key];
-    else minPrices[key] = { value: value, updatedAt: now, updatedBy: authorId };
-    changed++;
+    if (c.value === null) delete minPrices[c.key];
+    else minPrices[c.key] = { value: c.value, updatedAt: now, updatedBy: authorId, reason: reason };
   });
 
-  if (changed) persistMinPrices();
-  else renderMinPricesBlock();
-
+  persistMinPrices();
   closeModal('minPricesModal');
   if (currentSection === 'orders') renderOrders();
 }
@@ -183,9 +216,10 @@ function openMinPricesHistory() {
           <table class="admin-table">
             <thead><tr>
               <th style="width:130px">Дата и время</th>
-              <th style="width:120px">Покрытие</th>
+              <th style="width:110px">Покрытие</th>
               <th style="width:150px">Цена за кг</th>
-              <th>Кто изменил</th>
+              <th style="width:120px">Кто изменил</th>
+              <th>Причина</th>
             </tr></thead>
             <tbody>
               ${list.map(h => `
@@ -201,6 +235,7 @@ function openMinPricesHistory() {
                       : ''}
                   </td>
                   <td>${escapeHtml(minPriceAuthor(h.updatedBy))}</td>
+                  <td>${h.reason ? escapeHtml(h.reason) : '<span style="color:#9ca3af;">—</span>'}</td>
                 </tr>`).join('')}
             </tbody>
           </table>

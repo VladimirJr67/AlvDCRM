@@ -271,7 +271,7 @@ function injectModals() {
           <h2 id="clientModalTitle">Новый клиент</h2>
           <button type="button" class="modal-close-icon" onclick="cancelClientEdit()" title="Закрыть" aria-label="Закрыть">✕</button>
         </div>
-        <form onsubmit="saveClient(event)">
+        <form onsubmit="saveClient(event)" oninput="saveClientDraft()" onchange="saveClientDraft()">
           <input type="hidden" id="clientId">
           <div class="form-section">
             <h3>Организация</h3>
@@ -354,7 +354,7 @@ function injectModals() {
     <div class="modal-overlay" id="contactModal">
       <div class="modal">
         <h2 id="contactModalTitle">Добавить контактное лицо</h2>
-        <form onsubmit="saveContact(event)">
+        <form onsubmit="saveContact(event)" oninput="saveContactDraft()" onchange="saveContactDraft()">
           <input type="hidden" id="contactClientId">
           <input type="hidden" id="editContactIdx" value="">
           <div class="form-section">
@@ -469,6 +469,10 @@ function injectModals() {
                   </div>
                 </div>
                 <div style="font-size:11px;color:#9ca3af;">Стоимость за кг считается автоматически: Общая стоимость ÷ Кол-во кг.</div>
+                <div id="orderSpecsList"></div>
+                <div style="margin-top:10px;">
+                  <button type="button" class="btn btn-sm btn-secondary" onclick="addOrderSpecBlock()">+ Добавить еще спецификацию</button>
+                </div>
               </div>
             </div>
           </div>

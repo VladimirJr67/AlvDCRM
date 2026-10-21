@@ -146,7 +146,9 @@ function renderNews() {
         </div>
         ${expanded
           ? `<div class="news-item-body">${item.html || ''}</div>
-             <button type="button" class="link-btn" onclick="toggleNewsItem(${item.id})">Свернуть</button>`
+             <div class="news-collapse-row">
+               <button type="button" class="btn btn-sm btn-secondary" onclick="toggleNewsItem(${item.id})">Свернуть</button>
+             </div>`
           : `<div class="news-item-teaser">${escapeHtml(newsTeaser(item))}</div>
              <button type="button" class="link-btn" onclick="toggleNewsItem(${item.id})">Развернуть</button>`}
       </article>`;

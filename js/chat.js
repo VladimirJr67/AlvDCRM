@@ -115,6 +115,47 @@ function onChatInputKeydown(event) {
   sendChatMessageFromForm();
 }
 
+/* ===== Правка и удаление своих сообщений (П.21) ===== */
+
+function isMyChatMessage(m) {
+  return !!(m && currentUser && m.authorId === currentUser.id);
+}
+
+function editChatMessage(id) {
+  if (!canUseManagersChat()) return { ok: false, error: 'Чат менеджеров доступен только менеджерам по продажам' };
+  const m = (chatManagers || []).find(x => x && x.id === id);
+  if (!m) return { ok: false, error: 'Сообщение не найдено' };
+  if (!isMyChatMessage(m)) return { ok: false, error: 'Редактировать можно только свои сообщения' };
+
+  const value = prompt('Редактировать сообщение:', m.text || '');
+  if (value === null) return { ok: false, error: 'Отменено' };
+  const clean = String(value || '').trim();
+  if (!clean) { alert('Сообщение не может быть пустым'); return { ok: false, error: 'Пустое сообщение' }; }
+  if (clean.length > CHAT_MESSAGE_MAX) {
+    alert('Сообщение слишком длинное (максимум ' + CHAT_MESSAGE_MAX + ' символов)');
+    return { ok: false, error: 'Слишком длинное сообщение' };
+  }
+
+  m.text = clean;
+  m.editedAt = new Date().toISOString();
+  saveChatManagers();
+  renderChat();
+  return { ok: true };
+}
+
+function deleteChatMessage(id) {
+  if (!canUseManagersChat()) return { ok: false, error: 'Чат менеджеров доступен только менеджерам по продажам' };
+  const m = (chatManagers || []).find(x => x && x.id === id);
+  if (!m) return { ok: false, error: 'Сообщение не найдено' };
+  if (!isMyChatMessage(m)) return { ok: false, error: 'Удалять можно только свои сообщения' };
+  if (!confirm('Удалить сообщение?')) return { ok: false, error: 'Отменено' };
+
+  chatManagers = (chatManagers || []).filter(x => !x || x.id !== id);
+  saveChatManagers();
+  renderChat();
+  return { ok: true };
+}
+
 /* ===== Раздел «Чат менеджеров» ===== */
 
 function renderChat() {
@@ -148,7 +189,11 @@ function renderChat() {
             <div class="chat-msg${m.authorId === me ? ' mine' : ''}">
               <div class="chat-msg-head">
                 <strong>${escapeHtml(chatMessageAuthor(m))}</strong>
-                <span>${escapeHtml(formatDateTime(m.createdAt))}</span>
+                <span>${escapeHtml(formatDateTime(m.createdAt))}${m.editedAt ? ' · изменено' : ''}</span>
+                ${isMyChatMessage(m) ? `<span class="chat-msg-actions">
+                  <button class="btn-icon-btn" onclick="editChatMessage(${m.id})" title="Редактировать сообщение">Изменить</button>
+                  <button class="btn-icon-btn" onclick="deleteChatMessage(${m.id})" title="Удалить сообщение">Удалить</button>
+                </span>` : ''}
               </div>
               <div class="chat-msg-text">${escapeHtml(m.text)}</div>
             </div>`).join('')}
