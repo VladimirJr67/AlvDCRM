@@ -340,5 +340,38 @@ alerts.length = 0;
 run('tasks[0].status = "closed"; openTaskReschedule(7)');
 check('перенос недоступен для закрытой задачи', alerts.length === 1, alerts[0] || '');
 
+/* ============ 9. Закрытие нельзя обойти перетаскиванием и формой ============ */
+run(`
+  tasks = [{
+    id: 8, title: 'Не закрывать молча', ownerId: 2, status: 'in_progress', kind: 'regular',
+    coAssignees: [], deadline: '2026-11-12T10:00'
+  }];
+`);
+run(`
+  var fakeEvent = {
+    preventDefault: function(){}, dataTransfer: { getData: function(){ return '8'; } },
+    currentTarget: { style: {} }
+  };
+  handleDrop(fakeEvent, 'closed');
+`);
+check('перетаскивание в «Закрытые» не закрывает задачу молча',
+  run('tasks[0].status') === 'in_progress');
+check('перетаскивание открывает окно закрытия',
+  el('taskCloseConfirmModal').classList.contains('active') === true &&
+  String(el('taskCloseConfirmId').value) === '8');
+
+run(`
+  openTaskModal(tasks[0]);
+  document.getElementById('taskColumn').value = 'closed';
+  document.getElementById('taskTitle').value = 'Не закрывать молча (правка)';
+`);
+el('taskCloseConfirmModal').classList.remove('active');
+run('saveTask({ preventDefault: function(){}, target: null })');
+check('смена столбца в форме не закрывает задачу', run('tasks[0].status') === 'in_progress');
+check('остальные поля при этом сохраняются',
+  run('tasks[0].title') === 'Не закрывать молча (правка)');
+check('вместо закрытия открылось окно с комментарием',
+  el('taskCloseConfirmModal').classList.contains('active') === true);
+
 console.log(failures ? `\n  Провалов: ${failures}` : '\n  Все проверки доработки задач пройдены');
 process.exitCode = failures ? 1 : 0;

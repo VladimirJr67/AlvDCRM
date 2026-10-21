@@ -1119,9 +1119,8 @@ function renderTracking() {
         <h1>Отслеживание задач</h1>
       </div>
       <p class="field-hint" style="margin-bottom:16px;">
-        Здесь только задачи, которые вы назначили, и задачи, которые вы
-        отправили в отслеживание (кнопка «Отправить в отслеживание» в задачах
-        менеджеров). Следить «за всеми менеджерами» больше нельзя.
+        Здесь только задачи, которые вы сами отправили в отслеживание кнопкой
+        «Отправить в отслеживание» — автоматически задачи сюда не попадают.
       </p>
       <div class="orders-analysis-title">Задачи в отслеживании (${list.length})</div>
       <div class="orders-filters">
@@ -1540,6 +1539,20 @@ function handleDrop(e, columnId) {
   const task = tasks.find(t => t.id === taskId);
   if (!task) return;
 
+  // Закрытие задачи — только через «Закрыть задачу» с обязательным
+  // комментарием: перетаскивание в завершающий столбец открывает это окно,
+  // а не закрывает задачу молча.
+  if (isCompletedColumnId(columnId) && !isCompletedColumnId(task.status)) {
+    if (!taskCanBeClosed(task)) {
+      alert(taskClosureBlockMessage(task));
+      renderTasks();
+      return;
+    }
+    renderTasks();
+    openTaskCloseConfirm(task.id);
+    return;
+  }
+
   // Задача-ссылка не закрывается, пока не отмечена галочка: перетаскивание
   // в завершающий столбец отклоняем и объясняем причину.
   const moved = setTaskStatus(task, columnId);
@@ -1923,6 +1936,15 @@ function saveTask(e) {
   data.linkWorkedOff = linkWorkedOff;
   if (kind !== 'link') data.linkWorkedOff = false;
 
+  // Закрытие задачи — только через «Закрыть задачу» с обязательным
+  // комментарием: смена столбца на завершающий в форме сохраняет остальные
+  // поля, но задачу не закрывает — вместо этого открывается окно закрытия.
+  let closeAfterSave = false;
+  if (current && !isCompletedColumnId(current.status) && isCompletedColumnId(data.status)) {
+    data.status = current.status;
+    closeAfterSave = true;
+  }
+
   let task = null;
   let previousCoAssignees = [];
 
@@ -1982,6 +2004,7 @@ function saveTask(e) {
   saveTasks();
   closeModal('taskModal');
   renderTasks();
+  if (closeAfterSave && task) openTaskCloseConfirm(task.id);
 }
 
 function editTask(id) {
