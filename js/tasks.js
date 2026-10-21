@@ -1667,7 +1667,11 @@ function openTaskModal(task = null, clientId = null, defaultColumn = null) {
   // «Перенести активность», чтобы сохранялась причина переноса и счётчик.
   const deadlineEl = document.getElementById('taskDeadline');
   const deadlineHint = document.getElementById('taskDeadlineHint');
-  if (deadlineEl) deadlineEl.readOnly = !!task;
+  if (deadlineEl) {
+    deadlineEl.readOnly = !!task;
+    deadlineEl.style.background = task ? '#f3f4f6' : '';
+    deadlineEl.style.color = task ? '#6b7280' : '';
+  }
   if (deadlineHint) deadlineHint.style.display = task ? '' : 'none';
 
   document.getElementById('taskModal').classList.add('active');
@@ -2211,6 +2215,10 @@ function submitTaskReschedule() {
 
   saveTasks();
   closeModal('taskRescheduleModal');
+  // Если карточка задачи была открыта — обновляем её, чтобы новый срок и
+  // счётчик переносов сразу были видны.
+  const infoModal = document.getElementById('taskInfoModal');
+  if (infoModal && infoModal.classList && infoModal.classList.contains('active')) openTaskInfo(t.id);
   refreshAfterTaskChange();
   if (typeof currentSection === 'string' && currentSection === 'tracking') renderTracking();
   return { ok: true, count: t.rescheduleCount, deadline: newDeadline };
