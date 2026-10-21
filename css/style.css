@@ -678,6 +678,11 @@ select[multiple] option:checked { background: #3b82f6; color: #fff; }
 #contactModal,
 #clientNotesModal,
 #allHistoryModal { z-index: 200; }
+/* Просмотр задачи и окна закрытия/переноса открываются поверх формы задачи,
+   но ниже системных уведомлений (.toast-host, z-index 500). */
+#taskInfoModal { z-index: 220; }
+#taskCloseConfirmModal,
+#taskRescheduleModal { z-index: 300; }
 
 /* Передача клиента другому менеджеру в карточке */
 .card-transfer { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }

@@ -155,6 +155,7 @@ run(`
     document.getElementById('historyType').value = 'Размещение заказа';
     document.getElementById('historyComment').value = '';
     document.getElementById('historyNextActivity').value = '2026-11-01T10:00';
+    document.getElementById('historyTagType').value = 'Для отчёта';
     document.getElementById('historyEditIdx').value = '';
     document.getElementById('orderKg').value = '1200';
     document.getElementById('orderCost').value = '780000';

@@ -203,8 +203,8 @@ function asUser(login) {
   check('автор матрицы записан', created.createdBy === 1);
   check('покрытия матриц — Сырой/Анод/Покраска',
     JSON.stringify(run('MATRIX_COVERAGES')) === JSON.stringify(['Сырой', 'Анод', 'Покраска']));
-  check('статусы матриц — Поступила/Отписана',
-    JSON.stringify(run('MATRIX_STATUSES')) === JSON.stringify(['Поступила', 'Отписана']));
+  check('статусы матриц — Заказана/Поступила/Отписана',
+    JSON.stringify(run('MATRIX_STATUSES')) === JSON.stringify(['Заказана', 'Поступила', 'Отписана']));
   const beforeSave = saves.server;
   run(`setMatrixStatus(${created.id}, 'Отписана')`);
   check('статус матрицы меняется и сохраняется',

@@ -276,7 +276,7 @@ function normalizeCommentTags(tags) {
 }
 
 // Статусы заказа матриц.
-const MATRIX_STATUSES = ['Поступила', 'Отписана'];
+const MATRIX_STATUSES = ['Заказана', 'Поступила', 'Отписана'];
 const MATRIX_STATUS_DEFAULT = 'Поступила';
 
 // Статусы запроса на перенос клиента к другому менеджеру.
@@ -657,6 +657,12 @@ function normalizeDb(db) {
     if (typeof t.closeComment !== 'string') t.closeComment = '';
     if (typeof t.closedAt !== 'string') t.closedAt = '';
     if (t.closedBy == null) t.closedBy = null;
+    // Перенос активности: счётчик, последняя причина и история переносов
+    // (дата/время задачи меняются только через «Перенести активность»).
+    const rc = Number(t.rescheduleCount);
+    t.rescheduleCount = Number.isFinite(rc) && rc > 0 ? Math.floor(rc) : 0;
+    if (typeof t.lastRescheduleReason !== 'string') t.lastRescheduleReason = '';
+    if (!Array.isArray(t.rescheduleHistory)) t.rescheduleHistory = [];
   });
 
   // --- Заказы: номер спецификации (СП) для сопоставления с готовностью ---
@@ -678,14 +684,17 @@ function normalizeDb(db) {
     if (!m || typeof m !== 'object') return;
     if (typeof m.cipher !== 'string') m.cipher = '';
     if (typeof m.coating !== 'string') m.coating = '';
-    if (MATRIX_STATUSES.indexOf(m.status) < 0) m.status = MATRIX_STATUS_DEFAULT;
+    if (m.source !== 'order' && m.source !== 'manual') m.source = 'manual';
+    // Заказанные матрицы по умолчанию «Заказана», ручные — «Поступила».
+    if (MATRIX_STATUSES.indexOf(m.status) < 0) {
+      m.status = m.source === 'order' ? 'Заказана' : MATRIX_STATUS_DEFAULT;
+    }
     if (!('clientId' in m)) m.clientId = null;
     if (typeof m.clientName !== 'string') m.clientName = '';
     if (!('date' in m)) m.date = null;
     if (typeof m.comment !== 'string') m.comment = '';
     if (typeof m.weightPerM !== 'string') m.weightPerM = '';
     if (typeof m.press !== 'string') m.press = '';
-    if (m.source !== 'order' && m.source !== 'manual') m.source = 'manual';
     if (!('createdAt' in m)) m.createdAt = null;
     if (!('createdBy' in m)) m.createdBy = null;
   });

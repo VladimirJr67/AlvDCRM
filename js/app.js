@@ -416,29 +416,40 @@ function injectModals() {
             </div>
             <div class="form-row">
               <div class="form-group">
-                <label>Отметки</label>
-                <div class="tag-picker">
-                  <label class="tag-option"><input type="checkbox" id="historyTagSelf"> <span>Для себя</span></label>
-                  <label class="tag-option"><input type="checkbox" id="historyTagReport"> <span>Для отчёта</span></label>
-                </div>
+                <label>Отметка *</label>
+                <select id="historyTagType" onchange="onHistoryTagChange()" required>
+                  <option value="">— выберите отметку —</option>
+                  <option value="forSelf">Для себя</option>
+                  <option value="forReport">Для отчёта</option>
+                </select>
+                <div class="field-hint">Без выбора отметки комментарий не сохранится.</div>
               </div>
             </div>
             <div id="matrixFormSection" style="display:none;">
               <div class="form-section" style="margin-top:10px;padding-top:12px;border-top:1px dashed #e5e7eb;">
                 <h3>Заказ матриц</h3>
-                <div class="form-row">
-                  <div class="form-group">
-                    <label>Шифры *</label>
-                    <textarea id="matrixCiphers" rows="3" placeholder="По одному в строке или через запятую: ШФ-101, ШФ-102"></textarea>
-                  </div>
-                  <div class="form-group">
-                    <label>Покрытие</label>
-                    <select id="matrixCoating"></select>
+                <div id="matrixRowsList">
+                  <div class="matrix-row">
+                    <div class="form-row">
+                      <div class="form-group"><label>Шифр *</label>
+                        <input type="text" id="matrixCipher" placeholder="Например, ШФ-101"></div>
+                      <div class="form-group"><label>Вес матрицы</label>
+                        <input type="text" id="matrixWeight" placeholder="кг"></div>
+                    </div>
+                    <div class="form-row">
+                      <div class="form-group"><label>На какой пресс</label>
+                        <select id="matrixPress"></select></div>
+                      <div class="form-group"><label>Покрытие</label>
+                        <select id="matrixCoating"></select></div>
+                    </div>
                   </div>
                 </div>
+                <div style="margin-top:10px;">
+                  <button type="button" class="btn btn-sm btn-secondary" onclick="addMatrixRow()">+ Добавить еще матрицу</button>
+                </div>
                 <div class="field-hint">
-                  Каждый шифр попадёт в «Заказы матриц» со статусом «Поступила», задача встанет
-                  в столбец, привязанный к активности, а комментарий уйдёт в отчёт.
+                  Каждая матрица попадёт в «Учёт матриц» с привязкой к клиенту и в «Заказы/Матрицы»
+                  со статусом «Заказана», а задача встанет в столбец, привязанный к активности.
                 </div>
               </div>
             </div>
@@ -518,7 +529,11 @@ function injectModals() {
             <div class="form-row"><div class="form-group"><label>Название *</label><input type="text" id="taskTitle" required></div></div>
             <div class="form-row"><div class="form-group"><label>Описание</label><textarea id="taskDescription" rows="3"></textarea></div></div>
             <div class="form-row">
-              <div class="form-group"><label>Дедлайн</label><input type="datetime-local" id="taskDeadline"></div>
+              <div class="form-group">
+                <label>Дедлайн</label>
+                <input type="datetime-local" id="taskDeadline">
+                <div class="field-hint" id="taskDeadlineHint" style="display:none;">Меняется через «Перенести активность»</div>
+              </div>
               <div class="form-group"><label>Приоритет</label><select id="taskPriority"></select></div>
             </div>
             <div class="form-row">
@@ -591,8 +606,6 @@ function injectModals() {
             <div id="taskClientLink" style="display:none;font-size:13px;color:#6b7280;padding:8px;background:#f9fafb;border-radius:6px;margin-top:8px;"></div>
           </div>
           <div class="modal-actions">
-            <button type="button" class="btn btn-secondary" id="taskCloseBtn" style="display:none;margin-right:auto;"
-                    onclick="openTaskCloseConfirm(parseInt(document.getElementById('taskId').value, 10))">Закрыть задачу</button>
             <button type="button" class="btn btn-secondary" onclick="closeModal('taskModal')">Отмена</button>
             <button type="submit" class="btn">Сохранить</button>
           </div>
@@ -610,13 +623,50 @@ function injectModals() {
         <div class="form-section">
           <div id="taskCloseConfirmTitle" style="font-size:13px;color:#1f2937;margin-bottom:12px;"></div>
           <div class="form-group">
-            <label>Комментарий (необязательно)</label>
-            <textarea id="taskCloseConfirmComment" rows="3" placeholder="Что сделано"></textarea>
+            <label>Комментарий *</label>
+            <textarea id="taskCloseConfirmComment" rows="3" placeholder="Что сделано" oninput="onTaskCloseConfirmInput()"></textarea>
+            <div class="field-hint">Без комментария задачу закрыть нельзя.</div>
           </div>
         </div>
         <div class="modal-actions">
           <button type="button" class="btn btn-secondary" onclick="closeTaskConfirmModal()">Отмена</button>
-          <button type="button" class="btn" onclick="confirmTaskClose()">Закрыть задачу</button>
+          <button type="button" class="btn" id="taskCloseConfirmSubmit" onclick="confirmTaskClose()" disabled>Закрыть задачу</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="taskInfoModal" onclick="if(event.target===this)closeModal('taskInfoModal')">
+      <div class="modal" style="width:720px;max-width:95vw;">
+        <div class="modal-head">
+          <h2 id="taskInfoTitle">Информация о задаче</h2>
+          <button type="button" class="modal-close-icon" onclick="closeModal('taskInfoModal')" title="Закрыть" aria-label="Закрыть">✕</button>
+        </div>
+        <div id="taskInfoBody" style="max-height:56vh;overflow-y:auto;"></div>
+        <div class="modal-actions" id="taskInfoActions"></div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="taskRescheduleModal" onclick="if(event.target===this)closeTaskReschedule()">
+      <div class="modal" style="width:520px;max-width:94vw;">
+        <div class="modal-head">
+          <h2 id="taskRescheduleTitle">Перенести активность</h2>
+          <button type="button" class="modal-close-icon" onclick="closeTaskReschedule()" title="Отмена" aria-label="Отмена">✕</button>
+        </div>
+        <input type="hidden" id="taskRescheduleId">
+        <div class="form-section">
+          <div class="form-group">
+            <label>Новая дата и время *</label>
+            <input type="datetime-local" id="taskRescheduleDate">
+          </div>
+          <div class="form-group">
+            <label>Причина переноса *</label>
+            <textarea id="taskRescheduleReason" rows="3" placeholder="Почему переносим активность" oninput="onTaskRescheduleReasonInput()"></textarea>
+            <div class="field-hint">Без причины перенос невозможен. Счётчик переносов увеличится на 1.</div>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="closeTaskReschedule()">Отмена</button>
+          <button type="button" class="btn" id="taskRescheduleSubmit" onclick="submitTaskReschedule()" disabled>Перенести</button>
         </div>
       </div>
     </div>

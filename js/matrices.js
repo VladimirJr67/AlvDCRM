@@ -16,8 +16,8 @@
 // Покрытия матриц — три прайсовых покрытия (те же, что в минимальных ценах).
 const MATRIX_COVERAGES = ['Сырой', 'Анод', 'Покраска'];
 
-// Статусы заказа матриц.
-const MATRIX_STATUSES = ['Поступила', 'Отписана'];
+// Статусы матриц: заказанная -> поступила -> отписана.
+const MATRIX_STATUSES = ['Заказана', 'Поступила', 'Отписана'];
 
 const MATRICES_KEY = 'alvid_crm_matrices';
 
@@ -47,7 +47,10 @@ function saveMatrices() {
 // (source: 'manual').
 function addMatrix(data) {
   const maxId = matrices.reduce((m, x) => Math.max(m, x.id || 0), 0);
-  const status = MATRIX_STATUSES.indexOf(data.status) > -1 ? data.status : MATRIX_STATUSES[0];
+  const source = data.source === 'order' ? 'order' : 'manual';
+  // Статус по умолчанию: заказ — «Заказана», ручная запись справочника — «Поступила».
+  const defaultStatus = source === 'order' ? 'Заказана' : 'Поступила';
+  const status = MATRIX_STATUSES.indexOf(data.status) > -1 ? data.status : defaultStatus;
   const matrix = {
     id: maxId + 1,
     cipher: (data.cipher || '').trim(),
@@ -59,7 +62,7 @@ function addMatrix(data) {
     comment: (data.comment || '').trim(),
     weightPerM: (data.weightPerM || '').trim(),
     press: (data.press || '').trim(),
-    source: data.source === 'order' ? 'order' : 'manual',
+    source: source,
     createdAt: new Date().toISOString(),
     createdBy: data.createdBy !== undefined ? data.createdBy : (currentUser ? currentUser.id : null)
   };

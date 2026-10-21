@@ -335,6 +335,13 @@ function selectClient(id) {
   renderClientContacts(id);
 }
 
+// Переход к клиенту из таблиц заказов/матриц: открываем раздел «Клиенты» и
+// выделяем нужную строку.
+function goToClient(id) {
+  if (typeof goToSection === 'function') goToSection('clients');
+  setTimeout(() => selectClient(id), 50);
+}
+
 function renderClientContacts(id) {
   const panel = document.getElementById('contactPanel');
   if (!panel) return;
@@ -494,7 +501,12 @@ const COMMENT_TAG_ALIASES = {
 function normalizeCommentTag(key) {
   const raw = String(key == null ? '' : key).trim();
   if (!raw) return '';
-  return COMMENT_TAG_ALIASES[raw.toLowerCase()] || raw;
+  const alias = COMMENT_TAG_ALIASES[raw.toLowerCase()];
+  if (alias) return alias;
+  // В форме отметка выбирается подписью значения — приводим и её.
+  const byLabel = COMMENT_TAGS.find(t => t.label.toLowerCase() === raw.toLowerCase());
+  if (byLabel) return byLabel.key;
+  return raw;
 }
 
 function commentTagsList(tags) {
@@ -566,7 +578,7 @@ function renderHistoryBlock(client, editable) {
         <h3>История взаимодействий (${history.length}${person ? ' из ' + all.length : ''})</h3>
         <div class="history-actions">
           <button class="btn btn-sm btn-secondary" onclick="openAllHistoryModal(${client.id})">Вся история взаимодействий</button>
-          ${editable ? `<button class="btn btn-sm" onclick="openHistoryModal(${client.id})">+ Добавить</button>` : ''}
+          ${editable ? `<button class="btn btn-sm" onclick="openHistoryModalForContact(${client.id})">+ Добавить</button>` : ''}
         </div>
       </div>
       ${filterHint}
@@ -771,7 +783,7 @@ function renderClientCard(id) {
               <option value="all" ${historyFilter === 'all' ? 'selected' : ''}>Все контакты</option>
               ${historyContacts(client).map(ct => `<option value="${escapeHtml(ct)}" ${historyFilter === ct ? 'selected' : ''}>${escapeHtml(ct)}</option>`).join('')}
             </select>
-            ${canWrite ? `<button class="btn btn-sm" onclick="openHistoryModal(${client.id})">+ Добавить</button>` : ''}
+            ${canWrite ? `<button class="btn btn-sm" onclick="openHistoryModalForContact(${client.id})">+ Добавить</button>` : ''}
           </div>
         </div>
         <div class="cc-block-body flush">
@@ -1094,27 +1106,39 @@ function deleteContact(clientId, idx) {
   renderClientContacts(clientId);
 }
 
-// Теги, отмеченные в форме комментария.
-function readCommentTags(selfId, reportId) {
-  const tags = [];
-  const selfEl = document.getElementById(selfId);
-  const reportEl = document.getElementById(reportId);
-  if (selfEl && selfEl.checked) tags.push('forSelf');
-  if (reportEl && reportEl.checked) tags.push('forReport');
-  return tags;
+// Отметка комментария: выпадающий список «Для себя» / «Для отчёта».
+// Значение обязательно — без него комментарий не сохраняется.
+function readCommentTags() {
+  const el = document.getElementById('historyTagType');
+  const value = el ? String(el.value || '').trim() : '';
+  if (!value) return [];
+  // В историю пишем канонические коды (forSelf / forReport), а не подписи.
+  const list = commentTagsList([value]);
+  return list.length ? list : [];
 }
 
-function setCommentTagInputs(selfId, reportId, tags) {
+function setCommentTagInputs(tags) {
   const list = commentTagsList(tags);
-  const selfEl = document.getElementById(selfId);
-  const reportEl = document.getElementById(reportId);
-  if (selfEl) selfEl.checked = list.indexOf('forSelf') > -1;
-  if (reportEl) reportEl.checked = list.indexOf('forReport') > -1;
+  const el = document.getElementById('historyTagType');
+  if (el) el.value = list.length ? list[0] : '';
+  onHistoryTagChange();
+}
+
+// Кнопка «Добавить/Сохранить» в форме комментария заблокирована, пока не
+// выбрана отметка.
+function onHistoryTagChange() {
+  const tagEl = document.getElementById('historyTagType');
+  const submitBtn = document.querySelector('#historyModal button[type="submit"]');
+  if (!submitBtn || !tagEl) return;
+  submitBtn.disabled = !String(tagEl.value || '').trim();
 }
 
 // Открытие формы комментария. editIdx != null — правим существующую запись
 // (доступно автору и администратору).
-function openHistoryModal(clientId, editIdx) {
+// Открытие формы комментария. editIdx != null — правим существующую запись
+// (доступно автору и администратору). presetContact — контактное лицо,
+// которое нужно сразу подставить (после клика по контакту в карточке).
+function openHistoryModal(clientId, editIdx, presetContact) {
   document.getElementById('historyClientId').value = clientId;
   const client = clients.find(c => c.id === clientId);
   const select = document.getElementById('historyContactPerson');
@@ -1162,7 +1186,7 @@ function openHistoryModal(clientId, editIdx) {
       if (commentEl) commentEl.value = entry.comment || '';
       const personSel = document.getElementById('historyContactPerson');
       if (personSel) personSel.value = entry.contactPerson || '';
-      setCommentTagInputs('historyTagSelf', 'historyTagReport', entry.tags);
+      setCommentTagInputs(entry.tags);
       // Следующая активность и коллега по встрече — из сохранённой записи.
       if (nextActivityEl) nextActivityEl.value = entry.nextActivityAt || '';
       if (colleagueSel && entry.colleagueId) colleagueSel.value = String(entry.colleagueId);
@@ -1179,15 +1203,32 @@ function openHistoryModal(clientId, editIdx) {
   } else {
     if (editIdxEl) editIdxEl.value = '';
     if (commentEl) commentEl.value = '';
-    setCommentTagInputs('historyTagSelf', 'historyTagReport', []);
+    setCommentTagInputs([]);
     if (title) title.textContent = 'Добавить взаимодействие';
     if (submitBtn) submitBtn.textContent = 'Добавить';
+    // Контакт, по которому кликнули в карточке, сразу подставлен в форму
+    // (его можно сменить на другого).
+    if (presetContact) {
+      const options = Array.from(select.options || []);
+      const known = options.length ? options.some(o => o.value === presetContact) : true;
+      if (known) select.value = presetContact;
+    }
   }
 
   onHistoryTypeChange();
+  onHistoryTagChange();
   // Менеджер — всегда тот, кто оставил комментарий (текущий пользователь),
   // поэтому поле в модалке не показываем и проставляем автоматически при сохранении.
   document.getElementById('historyModal').classList.add('active');
+}
+
+// «+ Добавить» из истории взаимодействий: если в карточке выбран контакт,
+// форма открывается с ним (можно сменить на другого).
+function openHistoryModalForContact(clientId) {
+  const client = clients.find(c => c.id === clientId);
+  let name = client ? selectedContactName(client) : null;
+  if (!name && historyFilter && historyFilter !== 'all') name = historyFilter;
+  openHistoryModal(clientId, null, name || '');
 }
 
 /* ===== Форма заказа в комментарии =====
@@ -1246,14 +1287,80 @@ function formatActivityMoment(value) {
   });
 }
 
-// Шифры из окна «Заказ матриц»: по одному в строке или через запятую.
-function readMatrixCiphers() {
-  const el = document.getElementById('matrixCiphers');
-  if (!el) return [];
-  return String(el.value || '')
-    .split(/[\n,;]+/)
-    .map(s => s.trim())
-    .filter(Boolean);
+// Матрицы из окна «Заказ матриц»: строки «Шифр / Вес матрицы / На какой пресс /
+// Покрытие». Первая строка — основные поля формы, остальные добавляются
+// кнопкой «Добавить еще матрицу» (.matrix-extra-row).
+function matrixPressOptionsHtml(selected) {
+  const list = (typeof CLIENT_MATRIX_PRESSES !== 'undefined') ? CLIENT_MATRIX_PRESSES : ['5', '7', '8', '7/8'];
+  return list.map(v => `<option value="${escapeHtml(v)}"${v === selected ? ' selected' : ''}>${escapeHtml(v)}</option>`).join('');
+}
+
+function matrixCoatingOptionsHtml(selected) {
+  const list = (typeof ORDER_CONDITIONS !== 'undefined') ? ORDER_CONDITIONS : [];
+  return '<option value="">—</option>' + list.map(v =>
+    `<option value="${escapeHtml(v)}"${v === selected ? ' selected' : ''}>${escapeHtml(v)}</option>`).join('');
+}
+
+function readMatrixRows() {
+  const rows = [];
+  const val = id => {
+    const el = document.getElementById(id);
+    return el ? String(el.value == null ? '' : el.value).trim() : '';
+  };
+  const firstCipher = val('matrixCipher');
+  if (firstCipher) {
+    rows.push({
+      cipher: firstCipher,
+      weight: val('matrixWeight'),
+      press: val('matrixPress'),
+      coating: val('matrixCoating')
+    });
+  }
+  const extra = document.querySelectorAll('.matrix-extra-row');
+  Array.from(extra || []).forEach(row => {
+    const pick = sel => {
+      const el = row.querySelector(sel);
+      return el ? String(el.value == null ? '' : el.value).trim() : '';
+    };
+    const cipher = pick('.matrix-cipher');
+    if (!cipher) return;
+    rows.push({
+      cipher: cipher,
+      weight: pick('.matrix-weight'),
+      press: pick('.matrix-press'),
+      coating: pick('.matrix-coating')
+    });
+  });
+  return rows;
+}
+
+// Добавить ещё одну строку матрицы (мультизаказ).
+function addMatrixRow() {
+  const list = document.getElementById('matrixRowsList');
+  if (!list) return;
+  const row = document.createElement('div');
+  row.className = 'matrix-extra-row';
+  row.style.cssText = 'border-top:1px dashed #e5e7eb;margin-top:8px;padding-top:8px;';
+  row.innerHTML = `
+    <div class="form-row">
+      <div class="form-group"><label>Шифр *</label>
+        <input type="text" class="matrix-cipher" placeholder="Например, ШФ-102"></div>
+      <div class="form-group"><label>Вес матрицы</label>
+        <input type="text" class="matrix-weight" placeholder="кг"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>На какой пресс</label>
+        <select class="matrix-press">${matrixPressOptionsHtml('')}</select></div>
+      <div class="form-group"><label>Покрытие</label>
+        <select class="matrix-coating">${matrixCoatingOptionsHtml('')}</select></div>
+    </div>
+    <div style="text-align:right;"><button type="button" class="btn-icon-btn" onclick="removeMatrixRow(this)">Убрать</button></div>`;
+  list.appendChild(row);
+}
+
+function removeMatrixRow(button) {
+  const row = button && button.closest ? button.closest('.matrix-extra-row') : null;
+  if (row && row.parentNode) row.parentNode.removeChild(row);
 }
 
 // Служебные поля записи активности. closedAt заполняется, когда следующий шаг
@@ -1372,10 +1479,19 @@ function resetOrderForm() {
   if (spec) spec.value = '';
   renderOrderConditions('');
   // Поля заказа матриц сбрасываются вместе с заказом.
-  const ciphers = document.getElementById('matrixCiphers');
-  if (ciphers) ciphers.value = '';
+  const cipher = document.getElementById('matrixCipher');
+  if (cipher) cipher.value = '';
+  const weight = document.getElementById('matrixWeight');
+  if (weight) weight.value = '';
+  const press = document.getElementById('matrixPress');
+  if (press) press.innerHTML = matrixPressOptionsHtml('');
   const coating = document.getElementById('matrixCoating');
-  if (coating) coating.value = '';
+  if (coating) coating.innerHTML = matrixCoatingOptionsHtml('');
+  // Дополнительные строки матриц убираем.
+  const rows = document.getElementById('matrixRowsList');
+  if (rows) {
+    Array.from(rows.querySelectorAll('.matrix-extra-row')).forEach(r => r.remove());
+  }
   // Дополнительные спецификации заказа убираем.
   clearOrderSpecBlocks();
 }
@@ -1408,14 +1524,12 @@ function onHistoryTypeChange() {
   }
 }
 
-// Покрытия для заказа матриц — тот же справочник, что у заказов.
+// Поля строки матрицы: пресс (5/7/8/7/8) и покрытие (как у заказов).
 function renderMatrixCoatings() {
-  const select = document.getElementById('matrixCoating');
-  if (!select) return;
-  const current = select.value;
-  select.innerHTML = '<option value="">—</option>' +
-    ORDER_CONDITIONS.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('');
-  select.value = current;
+  const coating = document.getElementById('matrixCoating');
+  if (coating) coating.innerHTML = matrixCoatingOptionsHtml(coating.value);
+  const press = document.getElementById('matrixPress');
+  if (press) press.innerHTML = matrixPressOptionsHtml(press.value);
 }
 
 // Список коллег для встречи: менеджеры и руководители, кроме себя.
@@ -1706,15 +1820,14 @@ function saveHistory(e) {
   const nextCheck = checkNextActivity(type, nextEl ? nextEl.value : '');
   if (!nextCheck.ok) { alert(nextCheck.error); return; }
 
-  // 2. «Заказ матриц»: шифры, покрытие и комментарий.
+  // 2. «Заказ матриц»: строки матриц (шифр, вес, пресс, покрытие) и комментарий.
   if (isMatrixType(type)) {
-    const ciphers = readMatrixCiphers();
-    if (!ciphers.length) { alert('Укажите хотя бы один шифр матрицы'); return; }
-    const coatingEl = document.getElementById('matrixCoating');
-    const coating = coatingEl ? coatingEl.value.trim() : '';
-    matrixData = { ciphers: ciphers, coating: coating };
+    const rows = readMatrixRows();
+    if (!rows.length) { alert('Укажите хотя бы один шифр матрицы'); return; }
+    const ciphers = rows.map(r => r.cipher);
+    matrixData = { rows: rows, ciphers: ciphers, coating: rows[0].coating || '' };
     if (!comment) {
-      comment = 'Заказ матриц: ' + ciphers.join(', ') + (coating ? ' (' + coating + ')' : '');
+      comment = 'Заказ матриц: ' + ciphers.join(', ') + (matrixData.coating ? ' (' + matrixData.coating + ')' : '');
     }
   }
 
@@ -1732,9 +1845,12 @@ function saveHistory(e) {
 
   if (!comment) { alert('Заполните комментарий'); return; }
 
-  const tags = readCommentTags('historyTagSelf', 'historyTagReport');
-  // Комментарий к заказу матриц уходит в отчёт — отметка ставится сама.
-  if (matrixData && tags.indexOf('forReport') === -1) tags.push('forReport');
+  // Отметка обязательна: без «Для себя» / «Для отчёта» комментарий не сохраняется.
+  const tags = readCommentTags();
+  if (!tags.length) {
+    alert('Выберите отметку комментария: «Для себя» или «Для отчёта».');
+    return;
+  }
 
   const colleagueEl = document.getElementById('historyColleague');
   const colleagueId = (isMeetingType(type) && colleagueEl && colleagueEl.value)
@@ -1775,7 +1891,7 @@ function saveHistory(e) {
       saveTasks();
     }
 
-    if (matrixData) saveMatrixOrders(client, matrixData.ciphers, matrixData.coating, comment);
+    if (matrixData) saveMatrixOrders(client, matrixData, comment);
 
     saveClients(clients);
     closeModal('historyModal');
@@ -1798,9 +1914,9 @@ function saveHistory(e) {
   };
   applyActivityFields(entry, type, nextCheck.nextAt, boundColumnId);
 
-  // Заказ матриц: по записи на каждый шифр — они и есть «матрицы».
+  // Заказ матриц: по записи на каждую строку — они и есть «матрицы».
   if (matrixData) {
-    saveMatrixOrders(client, matrixData.ciphers, matrixData.coating, comment);
+    saveMatrixOrders(client, matrixData, comment);
   }
 
   client.history.push(entry);
@@ -1848,18 +1964,31 @@ function saveHistory(e) {
 // Дополнительная строка описания задачи для заказа матриц.
 function matrixExtraText(matrixData) {
   if (!matrixData) return '';
-  const parts = ['Шифры: ' + matrixData.ciphers.join(', ')];
-  if (matrixData.coating) parts.push('Покрытие: ' + matrixData.coating);
+  const rows = matrixData.rows || [];
+  const ciphers = matrixData.ciphers || rows.map(r => r.cipher);
+  const parts = ['Шифры: ' + ciphers.join(', ')];
+  rows.forEach((r, i) => {
+    const bits = [];
+    if (r.weight) bits.push('вес ' + r.weight);
+    if (r.press) bits.push('пресс ' + r.press);
+    if (r.coating) bits.push('покрытие ' + r.coating);
+    if (bits.length) parts.push('Матрица ' + (i + 1) + ' (' + r.cipher + '): ' + bits.join(', '));
+  });
   return parts.join('\n');
 }
 
-// Записи заказов матриц: по одной на шифр, статус — «Поступила», источник — «Заказ матриц».
-function saveMatrixOrders(client, ciphers, coating, comment) {
-  ciphers.forEach(cipher => {
+// Записи заказов матриц: по одной на строку, статус по умолчанию «Заказана».
+// Эти же записи сразу видны в разделе «Учёт матриц» (та же коллекция) —
+// с привязкой к клиенту, весом и прессом.
+function saveMatrixOrders(client, matrixData, comment) {
+  const rows = matrixData && matrixData.rows ? matrixData.rows : [];
+  rows.forEach(r => {
     addMatrix({
-      cipher: cipher,
-      coating: coating || '',
-      status: MATRIX_STATUSES[0],
+      cipher: r.cipher,
+      coating: r.coating || '',
+      weightPerM: r.weight || '',
+      press: r.press || '',
+      status: 'Заказана',
       clientId: client ? client.id : null,
       clientName: client ? client.orgName : '',
       comment: comment || '',

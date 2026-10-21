@@ -39,7 +39,11 @@ function el(id) {
       appendChild() {},
       focus() {},
       addEventListener() {},
-      reset() {}
+      reset() {},
+      querySelector: () => null,
+      querySelectorAll: () => [],
+      closest: () => null,
+      remove() {}
     };
   }
   return elements[id];
@@ -50,6 +54,14 @@ function resetElements(ids) {
     e.value = '';
     e.checked = false;
   });
+}
+
+// Дополнительные строки матриц (кнопка «Добавить еще матрицу»).
+let matrixExtraRows = [];
+function matrixRow(values) {
+  return {
+    querySelector: sel => ({ value: values[sel] === undefined ? '' : values[sel] })
+  };
 }
 
 const alerts = [];
@@ -75,7 +87,7 @@ const sandbox = {
     querySelector: () => null,
     addEventListener: () => {},
     createElement: () => el('__created'),
-    querySelectorAll: () => []
+    querySelectorAll: sel => (sel === '.matrix-extra-row' ? matrixExtraRows : [])
   },
   window: { addEventListener: () => {}, location: { protocol: 'http:' } },
   navigator: { sendBeacon: () => true },
@@ -114,20 +126,31 @@ run(`
 // Заполнить поля модалки комментария для одного сценария.
 function fillCommentModal(opts) {
   resetElements(['historyType', 'historyComment', 'historyNextActivity', 'historyEditIdx',
-    'historyContactPerson', 'historyTagSelf', 'historyTagReport', 'historyColleague',
-    'matrixCiphers', 'matrixCoating', 'orderCondition', 'orderKg', 'orderCost']);
+    'historyContactPerson', 'historyTagType', 'historyColleague',
+    'matrixCipher', 'matrixWeight', 'matrixPress', 'matrixCoating',
+    'orderCondition', 'orderKg', 'orderCost']);
+  matrixExtraRows = [];
   el('historyClientId').value = '1';
   el('historyType').value = opts.type;
   el('historyComment').value = opts.comment || '';
   el('historyNextActivity').value = opts.next || '';
   el('historyEditIdx').value = '';
   if (opts.colleague) el('historyColleague').value = String(opts.colleague);
-  if (opts.ciphers) el('matrixCiphers').value = opts.ciphers;
+  if (opts.cipher) el('matrixCipher').value = opts.cipher;
+  if (opts.weight) el('matrixWeight').value = String(opts.weight);
+  if (opts.press) el('matrixPress').value = opts.press;
   if (opts.coating) el('matrixCoating').value = opts.coating;
+  if (opts.extraMatrices) {
+    matrixExtraRows = opts.extraMatrices.map(m => matrixRow({
+      '.matrix-cipher': m.cipher, '.matrix-weight': m.weight == null ? '' : String(m.weight),
+      '.matrix-press': m.press || '', '.matrix-coating': m.coating || ''
+    }));
+  }
   if (opts.kg) el('orderKg').value = String(opts.kg);
   if (opts.cost) el('orderCost').value = String(opts.cost);
   if (opts.condition) el('orderCondition').value = opts.condition;
-  if (opts.forReport) el('historyTagReport').checked = true;
+  // Отметка комментария обязательна: в форме это выпадающий список.
+  el('historyTagType').value = opts.forReport ? 'Для отчёта' : 'Для себя';
 }
 
 function saveComment(opts) {
@@ -204,15 +227,24 @@ const taskList = () => run('tasks');
   /* ---- 6. Заказ матриц → matrices[] + задача + комментарий в отчёт ---- */
   saveComment({
     type: 'Заказ матриц', comment: 'Нужны матрицы под анод',
-    next: '2026-10-10T11:00', ciphers: 'ШФ-101, ШФ-102', coating: 'Анод'
+    next: '2026-10-10T11:00', cipher: 'ШФ-101', weight: 45, press: '7', coating: 'Анод',
+    extraMatrices: [{ cipher: 'ШФ-102', weight: 30, press: '8', coating: 'Анод' }],
+    forReport: true
   });
   const matrixRecords = run('matrices');
   const matrixColumn = run("taskColumnByName('Заказы/Матрицы').id");
   const matrixTask = taskList().find(t => t.status === matrixColumn);
-  check('матрицы: две записи по шифрам', matrixRecords.length === 2 &&
+  check('матрицы: две записи по строкам формы', matrixRecords.length === 2 &&
     matrixRecords[0].cipher === 'ШФ-101' && matrixRecords[1].cipher === 'ШФ-102',
     matrixRecords.map(m => m.cipher).join(', '));
-  check('матрицы: статус «Поступила» и покрытие', matrixRecords.every(m => m.status === 'Поступила' && m.coating === 'Анод'));
+  check('матрицы: новая матрица заказана, а не поступила',
+    matrixRecords.every(m => m.status === 'Заказана' && m.coating === 'Анод'),
+    JSON.stringify(matrixRecords.map(m => m.status)));
+  check('матрицы: вес и пресс сохранены',
+    matrixRecords[0].weightPerM === '45' && matrixRecords[0].press === '7' &&
+    matrixRecords[1].weightPerM === '30' && matrixRecords[1].press === '8',
+    JSON.stringify(matrixRecords.map(m => (m.weightPerM || '') + '/' + (m.press || ''))));
+  check('матрицы: пометка источника — заказ', matrixRecords.every(m => m.source === 'order'));
   check('матрицы: привязаны к клиенту и автору', matrixRecords.every(m => m.clientId === 1 && m.createdBy === 2));
   check('матрицы: задача в «Заказы/Матрицы»', !!matrixTask, matrixTask ? matrixTask.title : 'нет');
   check('матрицы: шифры в заголовке задачи', !!matrixTask && /ШФ-101/.test(matrixTask.title), matrixTask && matrixTask.title);
