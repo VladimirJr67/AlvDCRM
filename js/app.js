@@ -616,12 +616,13 @@ function injectModals() {
     <div class="modal-overlay" id="taskCloseConfirmModal" onclick="if(event.target===this)closeTaskConfirmModal()">
       <div class="modal" style="width:480px;max-width:94vw;">
         <div class="modal-head">
-          <h2>Закрыть задачу?</h2>
+          <h2 id="taskCloseConfirmHeading">Закрыть задачу?</h2>
           <button type="button" class="modal-close-icon" onclick="closeTaskConfirmModal()" title="Отмена" aria-label="Отмена">✕</button>
         </div>
         <input type="hidden" id="taskCloseConfirmId">
         <div class="form-section">
-          <div id="taskCloseConfirmTitle" style="font-size:13px;color:#1f2937;margin-bottom:12px;"></div>
+          <div id="taskCloseConfirmTitle" style="font-size:13px;color:#1f2937;margin-bottom:8px;"></div>
+          <div id="taskCloseConfirmNote" class="field-hint" style="margin-bottom:12px;"></div>
           <div class="form-group">
             <label>Комментарий *</label>
             <textarea id="taskCloseConfirmComment" rows="3" placeholder="Что сделано" oninput="onTaskCloseConfirmInput()"></textarea>
@@ -635,11 +636,43 @@ function injectModals() {
       </div>
     </div>
 
+    <div class="modal-overlay" id="taskNextActivityModal" onclick="if(event.target===this)closeTaskNextActivity()">
+      <div class="modal" style="width:520px;max-width:94vw;">
+        <div class="modal-head">
+          <h2 id="taskNextActivityTitle">Следующая активность</h2>
+          <button type="button" class="modal-close-icon" onclick="closeTaskNextActivity()" title="Отмена" aria-label="Отмена">✕</button>
+        </div>
+        <input type="hidden" id="taskNextActivityTaskId">
+        <div class="form-section">
+          <div class="form-group">
+            <label>Тип задачи *</label>
+            <select id="taskNextActivityType" onchange="onTaskNextActivityInput()"></select>
+          </div>
+          <div class="form-group">
+            <label>Следующая дата и время *</label>
+            <input type="datetime-local" id="taskNextActivityDate" onchange="onTaskNextActivityInput()">
+          </div>
+          <div class="form-group">
+            <label>Комментарий *</label>
+            <textarea id="taskNextActivityComment" rows="3" placeholder="Что сделано и что дальше"
+                      oninput="onTaskNextActivityInput()"></textarea>
+            <div class="field-hint">
+              Текущая задача закроется, следующая встанет в столбец выбранного типа,
+              а комментарий попадёт в отчёт по комментариям.
+            </div>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="closeTaskNextActivity()">Отмена</button>
+          <button type="button" class="btn" id="taskNextActivitySubmit" onclick="submitTaskNextActivity()" disabled>Создать и закрыть</button>
+        </div>
+      </div>
+    </div>
+
     <div class="modal-overlay" id="taskInfoModal" onclick="if(event.target===this)closeModal('taskInfoModal')">
       <div class="modal" style="width:720px;max-width:95vw;">
         <div class="modal-head">
           <h2 id="taskInfoTitle">Информация о задаче</h2>
-          <button type="button" class="modal-close-icon" onclick="closeModal('taskInfoModal')" title="Закрыть" aria-label="Закрыть">✕</button>
         </div>
         <div id="taskInfoBody" style="max-height:56vh;overflow-y:auto;"></div>
         <div class="modal-actions" id="taskInfoActions"></div>
@@ -1411,6 +1444,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     await enterApp();
     startSessionKeepAlive();
   } else if (hadLocalSession) {
+    // Сессию сервер не подтвердил — возвращаем форму входа (снимаем CSS-метку).
+    document.documentElement.className = String(document.documentElement.className || '')
+      .replace(/\bhas-session\b/g, '').trim();
     document.getElementById('loginScreen').style.display = 'flex';
     document.getElementById('app').style.display = 'none';
   }

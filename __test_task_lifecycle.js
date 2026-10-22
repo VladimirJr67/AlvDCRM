@@ -255,7 +255,7 @@ check('клик по карточке задачи открывает инфор
 run('openTaskInfo(1)');
 const infoHtml = el('taskInfoBody').innerHTML;
 check('окно информации без полей ввода', !/<input|<select|<textarea/.test(infoHtml));
-check('информация показывает счётчик переносов', /Переносов/.test(infoHtml));
+check('информация показывает срок задачи', /Срок:/.test(infoHtml));
 const actionsHtml = el('taskInfoActions').innerHTML;
 check('внизу окна — три кнопки',
   /Редактировать/.test(actionsHtml) && /Закрыть задачу/.test(actionsHtml) && /Перенести активность/.test(actionsHtml));
@@ -334,8 +334,8 @@ check('история переносов хранит обе причины',
   JSON.stringify(run('tasks[0].rescheduleHistory.map(r => r.reason)')) === '["Клиент в отпуске","Согласование задержалось"]',
   JSON.stringify(run('tasks[0].rescheduleHistory.map(r => r.reason)')));
 run('openTaskInfo(7)');
-check('в карточке видно число переносов', /Переносов/.test(el('taskInfoBody').innerHTML) &&
-  />2</.test(el('taskInfoBody').innerHTML));
+check('в карточке видно число переносов', /Переносов: 2/.test(el('taskInfoBody').innerHTML),
+  el('taskInfoBody').innerHTML.slice(0, 0));
 alerts.length = 0;
 run('tasks[0].status = "closed"; openTaskReschedule(7)');
 check('перенос недоступен для закрытой задачи', alerts.length === 1, alerts[0] || '');

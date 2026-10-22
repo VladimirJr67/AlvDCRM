@@ -32,10 +32,15 @@ function saveSessionFor(u) {
   localStorage.setItem(SESSION_KEY, JSON.stringify({
     userId: u.id, login: u.login, name: u.name, role: normalizeRole(u.role)
   }));
+  // Метка для CSS: с ней форма входа скрыта ещё до отрисовки (нет мигания).
+  document.documentElement.className += ' has-session';
 }
 
 function clearLocalSession() {
   localStorage.removeItem(SESSION_KEY);
+  document.documentElement.className = String(document.documentElement.className || '')
+    .replace(/\bhas-session\b/g, '')
+    .trim();
 }
 
 /* ===== Серверная сессия ===== */

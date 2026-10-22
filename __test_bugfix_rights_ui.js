@@ -167,10 +167,16 @@ check('после «Отправить в отслеживание» задач�
 
 /* ================= 7. F5 без мигания логина (П.6а) ================= */
 const appSrc = read('app.js');
+const htmlSrc = fs.readFileSync('index.html', 'utf8');
+const cssSrc = fs.readFileSync('css/style.css', 'utf8');
 check('форма входа скрывается до восстановления сессии',
   /hadLocalSession/.test(appSrc) && /loginScreen'\)\.style\.display = 'none'/.test(appSrc));
+check('метка сессии ставится до отрисовки страницы',
+  /has-session/.test(htmlSrc) && /alvid_crm_session/.test(htmlSrc));
+check('с меткой сессии форма входа не показывается',
+  /html\.has-session \.login-screen\s*\{\s*display:\s*none/.test(cssSrc));
 check('при отсутствии сессии форма возвращается',
-  /hadLocalSession\) \{\s*document\.getElementById\('loginScreen'\)\.style\.display = 'flex'/.test(appSrc));
+  /hadLocalSession\) \{[\s\S]{0,500}loginScreen'\)\.style\.display = 'flex'/.test(appSrc));
 check('черновики форм клиента/контакта включены',
   /saveClientDraft|saveContactDraft/.test(appSrc) &&
   /function saveClientDraft|function saveContactDraft/.test(read('clients.js')));

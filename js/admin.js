@@ -1009,6 +1009,43 @@ function taskRangeDate(t) {
   return t.statusUpdatedAt || t.createdAt || '';
 }
 
+// Задача попадает в период Анализа по СРОКУ (дедлайну) — так же, как на
+// доске «Задачи», поэтому цифры в Анализе и в дашборде сходятся. Задачи без
+// срока учитываем по дате смены статуса/создания (как было раньше).
+function taskInAnalysisPeriod(t) {
+  if (!t) return false;
+  if (!adminAnalysisDateFrom && !adminAnalysisDateTo) return true;
+  const dl = (typeof parseDeadline === 'function') ? parseDeadline(t.deadline) : null;
+  if (dl) {
+    const from = adminAnalysisDateFrom ? new Date(adminAnalysisDateFrom + 'T00:00:00') : null;
+    const to = adminAnalysisDateTo ? new Date(adminAnalysisDateTo + 'T23:59:59.999') : null;
+    if (from && dl < from) return false;
+    if (to && dl > to) return false;
+    return true;
+  }
+  return inAnalysisRange(taskRangeDate(t));
+}
+
+// Относится ли задача к менеджеру — тем же правилом, что и его дашборд
+// (владелец, исполнитель или соисполнитель).
+function taskMatchesManager(t, uid) {
+  if (uid == null) return true;
+  if (!t) return false;
+  if (t.ownerId === uid || t.assignedTo === uid) return true;
+  return Array.isArray(t.coAssignees) && t.coAssignees.indexOf(uid) > -1;
+}
+
+// ФИО менеджера по комментарию: в истории хранится логин (и иногда автор),
+// поэтому показываем имя из профиля, а логин — только если имени нет.
+function commentManagerName(entry) {
+  if (!entry) return '—';
+  let u = null;
+  if (entry.authorId != null) u = findUserById(entry.authorId);
+  if (!u && entry.manager && typeof findUserByLogin === 'function') u = findUserByLogin(entry.manager);
+  if (u) return u.name || u.login;
+  return entry.manager || '—';
+}
+
 function renderAdminAnalysis() {
   const main = document.getElementById('mainContent');
   if (!main) return;
@@ -1102,7 +1139,7 @@ function resetAdminManagerFilter() {
 function analysisManagerScoped(list) {
   if (adminManagerFilter === 'all') return list;
   const uid = parseInt(adminManagerFilter, 10);
-  return list.filter(t => taskManager(t).id === uid);
+  return list.filter(t => taskMatchesManager(t, uid));
 }
 
 function adminManagerFilterLabel() {
@@ -1111,10 +1148,10 @@ function adminManagerFilterLabel() {
   return u ? (u.name || u.login) : 'выбранный менеджер';
 }
 
-// Статистика по задачам (срез по менеджерам). При заданном периоде учитываются
-// задачи, перешедшие в текущий статус (или созданные) в этом периоде.
+// Статистика по задачам (срез по менеджерам). Период считается по сроку
+// задачи (дедлайну) — так цифры совпадают с дашбордом раздела «Задачи».
 function renderAdminStats() {
-  const all = tasks.filter(t => inAnalysisRange(taskRangeDate(t)));
+  const all = tasks.filter(taskInAnalysisPeriod);
   const scoped = analysisManagerScoped(all);
   const total = scoped.length;
   const overdue = scoped.filter(t => taskOverdue(t)).length;
@@ -1124,17 +1161,28 @@ function renderAdminStats() {
   const statusCols = globalTaskColumns();
 
   const managerRows = users.map(u => {
-    const managed = all.filter(t => taskManager(t).id === u.id);
+    const managed = all.filter(t => taskMatchesManager(t, u.id));
     return {
       user: u,
       counts: statusCols.map(sc => managed.filter(t => t.status === sc.id).length)
     };
   });
 
+  const periodLabel = (adminAnalysisDateFrom || adminAnalysisDateTo)
+    ? ' за период'
+    : '';
+
   return `
     <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:25px;">
-      <div class="stat-card"><div class="stat-value" style="color:#1a3a5c">${total}</div><div class="stat-label">Всего задач (${escapeHtml(adminManagerFilterLabel())})</div></div>
-      <div class="stat-card" onclick="openAdminOverdueTasks()" style="cursor:pointer;" title="Показать список просроченных задач"><div class="stat-value" style="color:#ef4444">${overdue}</div><div class="stat-label">Просрочено (${escapeHtml(adminManagerFilterLabel())}) — нажмите для списка</div></div>
+      <div class="stat-card" onclick="openAdminTaskList(${adminManagerFilter !== 'all' ? parseInt(adminManagerFilter, 10) : 'null'}, null, { period: true })"
+           style="cursor:pointer;" title="Показать список задач по выбранным фильтрам">
+        <div class="stat-value" style="color:#1a3a5c">${total}</div>
+        <div class="stat-label">Всего задач (${escapeHtml(adminManagerFilterLabel())})${periodLabel} — нажмите для списка</div>
+      </div>
+      <div class="stat-card" onclick="openAdminOverdueTasks()" style="cursor:pointer;" title="Показать список просроченных задач по выбранным фильтрам">
+        <div class="stat-value" style="color:#ef4444">${overdue}</div>
+        <div class="stat-label">Просрочено (${escapeHtml(adminManagerFilterLabel())})${periodLabel} — нажмите для списка</div>
+      </div>
     </div>
 
     <h3 style="font-size:15px;font-weight:600;color:#374151;margin-bottom:12px;">Срез по менеджерам</h3>
@@ -1170,11 +1218,16 @@ function commentsForRange() {
   clients.forEach(c => {
     (c.history || []).forEach(h => {
       if (!inAnalysisRange(h.date)) return;
-      if (managerUser && h.manager !== managerUser.login) return;
+      if (managerUser) {
+        const sameAuthor = h.authorId != null && h.authorId === managerUser.id;
+        const sameLogin = String(h.manager || '').toLowerCase() === String(managerUser.login || '').toLowerCase();
+        if (!sameAuthor && !sameLogin) return;
+      }
       const tags = commentTagsList(h.tags);
       if (adminCommentTagFilter !== 'all' && tags.indexOf(adminCommentTagFilter) === -1) return;
       result.push({
         manager: h.manager || '',
+        managerName: commentManagerName(h),
         type: h.type || '',
         company: c.orgName || '',
         comment: h.comment || '',
@@ -1212,7 +1265,7 @@ function renderAdminCommentsFeed() {
             <tbody>
               ${comments.map(h => `
                 <tr style="cursor:default;">
-                  <td><strong>${escapeHtml(h.manager || '—')}</strong></td>
+                  <td><strong>${escapeHtml(h.managerName || h.manager || '—')}</strong></td>
                   <td><span class="badge">${escapeHtml(h.type || '—')}</span></td>
                   <td>${escapeHtml(h.company)}</td>
                   <td><div class="history-comment">${escapeHtml(h.comment || '—')}</div></td>
@@ -1237,7 +1290,7 @@ function exportCommentsExcel() {
   }
   const comments = commentsForRange();
   const rows = comments.map(h => ({
-    'Менеджер': h.manager || '—',
+    'Менеджер': h.managerName || h.manager || '—',
     'Тип взаимодействия': h.type || '—',
     'Компания': h.company || '—',
     'Комментарий': (h.comment || '').replace(/\s+/g, ' ').trim(),
@@ -1340,9 +1393,9 @@ function renderAdminTaskList() {
 
   let list = tasks.slice();
   if (st.overdue) list = list.filter(t => taskOverdue(t));
-  if (st.managerId != null) list = list.filter(t => taskManager(t).id === st.managerId);
+  if (st.managerId != null) list = list.filter(t => taskMatchesManager(t, st.managerId));
   if (st.statusId) list = list.filter(t => t.status === st.statusId);
-  if (st.period) list = list.filter(t => inAnalysisRange(taskRangeDate(t)));
+  if (st.period) list = list.filter(taskInAnalysisPeriod);
   if (st.clientId != null) list = list.filter(t => String(t.clientId) === String(st.clientId));
   list = list.sort((a, b) => (a.deadline || '').localeCompare(b.deadline || ''));
 
@@ -1401,7 +1454,7 @@ function renderAdminTaskList() {
                   <td style="color:${isOverdue ? '#ef4444' : '#6b7280'};font-weight:${isOverdue ? '600' : '400'};">${t.deadline ? formatDate(t.deadline) : '—'}</td>
                   ${taskDaysCellHtml(t)}
                   <td style="text-align:right;white-space:nowrap;">
-                    ${st.overdue ? `<button class="btn-icon-btn" onclick="event.stopPropagation(); closeModal('adminTasksModal'); openTaskModal(tasks.find(x=>x.id===${t.id}))" title="Открыть задачу">Открыть</button>` : ''}
+                    <button class="btn-icon-btn" onclick="event.stopPropagation(); closeModal('adminTasksModal'); openTaskInfo(${t.id})" title="Открыть карточку задачи">Открыть</button>
                     ${adminTrackButtonHtml(t)}
                   </td>
                 </tr>`;
@@ -1425,18 +1478,23 @@ function openAdminOverdueTasks() {
   );
 }
 
-// Экспорт всех задач в Excel (XLSX) в реальном времени.
+// Экспорт задач в Excel (XLSX) в реальном времени. Учитываются выбранные
+// фильтры Анализа: период и менеджер — чтобы выгрузка совпадала с цифрами.
 function exportAdminReport() {
   if (typeof XLSX === 'undefined') {
     alert('Библиотека экспорта Excel не загружена.');
     return;
   }
-  const rows = tasks.map(t => {
+  const scopedUid = adminManagerFilter !== 'all' ? parseInt(adminManagerFilter, 10) : null;
+  const rows = tasks
+    .filter(taskInAnalysisPeriod)
+    .filter(t => taskMatchesManager(t, scopedUid))
+    .map(t => {
     const client = t.clientId ? clients.find(c => c.id === t.clientId) : null;
     const col = taskColumns.find(c => c.id === t.status);
     const days = taskDaysLeft(t);
     return {
-      'Менеджер': taskManager(t).login,
+      'Менеджер': taskManager(t).name || taskManager(t).login,
       'Клиент': client ? client.orgName : '—',
       'Тип задачи': col ? col.name : '—',
       'Комментарий': (t.description || t.title || '').replace(/\s+/g, ' ').trim(),

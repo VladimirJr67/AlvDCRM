@@ -37,6 +37,7 @@ const ASSIGNMENT_STATUSES = [
 
 const TASK_CALENDAR_MODE_KEY = 'alvid_crm_task_calendar_mode';
 const TASK_CALENDAR_ANCHOR_KEY = 'alvid_crm_task_calendar_anchor';
+const TASK_CALENDAR_PICK_KEY = 'alvid_crm_task_calendar_pick';
 
 function loadTasks() {
   const saved = localStorage.getItem('alvid_crm_tasks');
@@ -61,6 +62,33 @@ function loadTasks() {
     const d = new Date(savedAnchor);
     if (!isNaN(d.getTime())) taskCalendarAnchor = d;
   }
+  // Пласт (конкретный день/час) тоже восстанавливаем: после F5 доска не
+  // «распахивается» на весь период, а остаётся на выбранном дне.
+  restoreTaskCalendarPick();
+}
+
+// Вернуть сохранённый пласт на восстановленную дату. Если дата уже не
+// совпадает (переключили неделю/месяц) — пласт просто снимается.
+function restoreTaskCalendarPick() {
+  taskCalendarPick = null;
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(TASK_CALENDAR_PICK_KEY) || 'null'); } catch (e) { saved = null; }
+  if (!saved || !saved.key) return;
+  if (saved.key === 'today') {
+    const today = taskCalendarStartOfDay(new Date());
+    taskCalendarPick = {
+      key: 'today',
+      from: today,
+      to: taskCalendarAddDays(today, 1),
+      label: today.toLocaleDateString('ru-RU', { day: '2-digit', month: 'long', year: 'numeric' })
+    };
+    return;
+  }
+  const band = (typeof taskCalendarBands === 'function' ? taskCalendarBands() : []).find(b => b.key === saved.key);
+  if (!band) return;
+  const sameDay = saved.from && new Date(saved.from).toDateString() === band.from.toDateString();
+  if (!sameDay) return;
+  taskCalendarPick = { key: band.key, from: band.from, to: band.to, label: band.hint || band.label };
 }
 
 /* ===== Привязка активностей к столбцам =====
@@ -459,6 +487,9 @@ function applyTaskAssignment(task, assignedToId) {
 
 function saveTasks() {
   localStorage.setItem('alvid_crm_tasks', JSON.stringify(tasks));
+  // Счётчик в меню обновляем сразу после любого изменения задач (закрытие,
+  // перенос, правка), не дожидаясь перерисовки раздела.
+  if (typeof updateTasksMenuBadge === 'function') updateTasksMenuBadge();
   queueServerSave();
 }
 
@@ -518,19 +549,22 @@ function isTaskCompleted(task) {
 // Счётчик показывает активные задачи выбранного периода (День/Неделя/Месяц):
 // цифра должна соответствовать тому, что видно на доске, а не всей базе.
 // Завершённые в него не попадают — он отражает объём незакрытой работы.
+// Красный счётчик «просрочено» считается по всем видимым задачам (а не только
+// по периоду): закрыл просроченную — он сразу уменьшился.
 function updateTasksMenuBadge() {
   const badge = document.getElementById('tasksMenuBadge');
   if (!badge) return;
   const period = (typeof taskCalendarPeriodRange === 'function')
     ? taskCalendarPeriodRange(taskCalendarMode, taskCalendarAnchor)
     : null;
-  const visible = visibleTasks().filter(t => !period || taskInRange(t, period.from, period.to));
-  const active = visible.filter(t => !isTaskCompleted(t));
-  const done = visible.length - active.length;
+  const all = visibleTasks();
+  const active = all.filter(t => !isTaskCompleted(t));
+  const visible = period ? active.filter(t => taskInRange(t, period.from, period.to)) : active;
+  const done = all.filter(t => isTaskCompleted(t) && period && taskInRange(t, period.from, period.to)).length;
   const overdue = active.filter(t => taskOverdue(t)).length;
   badge.innerHTML =
-    `<span class="menu-badge-count" title="Активных задач за период: ${active.length}. Завершено: ${done}">${active.length}</span>` +
-    `<span class="menu-badge-count menu-badge-overdue" title="Просрочено">${overdue}</span>`;
+    `<span class="menu-badge-count" title="Активных задач за период: ${visible.length}. Завершено: ${done}">${visible.length}</span>` +
+    `<span class="menu-badge-count menu-badge-overdue" title="Просрочено всего: ${overdue}">${overdue}</span>`;
 }
 
 /* ===== Прокрутка доски стрелками =====
@@ -819,11 +853,19 @@ function taskCalendarBandsWithCounts() {
   });
 }
 
-// Сохранить выбранный период и дату (для восстановления после F5).
+// Сохранить выбранный период, дату и пласт (для восстановления после F5).
 function saveTaskCalendarState() {
   try {
     localStorage.setItem(TASK_CALENDAR_MODE_KEY, taskCalendarMode);
     localStorage.setItem(TASK_CALENDAR_ANCHOR_KEY, new Date(taskCalendarAnchor || new Date()).toISOString());
+    if (taskCalendarPick && taskCalendarPick.key) {
+      const from = taskCalendarPick.from ? new Date(taskCalendarPick.from).toISOString() : '';
+      localStorage.setItem(TASK_CALENDAR_PICK_KEY, JSON.stringify({
+        key: taskCalendarPick.key, from: from, label: taskCalendarPick.label || ''
+      }));
+    } else {
+      localStorage.removeItem(TASK_CALENDAR_PICK_KEY);
+    }
   } catch (e) { /* приватный режим */ }
 }
 
@@ -848,26 +890,57 @@ function shiftTaskCalendar(delta) {
 }
 
 function taskCalendarToday() {
+  // «Сегодня» открывает текущую неделю и выделяет сегодняшний день:
+  // так на доске сразу видны задачи на сегодня, а не «все подряд».
+  taskCalendarMode = 'week';
   taskCalendarAnchor = new Date();
   taskCalendarPick = null;
   saveTaskCalendarState();
   renderTasks();
 }
 
+// Пласт относится к сегодняшнему дню (для подсветки в ленте).
+function isTaskCalendarToday(band) {
+  if (!band || !band.from) return false;
+  const a = taskCalendarStartOfDay(band.from);
+  const b = taskCalendarStartOfDay(new Date());
+  return a.getTime() === b.getTime();
+}
+
+// Выбрать сегодняшний пласт: клик по «Сегодня» дополнительно сужает доску
+// до задач на сегодня.
+function pickTaskCalendarToday() {
+  taskCalendarMode = 'week';
+  taskCalendarAnchor = new Date();
+  const today = taskCalendarStartOfDay(new Date());
+  const band = {
+    key: 'today',
+    from: today,
+    to: taskCalendarAddDays(today, 1),
+    label: today.toLocaleDateString('ru-RU', { day: '2-digit', month: 'long', year: 'numeric' })
+  };
+  taskCalendarPick = band;
+  saveTaskCalendarState();
+  renderTasks();
+}
+
 // Клик по пласту: показать только его задачи (повторный клик — снять).
 function pickTaskCalendarBand(key) {
-  const band = taskCalendarBandsWithCounts().find(b => b.key === key);
+  const band = taskCalendarBandsWithCounts().find(b => b.key === key) ||
+    (taskCalendarPick && taskCalendarPick.key === key ? taskCalendarPick : null);
   if (!band) return;
   if (taskCalendarPick && taskCalendarPick.key === key) {
     taskCalendarPick = null;
   } else {
-    taskCalendarPick = { key: band.key, from: band.from, to: band.to, label: band.hint };
+    taskCalendarPick = { key: band.key, from: band.from, to: band.to, label: band.hint || band.label };
   }
+  saveTaskCalendarState();
   renderTasks();
 }
 
 function clearTaskCalendarPick() {
   taskCalendarPick = null;
+  saveTaskCalendarState();
   renderTasks();
 }
 
@@ -898,13 +971,13 @@ function renderTaskCalendarHtml() {
           <span class="task-calendar-total">задач в периоде: <strong>${periodTasks.length}</strong></span>
         </div>
         <button type="button" class="btn btn-sm btn-secondary" onclick="shiftTaskCalendar(1)" title="Следующий период">›</button>
-        <button type="button" class="btn btn-sm btn-secondary" onclick="taskCalendarToday()">Сегодня</button>
+        <button type="button" class="btn btn-sm btn-secondary" onclick="taskCalendarToday()" title="Текущая неделя с выделенным сегодняшним днём">Сегодня</button>
         ${taskCalendarPick ? `<button type="button" class="btn btn-sm" onclick="clearTaskCalendarPick()">Показать все задачи</button>` : ''}
       </div>
       <div class="task-calendar-bands">
         ${bands.map(b => `
           <button type="button"
-                  class="task-calendar-band${b.count ? ' has-tasks' : ''}${b.overdue ? ' has-overdue' : ''}${taskCalendarPick && taskCalendarPick.key === b.key ? ' active' : ''}"
+                  class="task-calendar-band${b.count ? ' has-tasks' : ''}${b.overdue ? ' has-overdue' : ''}${isTaskCalendarToday(b) ? ' is-today' : ''}${taskCalendarPick && taskCalendarPick.key === b.key ? ' active' : ''}"
                   onclick="pickTaskCalendarBand('${b.key}')"
                   title="${escapeHtml(b.hint)}: задач ${b.count}${b.overdue ? ', просрочено ' + b.overdue : ''}">
             <span class="task-calendar-count">${b.count}</span>
@@ -956,7 +1029,9 @@ function isUserTrackedBy(userId, trackerId) {
   return !!u && (u.trackedBy || []).indexOf(me) > -1;
 }
 
-// Добавить отслеживание: и в профиль сотрудника, и в его текущие задачи.
+// Добавить отслеживание сотрудника: отметка ставится только в профиле.
+// Задача попадает в «Отслеживание» лишь кнопкой «Отправить в отслеживание» —
+// автоматически задачи менеджеров туда больше не добавляются.
 function startTrackingUser(userId) {
   if (!isTaskTracker()) return { ok: false, error: 'Отслеживание доступно руководителю' };
   const target = findUserById(parseInt(userId, 10));
@@ -967,16 +1042,8 @@ function startTrackingUser(userId) {
   target.trackedBy = Array.isArray(target.trackedBy) ? target.trackedBy : [];
   if (target.trackedBy.indexOf(me) === -1) target.trackedBy.push(me);
 
-  let touched = 0;
-  tasks.forEach(t => {
-    if (t.ownerId !== target.id && t.assignedTo !== target.id) return;
-    if (!Array.isArray(t.trackingBy)) t.trackingBy = [];
-    if (t.trackingBy.indexOf(me) === -1) { t.trackingBy.push(me); touched++; }
-  });
-
   saveUsers();
-  saveTasks();
-  return { ok: true, tasks: touched };
+  return { ok: true, tasks: 0 };
 }
 
 // Снять отслеживание: убираем и из профиля, и из задач.
@@ -1032,14 +1099,18 @@ function userTaskProgress(userId) {
 }
 
 let trackingAssigneeFilter = '';
-let trackingStatusFilter = '';
 
 // Задача, которую текущий пользователь взял в отслеживание кнопкой
-// «Отправить в отслеживание» (его id лежит в trackingBy).
+// «Отправить в отслеживание». Автоматически добавленные записи (прежнее
+// «отслеживание сотрудника скопом») отметки не имеют и в раздел не попадают.
 function isTaskTrackedByMe(task) {
   const me = currentUser ? currentUser.id : null;
   if (!me || !task || !Array.isArray(task.trackingBy)) return false;
-  return task.trackingBy.indexOf(me) > -1;
+  if (task.trackingBy.indexOf(me) === -1) return false;
+  // Ручную отправку фиксируем отдельным списком.
+  if (Array.isArray(task.trackingManualBy)) return task.trackingManualBy.indexOf(me) > -1;
+  // Совместимость с задачами, отправленными до появления списка.
+  return task.trackingSentBy === me;
 }
 
 // Отправить в отслеживание может администратор, руководитель или разработчик —
@@ -1057,7 +1128,10 @@ function sendTaskToTracking(taskId) {
   if (!t) return { ok: false, error: 'Задача не найдена' };
   if (!canSendTaskToTracking(t)) return { ok: false, error: 'Эту задачу нельзя отправить в отслеживание' };
   if (!Array.isArray(t.trackingBy)) t.trackingBy = [];
-  t.trackingBy.push(currentUser.id);
+  if (t.trackingBy.indexOf(currentUser.id) === -1) t.trackingBy.push(currentUser.id);
+  // Отметка ручной отправки — именно по ней задача попадает в отслеживание.
+  if (!Array.isArray(t.trackingManualBy)) t.trackingManualBy = [];
+  if (t.trackingManualBy.indexOf(currentUser.id) === -1) t.trackingManualBy.push(currentUser.id);
   t.trackingSentAt = new Date().toISOString();
   t.trackingSentBy = currentUser.id;
   saveTasks();
@@ -1080,14 +1154,12 @@ function sendTaskToTrackingFromUi(taskId, managerId, statusId) {
 function sharedTrackingTasks() {
   return tasks
     .filter(t => isTaskTrackedByMe(t))
-    .filter(t => !trackingAssigneeFilter || String(t.assignedTo) === String(trackingAssigneeFilter))
-    .filter(t => !trackingStatusFilter || t.assignmentStatus === trackingStatusFilter)
+    .filter(t => !trackingAssigneeFilter || String(t.assignedTo || t.ownerId) === String(trackingAssigneeFilter))
     .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
 }
 
 function setTrackingFilter(kind, value) {
   if (kind === 'assignee') trackingAssigneeFilter = value || '';
-  else if (kind === 'status') trackingStatusFilter = value || '';
   renderTracking();
 }
 
@@ -1109,9 +1181,6 @@ function renderTracking() {
 
   const list = sharedTrackingTasks();
   const userOpts = users.map(u => `<option value="${u.id}"${String(trackingAssigneeFilter) === String(u.id) ? ' selected' : ''}>${escapeHtml(u.name || u.login)}</option>`).join('');
-  // Фильтр статусов «Отслеживания задач» показывает реальные статусы
-  // назначенных задач (Не принято / Принято / В работе / Выполнено).
-  const statusOpts = ASSIGNMENT_STATUSES.map(s => `<option value="${s.value}"${trackingStatusFilter === s.value ? ' selected' : ''}>${escapeHtml(s.label)}</option>`).join('');
 
   main.innerHTML = `
     <div class="orders-page">
@@ -1125,28 +1194,23 @@ function renderTracking() {
       <div class="orders-analysis-title">Задачи в отслеживании (${list.length})</div>
       <div class="orders-filters">
         <label>Исполнитель <select onchange="setTrackingFilter('assignee', this.value)"><option value="">Все</option>${userOpts}</select></label>
-        <label>Статус <select onchange="setTrackingFilter('status', this.value)"><option value="">Все</option>${statusOpts}</select></label>
       </div>
       <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:auto;margin-bottom:24px;">
         <table class="admin-table">
-          <thead><tr><th>Название</th><th>Исполнитель</th><th>Статус</th><th>Дедлайн</th><th style="text-align:right;">Действия</th></tr></thead>
+          <thead><tr><th>Название</th><th>Исполнитель</th><th>Дедлайн</th><th style="text-align:right;">Действия</th></tr></thead>
           <tbody>
             ${list.length ? list.map(t => {
               const assignee = findUserById(t.assignedTo != null ? t.assignedTo : t.ownerId);
-              const mineAssigned = isSharedTask(t) && t.assignedBy === (currentUser ? currentUser.id : null);
-              const tracked = isTaskTrackedByMe(t) && !mineAssigned;
               return `<tr style="cursor:default;">
-                <td><strong>${escapeHtml(t.title || '—')}</strong>${tracked ? ' <span class="badge" style="background:#e0f2fe;color:#075985;">в отслеживании</span>' : ''}</td>
+                <td><strong>${escapeHtml(t.title || '—')}</strong> <span class="badge" style="background:#e0f2fe;color:#075985;">в отслеживании</span></td>
                 <td>${escapeHtml(assignee ? (assignee.name || assignee.login) : '—')}</td>
-                <td>${escapeHtml(trackingTaskStatusLabel(t))}</td>
                 <td>${escapeHtml(t.deadline ? formatDate(t.deadline) : '—')}</td>
                 <td style="text-align:right;white-space:nowrap;">
                   <button class="btn-icon-btn" onclick="openTaskInfo(${t.id})" title="Информация о задаче">Информация</button>
-                  ${canSendTaskToTracking(t) ? `<button class="btn-icon-btn" onclick="sendTaskToTrackingFromUi(${t.id})" title="Отправить в отслеживание">В отслеживание</button>` : ''}
                   <button class="btn-icon-btn" onclick="deleteTask(${t.id})" title="Удалить">Удалить</button>
                 </td>
               </tr>`;
-            }).join('') : `<tr><td colspan="5" style="text-align:center;color:#9ca3af;padding:40px;">Задач в отслеживании нет</td></tr>`}
+            }).join('') : `<tr><td colspan="4" style="text-align:center;color:#9ca3af;padding:40px;">Задач в отслеживании нет</td></tr>`}
           </tbody>
         </table>
       </div>
@@ -1453,7 +1517,18 @@ function renderTaskCard(task, col) {
           ${assignees.length > 3 ? `<div style="width:22px;height:22px;border-radius:50%;background:#e5e7eb;color:#6b7280;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;">+${assignees.length-3}</div>` : ''}
         </div>
         <div style="display:flex;align-items:center;gap:6px;">
-          ${(typeof canSendTaskToTracking === 'function' && canSendTaskToTracking(task)) ? `<button onclick="event.stopPropagation(); sendTaskToTrackingFromUi(${task.id})" title="Добавить задачу в моё отслеживание" style="background:none;border:1px solid #bae6fd;color:#0369a1;cursor:pointer;font-size:10px;padding:2px 6px;border-radius:10px;white-space:nowrap;">В отслеживание</button>` : ''}
+          ${(() => {
+            // На дашборде выбранного менеджера кнопка отслеживания — главное
+            // действие: админ/рук/разраб отправляет задачу себе в отслеживание.
+            const onDashboard = (typeof dashboardManagerId !== 'undefined') && dashboardManagerId != null;
+            const tracked = typeof isTaskTrackedByMe === 'function' && isTaskTrackedByMe(task);
+            if (tracked) {
+              return '<span title="Задача в вашем отслеживании" style="border:1px solid #bae6fd;background:#e0f2fe;color:#075985;font-size:10px;padding:2px 6px;border-radius:10px;white-space:nowrap;">в отслеживании</span>';
+            }
+            if (typeof canSendTaskToTracking !== 'function' || !canSendTaskToTracking(task)) return '';
+            const label = onDashboard ? 'Отправить в отслеживание' : 'В отслеживание';
+            return `<button onclick="event.stopPropagation(); sendTaskToTrackingFromUi(${task.id})" title="Добавить задачу в моё отслеживание" style="background:none;border:1px solid #bae6fd;color:#0369a1;cursor:pointer;font-size:10px;padding:2px 6px;border-radius:10px;white-space:nowrap;">${label}</button>`;
+          })()}
           ${contact ? `<div style="font-size:10px;color:#9ca3af;">${escapeHtml(contact.name.split(' ')[0])}</div>` : ''}
         </div>
       </div>
@@ -2013,8 +2088,14 @@ function editTask(id) {
 }
 
 // Перерисовать текущий раздел после изменения задачи:
-// на канбане — доску, в админ-разделе — соответствующий подраздел.
+// на канбане — доску, в отслеживании — отслеживание, в админ-разделе —
+// соответствующий подраздел. Счётчик меню обновляется всегда.
 function refreshAfterTaskChange() {
+  if (typeof updateTasksMenuBadge === 'function') updateTasksMenuBadge();
+  if (currentSection === 'tracking' && typeof renderTracking === 'function') {
+    renderTracking();
+    return;
+  }
   if (typeof currentSection === 'string' && currentSection.startsWith('admin')) {
     renderAdminSection(currentSection);
   } else {
@@ -2110,20 +2191,40 @@ function cancelTaskClose() {
 /* ===== Закрытие задачи с подтверждением =====
    Отдельный вариант закрытия: кнопка «Закрыть задачу» в карточке открывает
    модалку подтверждения с полем комментария. Правила закрытия (задача-ссылка,
-   активность) соблюдаются через setTaskStatus(). */
+   активность) соблюдаются через setTaskStatus(). Режим 'noprofit' закрывает
+   задачу как «Нерентабельный клиент» — без следующей активности. */
 
-function openTaskCloseConfirm(taskId) {
+let taskCloseConfirmMode = 'close';  // 'close' | 'noprofit'
+
+function openTaskCloseConfirm(taskId, mode) {
   const t = tasks.find(x => x.id === taskId);
   if (!t) return;
   if (isCompletedColumnId(t.status)) { alert('Задача уже закрыта.'); return; }
   if (!taskCanBeClosed(t)) { alert(taskClosureBlockMessage(t)); return; }
+  taskCloseConfirmMode = mode === 'noprofit' ? 'noprofit' : 'close';
+  const noprofit = taskCloseConfirmMode === 'noprofit';
+
   document.getElementById('taskCloseConfirmId').value = taskId;
+  const headingEl = document.getElementById('taskCloseConfirmHeading');
+  if (headingEl) headingEl.textContent = noprofit ? 'Нерентабельный клиент' : 'Закрыть задачу?';
   const titleEl = document.getElementById('taskCloseConfirmTitle');
-  if (titleEl) titleEl.innerHTML = 'Задача: <strong>' + escapeHtml(t.title || '—') + '</strong>';
+  if (titleEl) {
+    titleEl.innerHTML = (noprofit ? 'Нерентабельный клиент · ' : 'Закрыть задачу · ') +
+      '<strong>' + escapeHtml(t.title || '—') + '</strong>';
+  }
+  const noteEl = document.getElementById('taskCloseConfirmNote');
+  if (noteEl) {
+    noteEl.textContent = noprofit
+      ? 'Задача закроется без следующей активности — комментарий попадёт в отчёт по комментариям.'
+      : 'Задача уйдёт в «Закрытые задачи». Комментарий обязателен и попадёт в отчёт.';
+  }
+  const submit = document.getElementById('taskCloseConfirmSubmit');
+  if (submit) {
+    submit.textContent = noprofit ? 'Нерентабельный клиент' : 'Закрыть задачу';
+    submit.disabled = true;
+  }
   const commentEl = document.getElementById('taskCloseConfirmComment');
   if (commentEl) commentEl.value = '';
-  const submit = document.getElementById('taskCloseConfirmSubmit');
-  if (submit) submit.disabled = true;
   document.getElementById('taskCloseConfirmModal').classList.add('active');
 }
 
@@ -2134,6 +2235,51 @@ function onTaskCloseConfirmInput() {
   const submit = document.getElementById('taskCloseConfirmSubmit');
   if (!comment || !submit) return;
   submit.disabled = !String(comment.value || '').trim();
+}
+
+// Общая часть закрытия: перевод в системный столбец «Закрытые задачи» и
+// фиксация комментария/даты/автора.
+function closeTaskInternal(t, comment) {
+  if (!t) return { ok: false, error: 'Задача не найдена' };
+  const target = taskClosedColumnId();
+  if (!target) return { ok: false, error: 'Нет завершающего столбца для закрытия задачи.' };
+  const res = setTaskStatus(t, target);
+  if (!res.ok) return res;
+  t.closeComment = comment;
+  t.closedAt = new Date().toISOString();
+  t.closedBy = currentUser ? currentUser.id : null;
+  saveTasks();
+  return { ok: true, status: target };
+}
+
+// Комментарий по задаче уходит в отчёт по комментариям: пишем запись в
+// историю взаимодействий клиента (если задача к нему привязана).
+function addClientCommentFromTask(task, type, comment, nextAt, taskId) {
+  if (!task || task.clientId == null) return null;
+  if (typeof clients === 'undefined' || !Array.isArray(clients)) return null;
+  const client = clients.find(c => c.id === task.clientId);
+  if (!client) return null;
+  if (!Array.isArray(client.history)) client.history = [];
+  const contact = (task.contactId && client.contacts)
+    ? (client.contacts.find(ct => ct.id === task.contactId) || null)
+    : null;
+  const now = new Date().toISOString();
+  const entry = {
+    date: now,
+    type: type || 'Задача',
+    contactPerson: contact ? (contact.name || '') : '',
+    manager: currentUser ? currentUser.login : '',
+    authorId: currentUser ? currentUser.id : null,
+    comment: comment || '',
+    tags: ['forReport'],
+    closedAt: now,
+    nextActivityAt: nextAt || null,
+    taskId: taskId != null ? taskId : null,
+    columnId: activityColumnId(type) || null
+  };
+  client.history.push(entry);
+  if (typeof saveClients === 'function') saveClients(clients);
+  return entry;
 }
 
 // Подтверждение закрытия: обязательный комментарий, перевод в системный
@@ -2151,25 +2297,132 @@ function confirmTaskClose() {
     return { ok: false, error: 'Нет комментария' };
   }
 
-  const target = taskClosedColumnId();
-  if (!target) { alert('Нет завершающего столбца для закрытия задачи.'); return { ok: false, error: 'Нет завершающего столбца' }; }
-  const res = setTaskStatus(t, target);
+  const noprofit = taskCloseConfirmMode === 'noprofit';
+  const res = closeTaskInternal(t, comment);
   if (!res.ok) { alert(res.error); return res; }
 
-  t.closeComment = comment;
-  t.closedAt = new Date().toISOString();
-  t.closedBy = currentUser ? currentUser.id : null;
+  // «Нерентабельный клиент»: закрываем без следующей активности, но
+  // комментарий остаётся в отчёте по комментариям.
+  if (noprofit) {
+    t.closeKind = 'noprofit';
+    addClientCommentFromTask(t, 'Нерентабелен', comment, null, t.id);
+    saveTasks();
+  }
 
-  saveTasks();
   closeModal('taskCloseConfirmModal');
   closeModal('taskInfoModal');
   closeModal('taskModal');
   refreshAfterTaskChange();
-  return { ok: true, status: target };
+  return { ok: true, status: res.status, noprofit: noprofit };
 }
 
 function closeTaskConfirmModal() {
   closeModal('taskCloseConfirmModal');
+}
+
+/* ===== «Добавить следующую активность» =====
+   Закрывает текущую задачу и сразу создаёт следующую: тип задачи, дата и
+   комментарий. Комментарий уходит в отчёт по комментариям (история клиента),
+   новая задача встаёт в столбец, привязанный к выбранному типу. */
+
+function openTaskNextActivity(taskId) {
+  const t = tasks.find(x => x.id === taskId);
+  if (!t) return;
+  if (isCompletedColumnId(t.status)) { alert('Задача уже закрыта.'); return; }
+  if (!taskCanBeClosed(t)) { alert(taskClosureBlockMessage(t)); return; }
+  document.getElementById('taskNextActivityTaskId').value = t.id;
+
+  const titleEl = document.getElementById('taskNextActivityTitle');
+  if (titleEl) titleEl.textContent = 'Следующая активность';
+
+  // Тип задачи — из справочника типов взаимодействий (как в комментариях).
+  const types = (typeof interactionTypes !== 'undefined' && interactionTypes.length)
+    ? interactionTypes.slice()
+    : ['Звонок'];
+  const select = document.getElementById('taskNextActivityType');
+  if (select) {
+    select.innerHTML = types.map(x => `<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`).join('');
+    const currentName = (taskColumns.find(c => c.id === t.status) || {}).name;
+    const match = types.find(x => String(x).toLowerCase() === String(currentName || '').toLowerCase());
+    select.value = match || types[0];
+  }
+
+  const dateEl = document.getElementById('taskNextActivityDate');
+  if (dateEl) {
+    // По умолчанию — через день, в то же время, что и текущий срок.
+    const base = parseDeadline(t.deadline) || new Date();
+    const next = new Date(base.getTime() + 24 * 60 * 60 * 1000);
+    const p = n => String(n).padStart(2, '0');
+    dateEl.value = next.getFullYear() + '-' + p(next.getMonth() + 1) + '-' + p(next.getDate()) +
+      'T' + p(next.getHours()) + ':' + p(next.getMinutes());
+  }
+  const commentEl = document.getElementById('taskNextActivityComment');
+  if (commentEl) commentEl.value = '';
+  const submit = document.getElementById('taskNextActivitySubmit');
+  if (submit) submit.disabled = true;
+  document.getElementById('taskNextActivityModal').classList.add('active');
+}
+
+function onTaskNextActivityInput() {
+  const date = document.getElementById('taskNextActivityDate');
+  const comment = document.getElementById('taskNextActivityComment');
+  const submit = document.getElementById('taskNextActivitySubmit');
+  if (!submit) return;
+  const ok = !!(date && String(date.value || '').trim()) && !!(comment && String(comment.value || '').trim());
+  submit.disabled = !ok;
+}
+
+function closeTaskNextActivity() {
+  closeModal('taskNextActivityModal');
+}
+
+// Создание следующей задачи + закрытие текущей с комментарием.
+function submitTaskNextActivity() {
+  const idEl = document.getElementById('taskNextActivityTaskId');
+  const t = tasks.find(x => x.id === parseInt(idEl ? idEl.value : '', 10));
+  if (!t) { alert('Задача не найдена'); return { ok: false, error: 'Задача не найдена' }; }
+  if (isCompletedColumnId(t.status)) { alert('Задача уже закрыта.'); return { ok: false, error: 'Задача закрыта' }; }
+  if (!taskCanBeClosed(t)) { alert(taskClosureBlockMessage(t)); return { ok: false, error: 'Закрыть нельзя' }; }
+
+  const typeEl = document.getElementById('taskNextActivityType');
+  const type = typeEl ? String(typeEl.value || '').trim() : '';
+  const dateEl = document.getElementById('taskNextActivityDate');
+  const date = dateEl ? String(dateEl.value || '').trim() : '';
+  const commentEl = document.getElementById('taskNextActivityComment');
+  const comment = commentEl ? String(commentEl.value || '').trim() : '';
+
+  if (!date) { alert('Укажите дату следующей активности.'); return { ok: false, error: 'Нет даты' }; }
+  if (!comment) { alert('Напишите комментарий — он попадёт в отчёт по комментариям.'); return { ok: false, error: 'Нет комментария' }; }
+
+  const client = t.clientId != null ? clients.find(c => c.id === t.clientId) : null;
+  // Столбец новой задачи: привязанный к типу, иначе — текущий столбец задачи.
+  const columnId = activityColumnId(type) || t.status;
+  const newTask = addAutoTask({
+    title: activityTaskTitle(type || 'Активность', client ? client.orgName : ''),
+    description: comment,
+    deadline: date,
+    status: columnId,
+    clientId: t.clientId != null ? t.clientId : null,
+    contactId: t.contactId != null ? t.contactId : null,
+    ownerId: t.ownerId != null ? t.ownerId : (currentUser ? currentUser.id : null),
+    kind: 'regular',
+    source: 'activity'
+  });
+
+  // Комментарий — в отчёт по комментариям (история взаимодействий клиента).
+  addClientCommentFromTask(t, type, comment, date, newTask ? newTask.id : null);
+
+  // Текущая задача закрывается с тем же комментарием.
+  const res = closeTaskInternal(t, comment);
+  if (!res.ok) { alert(res.error); return res; }
+  t.nextTaskId = newTask ? newTask.id : null;
+  saveTasks();
+
+  closeModal('taskNextActivityModal');
+  closeModal('taskInfoModal');
+  closeModal('taskModal');
+  refreshAfterTaskChange();
+  return { ok: true, closed: t.id, next: newTask ? newTask.id : null, status: res.status };
 }
 
 /* ===== Перенос активности =====
@@ -2321,38 +2574,73 @@ function taskInfoValue(task, label, value) {
 function renderTaskInfo(task) {
   const client = task.clientId ? clients.find(c => c.id === task.clientId) : null;
   const contact = task.contactId && client ? (client.contacts || []).find(ct => ct.id === task.contactId) : null;
-  const col = taskColumns.find(c => c.id === task.status);
-  const priority = TASK_PRIORITIES.find(p => p.value === task.priority) || TASK_PRIORITIES[1];
   const owner = task.ownerId ? findUserById(task.ownerId) : null;
-  const assignee = task.assignedTo ? findUserById(task.assignedTo) : null;
   const closer = task.closedBy ? findUserById(task.closedBy) : null;
   const coAssignees = (task.coAssignees || []).map(id => findUserById(id)).filter(Boolean);
-  const assignInfo = task.assignedTo ? assignmentStatusInfo(task.assignmentStatus) : null;
   const reschedules = Array.isArray(task.rescheduleHistory) ? task.rescheduleHistory : [];
+  const overdue = taskOverdue(task);
+  const closed = isCompletedColumnId(task.status);
 
+  // Шапка: название и главные «чипы» (срок, переносы, состояние).
+  const chips = [];
+  if (task.deadline) {
+    chips.push(`<span class="task-info-chip${overdue ? ' is-overdue' : ''}">Срок: ${escapeHtml(formatDate(task.deadline))}${overdue ? ' · просрочено' : ''}</span>`);
+  } else {
+    chips.push('<span class="task-info-chip">Без срока</span>');
+  }
+  if (task.rescheduleCount) {
+    chips.push(`<span class="task-info-chip">Переносов: ${task.rescheduleCount}</span>`);
+  }
+  if (closed) {
+    chips.push('<span class="task-info-chip is-closed">Задача закрыта</span>');
+  }
+
+  // Блок комментария (описание задачи) — визуальный акцент.
+  const commentBlock = task.description
+    ? `<div class="task-info-block">
+         <div class="task-info-block-label">Комментарий</div>
+         <div class="task-info-comment">${escapeHtml(task.description).replace(/\n/g, '<br>')}</div>
+       </div>`
+    : '';
+
+  // Блок клиента — отдельной карточкой, с переходом в карточку клиента.
+  const clientBlock = client
+    ? `<div class="task-info-client">
+         <div class="task-info-client-icon">🏢</div>
+         <div class="task-info-client-body">
+           <a href="#" class="task-info-client-name"
+              onclick="event.preventDefault(); closeModal('taskInfoModal'); openClientCard(${client.id});">${escapeHtml(client.orgName || 'Клиент')}</a>
+           ${contact ? `<div class="task-info-client-contact">Контакт: ${escapeHtml(contact.name)}</div>` : ''}
+         </div>
+       </div>`
+    : '';
+
+  // Ссылка задачи «Отработка ссылки» — отдельной строкой, чтобы не потерялась.
+  const linkBlock = task.linkUrl
+    ? `<div class="task-info-block">
+         <div class="task-info-block-label">Ссылка для отработки</div>
+         <div class="task-info-comment"><a href="${escapeHtml(normalizeTaskLink(task.linkUrl))}" target="_blank" rel="noopener">${escapeHtml(task.linkUrl)}</a>${task.linkWorkedOff ? ' · отработана' : ''}</div>
+       </div>`
+    : '';
+
+  // Блок комментария при закрытии — то, что писали при закрытии задачи.
+  const closeCommentBlock = task.closeComment
+    ? `<div class="task-info-block task-info-block-close">
+         <div class="task-info-block-label">Комментарий при закрытии</div>
+         <div class="task-info-comment">${escapeHtml(task.closeComment).replace(/\n/g, '<br>')}</div>
+         ${task.closedAt ? `<div class="task-info-block-meta">${escapeHtml(formatDate(task.closedAt))}${closer ? ' · ' + escapeHtml(closer.name || closer.login) : ''}</div>` : ''}
+       </div>`
+    : '';
+
+  // Компактная таблица деталей: срок и число переносов показаны в шапке,
+  // клиент и комментарии — в блоках выше.
   let rows = '';
-  rows += taskInfoValue(task, 'Название', escapeHtml(task.title || ''));
-  rows += taskInfoValue(task, 'Описание', escapeHtml(task.description || '').replace(/\n/g, '<br>'));
-  rows += taskInfoValue(task, 'Дедлайн', task.deadline ? escapeHtml(formatDate(task.deadline)) : '');
-  rows += taskInfoValue(task, 'Переносов', String(task.rescheduleCount || 0));
   if (task.lastRescheduleReason) {
     rows += taskInfoValue(task, 'Последняя причина переноса', escapeHtml(task.lastRescheduleReason));
   }
-  rows += taskInfoValue(task, 'Приоритет', escapeHtml(priority.name));
-  rows += taskInfoValue(task, 'Вид задачи', escapeHtml(taskKindName(task)) +
-    (task.linkUrl ? ' · <a href="' + escapeHtml(normalizeTaskLink(task.linkUrl)) + '" target="_blank" rel="noopener">' + escapeHtml(task.linkUrl) + '</a>' : ''));
-  rows += taskInfoValue(task, 'Колонка', col ? escapeHtml(col.name) : '');
-  rows += taskInfoValue(task, 'Клиент', client
-    ? '<a href="#" onclick="event.preventDefault(); closeModal(\'taskInfoModal\'); openClientCard(' + client.id + ');">' + escapeHtml(client.orgName) + '</a>'
-    : '');
-  rows += taskInfoValue(task, 'Контактное лицо', contact ? escapeHtml(contact.name) : '');
   rows += taskInfoValue(task, 'Автор', owner ? escapeHtml(owner.name || owner.login) : '');
-  rows += taskInfoValue(task, 'Исполнитель', assignee
-    ? escapeHtml(assignee.name || assignee.login) + (assignInfo ? ' · ' + escapeHtml(assignInfo.label) : '')
-    : '');
   rows += taskInfoValue(task, 'Соисполнители', coAssignees.map(u => escapeHtml(u.name || u.login)).join(', '));
   rows += taskInfoValue(task, 'Создана', task.createdAt ? escapeHtml(formatDate(task.createdAt)) : '');
-  rows += taskInfoValue(task, 'Комментарий к закрытию', task.closeComment ? escapeHtml(task.closeComment) : '');
   rows += taskInfoValue(task, 'Закрыта', task.closedAt
     ? escapeHtml(formatDate(task.closedAt)) + (closer ? ' · ' + escapeHtml(closer.name || closer.login) : '')
     : '');
@@ -2364,7 +2652,18 @@ function renderTaskInfo(task) {
     ).join('<br>'));
   }
 
-  return `<table style="width:100%;border-collapse:collapse;">${rows}</table>`;
+  return `
+    <div class="task-info">
+      <div class="task-info-head">
+        <div class="task-info-title">${escapeHtml(task.title || 'Задача')}</div>
+        ${chips.length ? `<div class="task-info-chips">${chips.join('')}</div>` : ''}
+      </div>
+      ${commentBlock}
+      ${linkBlock}
+      ${clientBlock}
+      ${closeCommentBlock}
+      <table class="task-info-table">${rows}</table>
+    </div>`;
 }
 
 function openTaskInfo(taskId) {
@@ -2380,8 +2679,10 @@ function openTaskInfo(taskId) {
   if (actions) {
     actions.innerHTML = `
       <button type="button" class="btn btn-secondary" onclick="closeModal('taskInfoModal'); openTaskModal(tasks.find(x=>x.id===${t.id}))">Редактировать</button>
-      <button type="button" class="btn btn-secondary" onclick="openTaskCloseConfirm(${t.id})"${closed ? ' disabled' : ''}>Закрыть задачу</button>
-      <button type="button" class="btn btn-secondary" onclick="openTaskReschedule(${t.id})"${closed ? ' disabled' : ''}>Перенести активность</button>`;
+      <button type="button" class="btn btn-secondary" onclick="openTaskReschedule(${t.id})"${closed ? ' disabled' : ''}>Перенести активность</button>
+      <button type="button" class="btn btn-secondary" onclick="openTaskNextActivity(${t.id})"${closed ? ' disabled' : ''}>Добавить следующую активность</button>
+      <button type="button" class="btn btn-secondary" onclick="openTaskCloseConfirm(${t.id}, 'noprofit')"${closed ? ' disabled' : ''}>Нерентабельный клиент</button>
+      <button type="button" class="btn" onclick="openTaskCloseConfirm(${t.id})"${closed ? ' disabled' : ''}>Закрыть задачу</button>`;
   }
   document.getElementById('taskInfoModal').classList.add('active');
 }

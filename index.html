@@ -5,6 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Алвид CRM</title>
 <link rel="icon" type="image/png" href="/Logo1.png?v=1">
+<!-- Сессия уже есть — форма входа скрывается до первой отрисовки: при F5
+     логин не мигает. Если сессия окажется недействительной, приложение
+     вернёт форму (js/app.js). -->
+<script>
+(function () {
+  try {
+    var s = JSON.parse(localStorage.getItem('alvid_crm_session') || 'null');
+    if (s && s.login) document.documentElement.className += ' has-session';
+  } catch (e) { /* приватный режим — форму покажем как обычно */ }
+})();
+</script>
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
