@@ -10,7 +10,7 @@ let pollingStarted = false;
 const STARTABLE_SECTIONS = [
   'orders', 'matrix-accounting', 'clients', 'tasks', 'news', 'contacts',
   'contacts-internal', 'contacts-mobile', 'notifications', 'chat', 'tracking',
-  'manager-tools', 'admin-analysis', 'admin-users', 'admin-task-columns',
+  'manager-tools', 'manager-emails', 'admin-analysis', 'admin-users', 'admin-task-columns',
   'admin-readiness', 'admin-interaction-types', 'admin-integrations', 'admin-permissions',
   'admin-login-background'
 ];
@@ -76,9 +76,12 @@ function buildSidebar() {
     { section: 'contacts-mobile', label: 'Мобильные' }
   ] });
   html += addItem('notifications', 'Уведомления', { badge: 'notificationsMenuBadge' });
-  // Инструменты менеджера — только для менеджера по продажам.
-  if (!admin) {
-    html += addItem('manager-tools', 'Инструменты менеджера');
+  // Инструменты менеджера — менеджеру по продажам и руководителю; админ и
+  // разработчик видят пункт, чтобы проверить инструменты.
+  if (typeof canUseManagerTools === 'function' ? canUseManagerTools() : !admin) {
+    html += addItem('manager-tools', 'Инструменты менеджера', { submenu: [
+      { section: 'manager-emails', label: 'Список почт для рассылок' }
+    ] });
   }
   // Чат менеджеров — изолированный раздел: только роль «менеджер по продажам».
   // Ни администратор, ни руководитель его не видят (см. js/chat.js).
@@ -620,6 +623,35 @@ function injectModals() {
       </div>
     </div>
 
+    <div class="modal-overlay" id="mailingEmailModal" onclick="if(event.target===this)closeModal('mailingEmailModal')">
+      <div class="modal" style="width:460px;max-width:94vw;">
+        <div class="modal-head">
+          <h2>Новая почта для рассылки</h2>
+          <button type="button" class="modal-close-icon" onclick="closeModal('mailingEmailModal')" title="Закрыть" aria-label="Закрыть">✕</button>
+        </div>
+        <form onsubmit="saveMailingEmail(event)">
+          <div class="form-section">
+            <div class="form-row">
+              <div class="form-group">
+                <label>Email *</label>
+                <input type="email" id="mailingEmailAddress" placeholder="client@example.ru" autocomplete="off">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Имя / комментарий</label>
+                <input type="text" id="mailingEmailName" placeholder="Например, Иван Петров — снабжение">
+              </div>
+            </div>
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('mailingEmailModal')">Отмена</button>
+            <button type="submit" class="btn">Добавить</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <div class="modal-overlay" id="taskCloseConfirmModal" onclick="if(event.target===this)closeTaskConfirmModal()">
       <div class="modal" style="width:520px;max-width:94vw;">
         <div class="modal-head">
@@ -894,9 +926,14 @@ function injectModals() {
         <form onsubmit="saveMatrixAccounting(event)">
           <div class="form-section">
             <div class="form-row">
-              <div class="form-group">
+              <div class="form-group client-typeahead-group">
                 <label>Клиент</label>
-                <select id="matrixAccountingClient"></select>
+                <input type="text" id="matrixAccountingClientSearch" autocomplete="off"
+                       placeholder="Начните вводить название компании…"
+                       oninput="onMatrixAccountingClientInput(this.value)"
+                       onfocus="onMatrixAccountingClientInput(this.value)">
+                <input type="hidden" id="matrixAccountingClient">
+                <div class="client-typeahead-dropdown" id="matrixAccountingClientDropdown"></div>
               </div>
             </div>
             <div class="form-row">
@@ -1232,6 +1269,8 @@ function renderSection(section) {
     renderAdminReadiness();
   } else if (section === 'manager-tools') {
     renderManagerTools();
+  } else if (section === 'manager-emails') {
+    renderManagerEmails();
   } else if (section.startsWith('admin')) {
     if (!isAdmin()) {
       main.innerHTML = `<div class="placeholder"><h2>Доступ запрещён</h2><p>У вас нет прав на этот раздел</p></div>`;
@@ -1339,6 +1378,8 @@ document.addEventListener('click', (e) => {
     selectMatricesClientFilter(id, name);
   } else if (searchInput && searchInput.id === 'orderEditClientSearch') {
     selectOrderEditClient(id, name);
+  } else if (searchInput && searchInput.id === 'matrixAccountingClientSearch') {
+    selectMatrixAccountingClient(id, name);
   } else if (searchInput && searchInput.id === 'adminTaskListClientInput') {
     selectAdminTaskListClient(id, name);
   }
@@ -1436,6 +1477,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   loadMatrices();
   loadNews();
   loadMinPrices();
+  loadMailingEmails();
 
   // Сессия: основная — серверная (httpOnly cookie), запасная — локальная
   // (режим file://). Перезагрузка страницы не разлогинивает: сервер

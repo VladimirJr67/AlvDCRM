@@ -363,7 +363,9 @@ const DEFAULT_DB = {
   rolePermissions: {},
   // «Матрицы клиента» — привязанные к карточке клиента матрицы
   // { id, clientId, cipher, weight, press }.
-  clientMatrices: []
+  clientMatrices: [],
+  // Список почт для рассылок (инструмент менеджера): { id, email, name, createdAt, createdBy }.
+  mailingEmails: []
 };
 
 // Типы взаимодействий по умолчанию — сидируются только при первом старте
@@ -520,6 +522,7 @@ function normalizeDb(db) {
   d.chatManagers = asArray(d.chatManagers);
   d.chatLeads = asArray(d.chatLeads);
   d.clientMatrices = asArray(d.clientMatrices);
+  d.mailingEmails = asArray(d.mailingEmails);
   d.taskColumnsPerManager = plainObject(d.taskColumnsPerManager);
   d.activityToColumnMap = plainObject(d.activityToColumnMap);
 

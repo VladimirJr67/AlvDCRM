@@ -106,6 +106,60 @@ function canManageMatrixAccounting() {
   return isAdmin() || isLead();
 }
 
+// Импорт и шаблон доступны и менеджеру по продажам: он импортирует матрицы
+// только по своим клиентам (чужие строки пропускаются с предупреждением).
+function canImportMatrices() {
+  if (!currentUser) return false;
+  return isAdmin() || isLead() || isManagerRole(currentUser);
+}
+
+// «Свой» клиент менеджера: он его создал или он ответственный менеджер.
+// Администратор/руководитель/разработчик работают с любыми клиентами.
+function isOwnClientForManager(client) {
+  if (!client) return false;
+  if (isAdmin() || isLead()) return true;
+  if (!currentUser) return false;
+  if (Number(client.createdBy) === Number(currentUser.id)) return true;
+  return Number(client.responsibleManagerId) === Number(currentUser.id);
+}
+
+/* ===== Сопоставление клиента по названию (импорт матриц) =====
+   В файле название компании почти всегда отличается мелочами: кавычки
+   « » / " ", лишние пробелы, регистр. Нормализуем обе стороны, чтобы точное
+   по смыслу название находило клиента и матрица привязывалась к его ID. */
+
+function normalizeCompanyName(value) {
+  return String(value == null ? '' : value)
+    .replace(/[\u00a0\u2007\u202f]/g, ' ')
+    .replace(/[«»„“”"'’‘`]/g, '')
+    .replace(/ё/g, 'е').replace(/Ё/g, 'Е')
+    .replace(/\s*\/\s*/g, '/')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function matrixClientNameOf(client) {
+  if (!client) return '';
+  return String(client.orgName || client.name || '').trim();
+}
+
+// Клиент по названию: сначала точное совпадение после нормализации, затем —
+// единственное «похожее» (одно название входит в другое). Несколько похожих
+// считаем неоднозначными и не привязываем.
+function findClientByName(rawName) {
+  const target = normalizeCompanyName(rawName);
+  if (!target) return null;
+  const list = Array.isArray(clients) ? clients : [];
+  const exact = list.find(c => normalizeCompanyName(matrixClientNameOf(c)) === target);
+  if (exact) return exact;
+  const loose = list.filter(c => {
+    const n = normalizeCompanyName(matrixClientNameOf(c));
+    return n && (n.indexOf(target) > -1 || target.indexOf(n) > -1);
+  });
+  return loose.length === 1 ? loose[0] : null;
+}
+
 function matrixInPeriod(m) {
   if (!matricesDateFrom && !matricesDateTo) return true;
   const day = String(m.date || '').slice(0, 10);
@@ -564,7 +618,9 @@ function renderMatrixAccounting() {
   const main = document.getElementById('mainContent');
   if (!main) return;
   const canAdd = isAdmin() || (typeof can === 'function' && can('matrices.create'));
-  // Импорт и удаление шифров — только администратор, руководитель и разработчик.
+  // Импорт и шаблон — менеджеру тоже (только по своим клиентам), удаление
+  // шифров — администратор, руководитель и разработчик.
+  const canImport = canImportMatrices();
   const canManage = canManageMatrixAccounting();
   const list = matrixAccountingList();
 
@@ -574,7 +630,7 @@ function renderMatrixAccounting() {
         <h1>Учёт матриц</h1>
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
           <input type="text" class="search-bar" placeholder="Поиск по шифру, клиенту, весу…" value="${escapeHtml(matrixAccountingSearch)}" oninput="setMatrixAccountingSearch(this.value)" style="width:300px;max-width:100%;margin-bottom:0;">
-          ${canManage ? `<input type="file" id="matrixAccountingFileInput" accept=".xlsx,.xls,.csv" style="display:none" onchange="importMatricesFromExcel(event)">
+          ${canImport ? `<input type="file" id="matrixAccountingFileInput" accept=".xlsx,.xls,.csv" style="display:none" onchange="importMatricesFromExcel(event)">
           <button class="btn btn-secondary" onclick="document.getElementById('matrixAccountingFileInput').click()" title="Колонки файла: Клиент, Шифр, Вес за м/п, Пресс">Импорт</button>
           <button class="btn btn-secondary" onclick="downloadMatricesTemplate()" title="Скачать шаблон импорта матриц">Шаблон</button>` : ''}
           ${canAdd ? '<button class="btn" onclick="openMatrixAccountingModal()">+ Добавить матрицу</button>' : ''}
@@ -593,14 +649,16 @@ function renderMatrixAccounting() {
           </tr></thead>
           <tbody>
             ${list.length ? list.map(m => {
-              const c = m.clientId ? clients.find(x => x.id === m.clientId) : null;
-              const clientName = c ? (c.orgName || c.name || '') : '';
+              const c = m.clientId ? clients.find(x => Number(x.id) === Number(m.clientId)) : null;
+              // Если клиент уже удалён из базы, показываем название из записи,
+              // а не прочерк: матрица остаётся привязанной по смыслу.
+              const clientName = matrixClientNameOf(c) || String(m.clientName || '').trim();
               const canEditRow = canManage || (currentUser && m.createdBy === currentUser.id);
               return `
               <tr style="cursor:default;">
                 <td style="padding-left:16px;">${m.clientId && clientName
                   ? `<a href="#" onclick="event.preventDefault();goToClient(${m.clientId});">${escapeHtml(clientName)}</a>`
-                  : '—'}</td>
+                  : (clientName ? escapeHtml(clientName) : '—')}</td>
                 <td><strong>${escapeHtml(m.cipher || '—')}</strong></td>
                 <td>${escapeHtml(m.weightPerM || '—')}</td>
                 <td>${escapeHtml(m.press || '—')}</td>
@@ -627,8 +685,44 @@ function openMatrixAccountingModal(id) {
   document.getElementById('matrixAccountingCipher').value = m ? (m.cipher || '') : '';
   document.getElementById('matrixAccountingWeight').value = m ? (m.weightPerM || '') : '';
   document.getElementById('matrixAccountingPress').value = (m && m.press) ? m.press : CLIENT_MATRIX_PRESSES[0];
-  document.getElementById('matrixAccountingClient').innerHTML = matrixClientSelectOptions(m ? m.clientId : '');
+
+  // Клиент выбирается поиском по названию: в CRM тысячи компаний, выпадающий
+  // список из них неудобен.
+  const client = m && m.clientId ? (clients || []).find(c => Number(c.id) === Number(m.clientId)) : null;
+  const clientIdEl = document.getElementById('matrixAccountingClient');
+  if (clientIdEl) clientIdEl.value = client ? client.id : '';
+  const searchEl = document.getElementById('matrixAccountingClientSearch');
+  if (searchEl) searchEl.value = client ? matrixClientNameOf(client) : '';
+  const dd = document.getElementById('matrixAccountingClientDropdown');
+  if (dd) dd.style.display = 'none';
+
   modal.classList.add('active');
+}
+
+// Автокомплит клиента в окне «Учёт матриц»: подсказки по названию компании.
+function onMatrixAccountingClientInput(query) {
+  const dd = document.getElementById('matrixAccountingClientDropdown');
+  if (!dd) return;
+  const q = String(query || '').trim().toLowerCase();
+  const list = (clients || [])
+    .filter(c => !q || matrixClientNameOf(c).toLowerCase().includes(q))
+    .slice(0, 30);
+  dd.innerHTML = list.length
+    ? list.map(c => `<div class="client-typeahead-item" data-id="${c.id}" data-name="${escapeHtml(matrixClientNameOf(c))}">${escapeHtml(matrixClientNameOf(c) || ('Клиент #' + c.id))}</div>`).join('')
+    : '<div class="client-typeahead-item" style="color:#9ca3af;cursor:default;">Ничего не найдено</div>';
+  dd.style.display = 'block';
+  // Введённый вручную текст без выбора из подсказок сбрасывает привязку.
+  const idEl = document.getElementById('matrixAccountingClient');
+  if (idEl) idEl.value = '';
+}
+
+function selectMatrixAccountingClient(id, name) {
+  const dd = document.getElementById('matrixAccountingClientDropdown');
+  if (dd) dd.style.display = 'none';
+  const idEl = document.getElementById('matrixAccountingClient');
+  if (idEl) idEl.value = id != null ? id : '';
+  const searchEl = document.getElementById('matrixAccountingClientSearch');
+  if (searchEl && name) searchEl.value = name;
 }
 
 function saveMatrixAccounting(e) {
@@ -636,8 +730,15 @@ function saveMatrixAccounting(e) {
   const cipher = String(document.getElementById('matrixAccountingCipher').value || '').trim();
   if (!cipher) { alert('Укажите шифр матрицы'); return; }
   const clientIdRaw = document.getElementById('matrixAccountingClient').value;
-  const clientId = clientIdRaw ? parseInt(clientIdRaw, 10) : null;
-  const client = clientId ? clients.find(c => c.id === clientId) : null;
+  let clientId = clientIdRaw ? parseInt(clientIdRaw, 10) : null;
+  // Если из подсказок не выбирали, но название введено точно — привязываем
+  // к найденному клиенту (как при импорте из файла).
+  if (!clientId) {
+    const typed = String((document.getElementById('matrixAccountingClientSearch') || {}).value || '').trim();
+    const found = typed ? findClientByName(typed) : null;
+    if (found) clientId = found.id;
+  }
+  const client = clientId ? (clients || []).find(c => Number(c.id) === Number(clientId)) : null;
   const weightPerM = String(document.getElementById('matrixAccountingWeight').value || '').trim();
   const press = document.getElementById('matrixAccountingPress').value;
   const idRaw = document.getElementById('matrixAccountingId').value;
@@ -648,7 +749,7 @@ function saveMatrixAccounting(e) {
     if (!m) { alert('Матрица не найдена'); return; }
     m.cipher = cipher;
     m.clientId = clientId;
-    m.clientName = client ? (client.orgName || '') : '';
+    m.clientName = client ? matrixClientNameOf(client) : '';
     m.weightPerM = weightPerM;
     m.press = press;
     saveMatrices();
@@ -656,7 +757,7 @@ function saveMatrixAccounting(e) {
     addMatrix({
       cipher: cipher,
       clientId: clientId,
-      clientName: client ? (client.orgName || '') : '',
+      clientName: client ? matrixClientNameOf(client) : '',
       weightPerM: weightPerM,
       press: press,
       source: 'manual',
@@ -725,13 +826,13 @@ function buildMatricesFromRows(rows) {
     const cipher = matrixImportCell(row[col.cipher]);
     if (!cipher) continue;
     const clientName = matrixImportCell(row[col.client]);
-    const client = clientName
-      ? clients.find(c => String(c.orgName || '').trim().toLowerCase() === clientName.toLowerCase())
-      : null;
+    // Название ищем терпимо к кавычкам и пробелам: точное по смыслу совпадение
+    // привязывает матрицу к ID клиента, а не оставляет прочерк в списке.
+    const client = findClientByName(clientName);
     result.push({
       cipher: cipher,
       clientId: client ? client.id : null,
-      clientName: client ? (client.orgName || clientName) : clientName,
+      clientName: client ? (matrixClientNameOf(client) || clientName) : clientName,
       weight: matrixImportCell(row[col.weight]),
       press: matrixImportCell(row[col.press])
     });
@@ -740,7 +841,7 @@ function buildMatricesFromRows(rows) {
 }
 
 async function importMatricesFromExcel(event) {
-  if (!canManageMatrixAccounting()) {
+  if (!canImportMatrices()) {
     if (event && event.target) event.target.value = '';
     return;
   }
@@ -750,23 +851,56 @@ async function importMatricesFromExcel(event) {
 
   try {
     const rows = await parseSpreadsheetFile(file);
-    const imported = buildMatricesFromRows(rows);
-    if (!imported.length) {
+    const parsed = buildMatricesFromRows(rows);
+    if (!parsed.length) {
       renderMatrixAccounting();
       showMatrixAccountingImportResult('В файле не найдено строк с шифром. Колонки: Клиент, Шифр, Вес за м/п, Пресс.', true);
       return;
     }
-    imported.forEach(r => addMatrix({
-      cipher: r.cipher,
-      clientId: r.clientId,
-      clientName: r.clientName,
-      weightPerM: r.weight,
-      press: r.press,
-      source: 'manual',
-      createdBy: currentUser ? currentUser.id : null
-    }));
+
+    // Менеджер импортирует только по своим клиентам: чужие и неизвестные
+    // строки пропускаются, в отчёте видно, сколько импортировано и почему
+    // часть строк пропущена.
+    const managerMode = !isAdmin() && !isLead();
+    const imported = [];
+    const skipped = [];
+    parsed.forEach(r => {
+      if (managerMode) {
+        const client = r.clientId ? (clients || []).find(c => Number(c.id) === Number(r.clientId)) : null;
+        if (!client) {
+          skipped.push(r.cipher + ' — клиент «' + (r.clientName || 'не указан') + '» не найден в CRM');
+          return;
+        }
+        if (!isOwnClientForManager(client)) {
+          skipped.push(r.cipher + ' — клиент «' + (matrixClientNameOf(client) || r.clientName) + '» не ваш');
+          return;
+        }
+      }
+      addMatrix({
+        cipher: r.cipher,
+        clientId: r.clientId,
+        clientName: r.clientName,
+        weightPerM: r.weight,
+        press: r.press,
+        source: 'manual',
+        createdBy: currentUser ? currentUser.id : null
+      });
+      imported.push(r.cipher);
+    });
+
     renderMatrixAccounting();
-    showMatrixAccountingImportResult('Импортировано матриц: ' + imported.length, false);
+    const skippedText = skipped.length
+      ? '. Пропущено: ' + skipped.length + ' — ' + skipped.slice(0, 5).join('; ') +
+        (skipped.length > 5 ? ' и ещё ' + (skipped.length - 5) : '')
+      : '';
+    if (!imported.length) {
+      showMatrixAccountingImportResult('Импортировано матриц: 0' + skippedText, true);
+      return;
+    }
+    showMatrixAccountingImportResult(
+      'Импортировано матриц: ' + imported.length + skippedText,
+      skipped.length > 0
+    );
   } catch (err) {
     renderMatrixAccounting();
     showMatrixAccountingImportResult('Ошибка при импорте: ' + (err && err.message ? err.message : err), true);
@@ -775,8 +909,8 @@ async function importMatricesFromExcel(event) {
 
 // Шаблон импорта: колонки Клиент, Шифр, Вес за м/п, Пресс и пример заполнения.
 function downloadMatricesTemplate() {
-  if (!canManageMatrixAccounting()) {
-    alert('Шаблон импорта доступен администратору или руководителю.');
+  if (!canImportMatrices()) {
+    alert('Шаблон импорта доступен менеджеру, руководителю и администратору.');
     return;
   }
   if (typeof XLSX === 'undefined') {
