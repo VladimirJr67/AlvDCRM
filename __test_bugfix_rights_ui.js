@@ -68,7 +68,7 @@ run(`
   users = [
     { id: 1, login: 'Admin', password: 'Admin', role: 'admin', name: 'Администратор' },
     { id: 2, login: 'manager', password: 'm', role: 'manager', name: 'Иванов Иван' },
-    { id: 3, login: 'manager2', password: 'm2', role: 'manager', name: 'Сидоров Сидор' },
+    { id: 3, login: 'sidorov', password: 'm2', role: 'manager', name: 'Сидоров Сидор', position: 'менеджер по продажам' },
     { id: 4, login: 'lead', password: 'l', role: 'lead', name: 'Петров Пётр' },
     { id: 5, login: 'dev', password: 'd', role: 'developer', name: 'Разработчик' }
   ];
@@ -197,8 +197,10 @@ run(`
   renderAdminAnalysis();
 `);
 const statsHtml = el('mainContent').innerHTML;
-check('в срезе по менеджерам — русские имена', /manager-name[^>]*>Сидоров Сидор</.test(statsHtml));
-check('в срезе не используется логин как имя', !/manager-name[^>]*>manager2</.test(statsHtml));
+check('в срезе по менеджерам — «Фамилия И.О.»',
+  /manager-name[^>]*>\s*<div class="person-name">Сидоров С\.<\/div>/.test(statsHtml));
+check('в срезе не используется логин как имя', !/person-name[^>]*>manager2</.test(statsHtml));
+check('под ФИО мелкой строкой — должность', /person-sub[^>]*>менеджер по продажам</.test(statsHtml));
 check('есть фильтр по менеджерам', /adminManagerFilter/.test(statsHtml) && /Все задачи/.test(statsHtml));
 
 run('setAdminManagerFilter("3")');
@@ -210,13 +212,16 @@ check('«Все задачи» сбрасывает фильтр', run('adminMan
 
 // Лента комментариев: тот же фильтр.
 run(`
-  clients[0].history = [{ date: '2026-10-01T10:00:00.000Z', type: 'Звонок', manager: 'manager2', comment: 'чужой', authorId: 3 }];
+  clients[0].history = [{ date: '2026-10-01T10:00:00.000Z', type: 'Звонок', manager: 'sidorov', comment: 'чужой', authorId: 3 }];
   clients[1].history = [{ date: '2026-10-01T11:00:00.000Z', type: 'Звонок', manager: 'manager', comment: 'мой', authorId: 2 }];
   adminManagerFilter = '3';
 `);
 const feed = run('commentsForRange()');
 check('лента комментариев фильтруется по менеджеру',
-  feed.length === 1 && feed[0].manager === 'manager2', JSON.stringify(feed.map(f => f.manager)));
+  feed.length === 1 && feed[0].manager === 'sidorov', JSON.stringify(feed.map(f => f.manager)));
+check('в ленте менеджер показан как «Фамилия И.О.»',
+  feed.length === 1 && /person-name[^>]*>Сидоров С\.</.test(feed[0].managerCell || ''),
+  feed.length ? feed[0].managerCell : 'пусто');
 run('adminManagerFilter = "all"');
 
 // Список задач менеджера: период + фильтр клиента.

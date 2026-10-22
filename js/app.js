@@ -177,8 +177,15 @@ function updateUserInfo() {
   const nameEl = document.getElementById('userInfoName') || document.querySelector('.user-info-name');
   if (!currentUser) return;
 
-  const label = (currentUser.name || currentUser.login || '').trim();
-  if (nameEl) nameEl.textContent = label || currentUser.login;
+  // В профиле — «Фамилия И.О.»: имя и фамилия в базе записаны по-разному,
+  // фамилию определяет personShortName (по логину).
+  const label = (typeof personShortName === 'function')
+    ? personShortName(currentUser.name, currentUser.login)
+    : (currentUser.name || currentUser.login || '').trim();
+  if (nameEl) {
+    nameEl.textContent = label || currentUser.login;
+    nameEl.title = (currentUser.name || currentUser.login || '');
+  }
 
   if (avatar) {
     if (currentUser.photo) {

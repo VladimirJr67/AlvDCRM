@@ -322,11 +322,12 @@ check('список «Просрочено» соответствует цифр
 run('adminManagerFilter = "all"');
 
 const feed = run('commentsForRange()');
-check('в ленте комментариев ФИО вместо логина',
-  feed.length === 1 && feed[0].managerName === 'Владимир Куриков', feed.length ? feed[0].managerName : 'пусто');
+check('в ленте комментариев «Фамилия И.О.» вместо логина',
+  feed.length === 1 && feed[0].managerName === 'Куриков В.', feed.length ? feed[0].managerName : 'пусто');
 run('adminAnalysisTab = "comments"; renderAdminAnalysis()');
-check('в таблице ленты выводится ФИО', /Владимир Куриков/.test(el('mainContent').innerHTML) &&
-  !/>Kurikov</.test(el('mainContent').innerHTML));
+const feedHtml = el('mainContent').innerHTML;
+check('в таблице ленты выводится «Фамилия И.О.»', /person-name[^>]*>Куриков В\.</.test(feedHtml));
+check('вторая строка ячейки — должность или логин', /person-sub[^>]*>Kurikov</.test(feedHtml));
 
 console.log(failures ? `\n  Провалов: ${failures}` : '\n  Все проверки багфиксов пройдены');
 process.exitCode = failures ? 1 : 0;

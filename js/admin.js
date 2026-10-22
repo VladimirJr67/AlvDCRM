@@ -1036,14 +1036,30 @@ function taskMatchesManager(t, uid) {
 }
 
 // ФИО менеджера по комментарию: в истории хранится логин (и иногда автор),
-// поэтому показываем имя из профиля, а логин — только если имени нет.
+// поэтому берём пользователя, а показываем «Фамилия И.О.».
+function commentManagerUser(entry) {
+  if (!entry) return null;
+  if (entry.authorId != null) {
+    const u = findUserById(entry.authorId);
+    if (u) return u;
+  }
+  if (entry.manager && typeof findUserByLogin === 'function') return findUserByLogin(entry.manager) || null;
+  return null;
+}
+
 function commentManagerName(entry) {
-  if (!entry) return '—';
-  let u = null;
-  if (entry.authorId != null) u = findUserById(entry.authorId);
-  if (!u && entry.manager && typeof findUserByLogin === 'function') u = findUserByLogin(entry.manager);
-  if (u) return u.name || u.login;
-  return entry.manager || '—';
+  const u = commentManagerUser(entry);
+  if (u) return personShortName(u.name, u.login);
+  return (entry && entry.manager) || '—';
+}
+
+// Ячейка менеджера для таблиц: «Фамилия И.О.» и мелкой строкой должность/логин.
+function managerCellHtml(user) {
+  if (!user) return '<span style="color:#9ca3af;">—</span>';
+  const short = personShortName(user.name, user.login);
+  const sub = personSubLine(user);
+  return `<div class="person-name">${escapeHtml(short)}</div>` +
+    (sub ? `<div class="person-sub">${escapeHtml(sub)}</div>` : '');
 }
 
 function renderAdminAnalysis() {
@@ -1064,38 +1080,35 @@ function renderAdminAnalysis() {
     `<option value="${u.id}"${String(adminManagerFilter) === String(u.id) ? ' selected' : ''}>${escapeHtml(u.name || u.login)}</option>`).join('');
 
   const dateBar = `
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:20px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:10px 14px;flex-wrap:wrap;">
-      <span style="font-size:13px;color:#4b5563;font-weight:500;">Период:</span>
-      <label style="font-size:12px;color:#6b7280;">С</label>
-      <input type="date" id="adminDateFrom" value="${escapeHtml(from)}" onchange="setAdminAnalysisDateRange(this.value, document.getElementById('adminDateTo').value)"
-             style="padding:6px 9px;border:1px solid #d0d5dd;border-radius:5px;font-size:12px;outline:none;">
-      <label style="font-size:12px;color:#6b7280;">По</label>
-      <input type="date" id="adminDateTo" value="${escapeHtml(to)}" onchange="setAdminAnalysisDateRange(document.getElementById('adminDateFrom').value, this.value)"
-             style="padding:6px 9px;border:1px solid #d0d5dd;border-radius:5px;font-size:12px;outline:none;">
+    <div class="analysis-filters">
+      <span class="analysis-filter-label">Период:</span>
+      <label class="analysis-filter-lbl">С</label>
+      <input type="date" id="adminDateFrom" value="${escapeHtml(from)}" onchange="setAdminAnalysisDateRange(this.value, document.getElementById('adminDateTo').value)">
+      <label class="analysis-filter-lbl">По</label>
+      <input type="date" id="adminDateTo" value="${escapeHtml(to)}" onchange="setAdminAnalysisDateRange(document.getElementById('adminDateFrom').value, this.value)">
       <button class="btn btn-sm btn-secondary" onclick="setAdminAnalysisDateRange('${today}','${today}')">Сегодня</button>
       ${(from || to) ? `<button class="btn btn-sm btn-secondary" onclick="setAdminAnalysisDateRange('','')">Сбросить</button>` : ''}
-      <span style="font-size:13px;color:#4b5563;font-weight:500;margin-left:8px;">Менеджер:</span>
-      <select id="adminManagerFilter" onchange="setAdminManagerFilter(this.value)"
-              style="padding:6px 9px;border:1px solid #d0d5dd;border-radius:5px;font-size:12px;outline:none;">
+      <span class="analysis-filter-label" style="margin-left:8px;">Менеджер:</span>
+      <select id="adminManagerFilter" onchange="setAdminManagerFilter(this.value)">
         <option value="all"${adminManagerFilter === 'all' ? ' selected' : ''}>Все менеджеры</option>
         ${managerOpts}
       </select>
       <button class="btn btn-sm ${adminManagerFilter === 'all' ? 'btn-secondary' : ''}" onclick="resetAdminManagerFilter()"
               title="Показать данные по всем менеджерам">Все задачи</button>
       ${adminAnalysisTab === 'comments' ? `
-        <span style="font-size:13px;color:#4b5563;font-weight:500;margin-left:8px;">Отметка:</span>
-        <select onchange="setAdminCommentTagFilter(this.value)" style="padding:6px 9px;border:1px solid #d0d5dd;border-radius:5px;font-size:12px;outline:none;">
+        <span class="analysis-filter-label" style="margin-left:8px;">Отметка:</span>
+        <select onchange="setAdminCommentTagFilter(this.value)">
           <option value="all"${adminCommentTagFilter === 'all' ? ' selected' : ''}>Все комментарии</option>
           <option value="forSelf"${adminCommentTagFilter === 'forSelf' ? ' selected' : ''}>Для себя</option>
           <option value="forReport"${adminCommentTagFilter === 'forReport' ? ' selected' : ''}>Для отчёта</option>
         </select>` : ''}
-      ${(from || to) ? `<span style="font-size:12px;color:#9ca3af;">Показаны данные за период</span>` : ''}
+      ${(from || to) ? `<span class="analysis-filter-note">Показаны данные за период</span>` : ''}
     </div>`;
 
   main.innerHTML = `
-    <div style="padding:25px;max-width:1100px;margin:0 auto;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-        <h1 style="font-size:22px;font-weight:600;color:#1a3a5c;">Анализ</h1>
+    <div class="analysis-page">
+      <div class="analysis-head">
+        <h1>Анализ</h1>
         ${adminAnalysisTab === 'comments'
           ? '<button class="btn" onclick="exportCommentsExcel()">Выгрузить комментарии в Excel</button>'
           : '<button class="btn" onclick="exportAdminReport()">Экспорт в Excel</button>'}
@@ -1196,7 +1209,7 @@ function renderAdminStats() {
         <tbody>
           ${managerRows.length ? managerRows.map(r => `
             <tr>
-              <td class="manager-name" onclick="openAdminTaskList(${r.user.id}, null, { period: true })" title="Все задачи менеджера за выбранный период">${escapeHtml(r.user.name || r.user.login)}</td>
+              <td class="manager-name" onclick="openAdminTaskList(${r.user.id}, null, { period: true })" title="Все задачи менеджера за выбранный период">${managerCellHtml(r.user)}</td>
               ${r.counts.map((c, i) => `
                 <td class="stat-cell" onclick="openAdminTaskList(${r.user.id}, '${escapeHtml(statusCols[i].id)}', { period: true })" title="${escapeHtml(statusCols[i].name)}">${c}</td>
               `).join('')}
@@ -1225,9 +1238,11 @@ function commentsForRange() {
       }
       const tags = commentTagsList(h.tags);
       if (adminCommentTagFilter !== 'all' && tags.indexOf(adminCommentTagFilter) === -1) return;
+      const entryUser = commentManagerUser(h);
       result.push({
         manager: h.manager || '',
         managerName: commentManagerName(h),
+        managerCell: managerCellHtml(entryUser),
         type: h.type || '',
         company: c.orgName || '',
         comment: h.comment || '',
@@ -1265,7 +1280,7 @@ function renderAdminCommentsFeed() {
             <tbody>
               ${comments.map(h => `
                 <tr style="cursor:default;">
-                  <td><strong>${escapeHtml(h.managerName || h.manager || '—')}</strong></td>
+                  <td>${h.managerCell || ('<div class="person-name">' + escapeHtml(h.managerName || h.manager || '—') + '</div>')}</td>
                   <td><span class="badge">${escapeHtml(h.type || '—')}</span></td>
                   <td>${escapeHtml(h.company)}</td>
                   <td><div class="history-comment">${escapeHtml(h.comment || '—')}</div></td>

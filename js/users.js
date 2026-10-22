@@ -81,6 +81,69 @@ function findUserByLogin(login) {
   return users.find(u => u.login.toLowerCase() === String(login).toLowerCase());
 }
 
+/* ===== Короткое имя «Фамилия И.О.» =====
+   В базе ФИО записано по-разному («Владимир Куриков», «Шестернев Андрей»),
+   а логин почти всегда совпадает с фамилией латиницей (Kurikov ↔ Куриков).
+   Поэтому фамилию ищем по логину (через транслитерацию), а если не нашли —
+   берём последнее слово (в CRM чаще «Имя Фамилия»). */
+
+const TRANSLIT_RU = {
+  а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh', з: 'z', и: 'i',
+  й: 'i', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't',
+  у: 'u', ф: 'f', х: 'h', ц: 'c', ч: 'ch', ш: 'sh', щ: 'sch', ъ: '', ы: 'y', ь: '',
+  э: 'e', ю: 'yu', я: 'ya'
+};
+
+// Транслитерация для сравнения с логином: только латиница в нижнем регистре.
+function translitRu(value) {
+  return String(value == null ? '' : value).toLowerCase()
+    .split('').map(ch => (ch in TRANSLIT_RU) ? TRANSLIT_RU[ch] : ch).join('')
+    .replace(/[^a-z]/g, '');
+}
+
+// Фамилия по логину: «Kurikov» → «Куриков» из «Владимир Куриков».
+function personSurnameIndex(parts, login) {
+  const need = translitRu(login);
+  if (!need) return -1;
+  return parts.findIndex(p => {
+    const t = translitRu(p);
+    if (!t) return false;
+    if (t === need) return true;
+    // Логин может быть с хвостом (kurikov1, kurikov_a) — сравниваем основу.
+    return t.length >= 4 && (need.indexOf(t) === 0 || t.indexOf(need) === 0);
+  });
+}
+
+// «Фамилия И.О.» — компактное имя для таблиц и профиля.
+function personShortName(name, login) {
+  const raw = String(name == null ? '' : name).trim();
+  if (!raw) return String(login == null ? '' : login);
+  const parts = raw.split(/\s+/).filter(Boolean);
+  if (parts.length === 1) return parts[0];
+
+  let idx = personSurnameIndex(parts, login);
+  if (idx === -1) {
+    // Отчество (…ич / …вна) на последнем месте — фамилия тогда первая.
+    const last = parts[parts.length - 1].toLowerCase();
+    const patronymic = /(ич|вна|чна)$/.test(last) && parts.length >= 3;
+    idx = patronymic ? 0 : parts.length - 1;
+  }
+  const surname = parts[idx];
+  const initials = parts
+    .filter((p, i) => i !== idx)
+    .map(p => p[0].toUpperCase() + '.')
+    .join('');
+  return initials ? surname + ' ' + initials : surname;
+}
+
+// Вторая, мелкая строка под ФИО: должность, иначе логин.
+function personSubLine(user) {
+  if (!user) return '';
+  const position = String(user.position || '').trim();
+  if (position) return position;
+  return String(user.login || '');
+}
+
 // Роли системы: администратор, менеджер по продажам, руководитель.
 function userRoleLabel(u) {
   if (!u) return ROLE_LABELS[ROLE_MANAGER];

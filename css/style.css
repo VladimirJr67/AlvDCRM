@@ -29,9 +29,6 @@ html.has-session .login-screen { display: none; }
 
 .app { display: none; height: 100vh; }
 .sidebar { width: 220px; background: #fff; border-right: 1px solid #e5e7eb; display: flex; flex-direction: column; padding: 20px 0; }
-.sidebar-logo { padding: 0 20px 20px; display: flex; align-items: center; gap: 10px; }
-.sidebar-logo img { width: 36px; }
-.sidebar-logo span { font-size: 18px; font-weight: 600; color: #1a3a5c; }
 /* Курсы валют (USD / EUR) — компактный виджет в сайдбаре */
 .sidebar-rates { display: flex; gap: 6px; padding: 12px 20px 14px; border-bottom: 1px solid #e5e7eb; }
 .rate-item { flex: 1; display: flex; align-items: center; justify-content: center; gap: 4px; background: #f4f7fb; border: 1px solid #eef1f5; border-radius: 8px; padding: 6px 4px; min-width: 0; white-space: nowrap; }
@@ -64,14 +61,22 @@ html.has-session .login-screen { display: none; }
 .submenu-item { padding: 8px 0; cursor: pointer; color: #6b7280; }
 .submenu-item:hover { color: #1a3a5c; }
 .submenu-item.active { color: #1a3a5c; font-weight: 500; }
+/* Профиль внизу сайдбара: сверху аватар + «Фамилия И.О.», снизу две кнопки. */
 .user-info {
-  padding: 12px 20px;
+  padding: 12px 16px 14px;
   border-top: 1px solid #e5e7eb;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 54px;      /* нижний блок не схлопывается */
+  flex-shrink: 0;        /* не уезжает при длинном имени */
+  min-width: 0;
+}
+.user-info-top {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 54px;      /* нижний блок не схлопывается */
-  flex-shrink: 0;        /* не уезжает при длинном имени */
+  min-width: 0;          /* без этого многоточие во flex не срабатывает */
 }
 .user-avatar {
   width: 32px; height: 32px; border-radius: 50%;
@@ -90,16 +95,22 @@ html.has-session .login-screen { display: none; }
   color: #1a3a5c;
   font-weight: 500;
 }
+.user-info-actions { display: flex; gap: 6px; min-width: 0; }
 .logout-btn {
-  flex-shrink: 0;        /* кнопки не сжимаются */
+  flex: 1 1 0;           /* кнопки делят строку поровну и не вылезают */
+  min-width: 0;
   white-space: nowrap;
-  background: none;
-  border: none;
-  color: #9ca3af;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  color: #4b5563;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 11.5px;
+  padding: 5px 6px;
+  line-height: 1.2;
+  transition: background .15s, color .15s, border-color .15s;
 }
-.logout-btn:first-of-type { margin-left: auto; } /* «Профиль» и «Выйти» прижаты вправо */
+.logout-btn:hover { background: #e8eef7; color: #1a3a5c; border-color: #cfd9e6; }
 
 .main { flex: 1; overflow: hidden; display: flex; }
 #mainContent { min-width: 0; flex: 1; width: 100%; }
@@ -362,7 +373,45 @@ select[multiple] option:checked { background: #3b82f6; color: #fff; }
 .manager-group-empty { padding: 18px 16px; font-size: 12px; color: #9ca3af; text-align: center; }
 
 /* Вкладки «Анализ» */
-.analysis-tabs { display: flex; gap: 8px; margin-bottom: 20px; }
+.analysis-tabs { display: flex; gap: 8px; margin-bottom: 10px; }
+
+/* ============================================================
+   «Анализ»: компактная шапка — фильтры сразу под заголовком
+   ============================================================ */
+.analysis-page { padding: 16px 25px 25px; max-width: 1100px; margin: 0 auto; }
+.analysis-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 0 0 8px; }
+.analysis-head h1 { font-size: 22px; font-weight: 600; color: #1a3a5c; margin: 0; }
+.analysis-filters {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 8px;
+  padding: 8px 12px; margin-bottom: 14px;
+}
+.analysis-filter-label { font-size: 13px; color: #4b5563; font-weight: 500; }
+.analysis-filter-lbl { font-size: 12px; color: #6b7280; }
+.analysis-filters input[type="date"],
+.analysis-filters select {
+  padding: 6px 9px; border: 1px solid #d0d5dd; border-radius: 5px;
+  font-size: 12px; outline: none; background: #fff; color: #374151;
+}
+.analysis-filter-note { font-size: 12px; color: #9ca3af; }
+
+/* ФИО менеджера в две строки: «Фамилия И.О.» + мелкой строкой должность/логин */
+.person-name {
+  font-weight: 600; color: #1a3a5c; font-size: 13px; line-height: 1.25;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px;
+}
+.person-sub {
+  font-size: 11px; color: #9ca3af; line-height: 1.25; margin-top: 1px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px;
+}
+
+body.theme-dark .analysis-head h1 { color: var(--text); }
+body.theme-dark .analysis-filters { background: var(--surface); border-color: var(--border); }
+body.theme-dark .analysis-filter-label { color: var(--text-dim); }
+body.theme-dark .analysis-filters input[type="date"],
+body.theme-dark .analysis-filters select { background: var(--surface-2); border-color: var(--border); color: var(--text); }
+body.theme-dark .person-name { color: var(--text); }
+body.theme-dark .person-sub { color: var(--text-dim); }
 
 /* Вкладки разделов с двумя списками (например, «Заказы/Матрицы») */
 .section-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
@@ -899,7 +948,6 @@ body.theme-dark { background: var(--bg); color: var(--text); }
 
 /* Каркас: сайдбар, меню, блоки в сайдбаре */
 body.theme-dark .sidebar { background: var(--surface); border-right-color: var(--border); }
-body.theme-dark .sidebar-logo span { color: var(--text); }
 body.theme-dark .menu-item { color: var(--text-dim); }
 body.theme-dark .menu-item:hover { background: var(--surface-2); color: var(--text); }
 body.theme-dark .menu-item.active { background: var(--surface-2); color: #7fb2e5; }

@@ -108,5 +108,47 @@ check('высота контента в админке не зажата фле�
 check('есть отступ до самого низа',
   /#mainContent\.admin-scroll\s*\{[^}]*padding-bottom:\s*\d+px/.test(css));
 
+/* ================= 4. Сайдбар: без дублирующего логотипа (П.1) ================= */
+check('в сайдбаре нет блока с логотипом', !/sidebar-logo/.test(indexSrc) && !/sidebar-logo/.test(css));
+check('курсы валют остались в сайдбаре', /id="sidebarRates"/.test(indexSrc));
+check('цены остались в сайдбаре', /id="sidebarMinPrices"/.test(indexSrc));
+
+/* ================= 5. Профиль внизу — две строки (П.3) ================= */
+check('профиль разбит на две строки', /class="user-info"[\s\S]*?class="user-info-top"[\s\S]*?class="user-info-actions"/.test(indexSrc));
+check('в первой строке аватар и имя', /user-info-top[\s\S]{0,200}userAvatar[\s\S]{0,200}userInfoName/.test(indexSrc));
+check('вторая строка — кнопки «Профиль» и «Выйти»',
+  /user-info-actions[\s\S]{0,300}openProfileModal\(\)[\s\S]{0,300}doLogout\(\)/.test(indexSrc));
+check('профиль — колонка, а не одна тесная строка',
+  /\.user-info\s*\{[^}]*flex-direction:\s*column/.test(css));
+check('длинное ФИО обрезается многоточием',
+  /\.user-info-name\s*\{[^}]*text-overflow:\s*ellipsis/.test(css) &&
+  /\.user-info-name\s*\{[^}]*white-space:\s*nowrap/.test(css));
+check('кнопки профиля не вылезают за сайдбар',
+  /\.user-info-actions\s*\{[^}]*display:\s*flex/.test(css) &&
+  /\.logout-btn\s*\{[^}]*flex:\s*1/.test(css));
+
+/* ================= 6. Анализ: фильтры под заголовком (П.2) ================= */
+check('фильтры собраны в отдельный блок сразу под заголовком',
+  /class="analysis-head"/.test(read('admin.js')) && /class="analysis-filters"/.test(read('admin.js')));
+check('у страницы «Анализ» компактный верхний отступ',
+  /\.analysis-page\s*\{[^}]*padding:\s*1[0-9]px/.test(css));
+check('у шапки минимальный отступ до фильтров',
+  /\.analysis-head\s*\{[^}]*margin:\s*0 0 [0-9]+px/.test(css) &&
+  /\.analysis-tabs\s*\{[^}]*margin-bottom:\s*[0-9]+px/.test(css));
+
+/* ================= 7. «Фамилия И.О.» вместо логина (П.2) ================= */
+check('формат «Фамилия И.О.» — фамилия по логину',
+  run("personShortName('Владимир Куриков', 'Kurikov')") === 'Куриков В.');
+check('фамилия первой в записи «Фамилия Имя»',
+  run("personShortName('Шестернев Андрей', 'Shesternev')") === 'Шестернев А.');
+check('две части без совпадения логина — фамилия последняя',
+  run("personShortName('Андрей Савочкин', 'x')") === 'Савочкин А.');
+check('три части — фамилия и два инициала',
+  run("personShortName('Иванов Иван Иванович', 'Ivanov')") === 'Иванов И.И.');
+check('одно слово не ломается', run("personShortName('Создатель', 'Разраб')") === 'Создатель');
+check('вторая строка — должность или логин',
+  run("personSubLine({ login: 'Kurikov', position: 'менеджер по продажам' })") === 'менеджер по продажам' &&
+  run("personSubLine({ login: 'Shesternev', position: '' })") === 'Shesternev');
+
 console.log(failures ? `\n  Провалов: ${failures}` : '\n  Все проверки чистки интерфейса пройдены');
 process.exitCode = failures ? 1 : 0;
