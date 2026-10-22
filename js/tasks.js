@@ -520,22 +520,39 @@ function visibleTasks() {
 // Столбцы, задачи из которых считаются завершёнными. Ищем явные имена
 // (Завершены / Выполнено / Закрытые задачи / Готово и т.п.), а если их нет —
 // считаем завершающим последний столбец доски (на канбане справа — готово).
+// Учитываются и индивидуальные столбцы менеджеров: «Выполнено» на личной
+// доске — такой же системный столбец, его задачи не должны попадать в счётчик.
 const COMPLETED_COLUMN_RE = /заверш|выполн|закрыт|готово|сделан/i;
 
+function allTaskColumnsFlat() {
+  const list = Array.isArray(taskColumns) ? taskColumns.slice() : [];
+  const perManager = (typeof taskColumnsPerManager === 'object' && taskColumnsPerManager) ? taskColumnsPerManager : {};
+  Object.keys(perManager).forEach(uid => {
+    const cols = perManager[uid];
+    if (!Array.isArray(cols)) return;
+    cols.forEach(c => {
+      if (!c || !c.id) return;
+      if (!list.some(x => x && x.id === c.id)) list.push(c);
+    });
+  });
+  return list.sort((a, b) => (a.order || 0) - (b.order || 0));
+}
+
 function taskCompletedColumnIds() {
-  const byName = taskColumns
+  const all = allTaskColumnsFlat();
+  const byName = all
     .filter(c => c && (c.id === 'completed' || COMPLETED_COLUMN_RE.test(String(c.name || ''))))
     .map(c => c.id);
   if (byName.length) return byName;
   // Запасной вариант: последний столбец по порядку — он и есть «финиш».
-  const sorted = [...taskColumns].sort((a, b) => (a.order || 0) - (b.order || 0));
+  const sorted = allTaskColumnsFlat();
   return sorted.length ? [sorted[sorted.length - 1].id] : [];
 }
 
 // Системный столбец, в который уходит закрытая задача: «Закрытые задачи»,
 // иначе первый завершающий, иначе последний столбец доски.
 function taskClosedColumnId() {
-  const system = taskColumns.find(c => c && /^закрыт/i.test(String(c.name || '')));
+  const system = allTaskColumnsFlat().find(c => c && /^закрыт/i.test(String(c.name || '')));
   if (system) return system.id;
   const completed = taskCompletedColumnIds();
   return completed.length ? completed[0] : null;
@@ -1459,6 +1476,8 @@ function renderTaskCard(task, col) {
   return `
     <div ${col.assigned ? '' : `draggable="true" ondragstart="handleDragStart(event, ${task.id})" ondragend="handleDragEnd(event)"`}
          onclick="openTaskInfo(${task.id})"
+         ondblclick="event.stopPropagation(); closeModal('taskInfoModal'); editTask(${task.id})"
+         title="Клик — карточка задачи, двойной клик — редактирование"
          style="background:#fff;border-radius:8px;padding:12px;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,0.08);border-left:3px solid ${col.assigned ? '#7c3aed' : (col.coop ? '#0ea5e9' : priority.color)};transition:all 0.15s;"
          onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.12)'"
          onmouseout="this.style.boxShadow='0 1px 3px rgba(0,0,0,0.08)'">
@@ -2188,53 +2207,103 @@ function cancelTaskClose() {
   closeModal('taskCloseModal');
 }
 
-/* ===== Закрытие задачи с подтверждением =====
-   Отдельный вариант закрытия: кнопка «Закрыть задачу» в карточке открывает
-   модалку подтверждения с полем комментария. Правила закрытия (задача-ссылка,
-   активность) соблюдаются через setTaskStatus(). Режим 'noprofit' закрывает
-   задачу как «Нерентабельный клиент» — без следующей активности. */
+/* ===== Умное закрытие задачи =====
+   Кнопка «Закрыть задачу» открывает окно как у добавления комментария:
+   тип задачи (справочник), дата и время следующей активности, комментарий и
+   отметка «Для себя / Для отчёта». При сохранении задача уходит в «Закрытые
+   задачи», на указанную дату создаётся следующая активность (кроме
+   «Нерентабельный клиент»), а комментарий попадает в аналитику — в ленту
+   комментариев клиента. */
 
-let taskCloseConfirmMode = 'close';  // 'close' | 'noprofit'
+function taskNextActivityDefaultDate(task) {
+  // По умолчанию — через день от текущего срока задачи. Если срок уже в
+  // прошлом (просроченная задача), предлагаем завтра в это же время.
+  const base = parseDeadline(task && task.deadline) || new Date();
+  let next = new Date(base.getTime() + 24 * 60 * 60 * 1000);
+  const now = new Date();
+  if (next.getTime() <= now.getTime()) {
+    next = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  }
+  const p = n => String(n).padStart(2, '0');
+  return next.getFullYear() + '-' + p(next.getMonth() + 1) + '-' + p(next.getDate()) +
+    'T' + p(next.getHours()) + ':' + p(next.getMinutes());
+}
 
-function openTaskCloseConfirm(taskId, mode) {
+function isTaskCloseNoprofit() {
+  const el = document.getElementById('taskCloseNoprofit');
+  return !!(el && el.checked);
+}
+
+function readTaskCloseField(id) {
+  const el = document.getElementById(id);
+  return el ? String(el.value == null ? '' : el.value).trim() : '';
+}
+
+// Кнопка «Закрыть» активна, когда есть комментарий и отметка, а для обычного
+// закрытия — ещё и дата следующей активности.
+function updateTaskCloseSubmit() {
+  const submit = document.getElementById('taskCloseConfirmSubmit');
+  if (!submit) return;
+  const comment = readTaskCloseField('taskCloseConfirmComment');
+  const tag = readTaskCloseField('taskCloseTag');
+  const date = readTaskCloseField('taskCloseNextDate');
+  submit.disabled = !(comment && tag && (isTaskCloseNoprofit() || date));
+}
+
+function onTaskCloseConfirmInput() {
+  updateTaskCloseSubmit();
+}
+
+// «Нерентабельный клиент»: тип задачи и дата не нужны — блокируем их.
+function applyTaskCloseMode() {
+  const noprofit = isTaskCloseNoprofit();
+  const fields = document.getElementById('taskCloseNextFields');
+  if (fields) fields.style.display = noprofit ? 'none' : '';
+  const typeEl = document.getElementById('taskCloseType');
+  const dateEl = document.getElementById('taskCloseNextDate');
+  if (typeEl) typeEl.disabled = noprofit;
+  if (dateEl) dateEl.disabled = noprofit;
+  const noteEl = document.getElementById('taskCloseConfirmNote');
+  if (noteEl) {
+    noteEl.textContent = noprofit
+      ? 'Клиент нерентабельный: следующая активность не создаётся, задача просто закроется.'
+      : 'Задача уйдёт в «Закрытые задачи», а на указанную дату создастся следующая активность.';
+  }
+  updateTaskCloseSubmit();
+}
+
+function openTaskCloseConfirm(taskId) {
   const t = tasks.find(x => x.id === taskId);
   if (!t) return;
   if (isCompletedColumnId(t.status)) { alert('Задача уже закрыта.'); return; }
   if (!taskCanBeClosed(t)) { alert(taskClosureBlockMessage(t)); return; }
-  taskCloseConfirmMode = mode === 'noprofit' ? 'noprofit' : 'close';
-  const noprofit = taskCloseConfirmMode === 'noprofit';
 
   document.getElementById('taskCloseConfirmId').value = taskId;
-  const headingEl = document.getElementById('taskCloseConfirmHeading');
-  if (headingEl) headingEl.textContent = noprofit ? 'Нерентабельный клиент' : 'Закрыть задачу?';
   const titleEl = document.getElementById('taskCloseConfirmTitle');
-  if (titleEl) {
-    titleEl.innerHTML = (noprofit ? 'Нерентабельный клиент · ' : 'Закрыть задачу · ') +
-      '<strong>' + escapeHtml(t.title || '—') + '</strong>';
+  if (titleEl) titleEl.innerHTML = '<strong>' + escapeHtml(t.title || '—') + '</strong>';
+
+  // Тип задачи — из справочника типов взаимодействий (как в комментариях).
+  const types = (typeof interactionTypes !== 'undefined' && interactionTypes.length)
+    ? interactionTypes.slice()
+    : ['Звонок'];
+  const typeSelect = document.getElementById('taskCloseType');
+  if (typeSelect) {
+    typeSelect.innerHTML = types.map(x => `<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`).join('');
+    const currentName = (taskColumns.find(c => c.id === t.status) || {}).name;
+    const match = types.find(x => String(x).toLowerCase() === String(currentName || '').toLowerCase());
+    typeSelect.value = match || types[0];
   }
-  const noteEl = document.getElementById('taskCloseConfirmNote');
-  if (noteEl) {
-    noteEl.textContent = noprofit
-      ? 'Задача закроется без следующей активности — комментарий попадёт в отчёт по комментариям.'
-      : 'Задача уйдёт в «Закрытые задачи». Комментарий обязателен и попадёт в отчёт.';
-  }
-  const submit = document.getElementById('taskCloseConfirmSubmit');
-  if (submit) {
-    submit.textContent = noprofit ? 'Нерентабельный клиент' : 'Закрыть задачу';
-    submit.disabled = true;
-  }
+  const dateEl = document.getElementById('taskCloseNextDate');
+  if (dateEl) dateEl.value = taskNextActivityDefaultDate(t);
   const commentEl = document.getElementById('taskCloseConfirmComment');
   if (commentEl) commentEl.value = '';
-  document.getElementById('taskCloseConfirmModal').classList.add('active');
-}
+  const tagEl = document.getElementById('taskCloseTag');
+  if (tagEl) tagEl.value = '';
+  const noprofitEl = document.getElementById('taskCloseNoprofit');
+  if (noprofitEl) noprofitEl.checked = false;
 
-// Кнопка «Закрыть задачу» в окне закрытия активна только при непустом
-// обязательном комментарии.
-function onTaskCloseConfirmInput() {
-  const comment = document.getElementById('taskCloseConfirmComment');
-  const submit = document.getElementById('taskCloseConfirmSubmit');
-  if (!comment || !submit) return;
-  submit.disabled = !String(comment.value || '').trim();
+  applyTaskCloseMode();
+  document.getElementById('taskCloseConfirmModal').classList.add('active');
 }
 
 // Общая часть закрытия: перевод в системный столбец «Закрытые задачи» и
@@ -2254,7 +2323,7 @@ function closeTaskInternal(t, comment) {
 
 // Комментарий по задаче уходит в отчёт по комментариям: пишем запись в
 // историю взаимодействий клиента (если задача к нему привязана).
-function addClientCommentFromTask(task, type, comment, nextAt, taskId) {
+function addClientCommentFromTask(task, type, comment, nextAt, taskId, tags) {
   if (!task || task.clientId == null) return null;
   if (typeof clients === 'undefined' || !Array.isArray(clients)) return null;
   const client = clients.find(c => c.id === task.clientId);
@@ -2271,7 +2340,7 @@ function addClientCommentFromTask(task, type, comment, nextAt, taskId) {
     manager: currentUser ? currentUser.login : '',
     authorId: currentUser ? currentUser.id : null,
     comment: comment || '',
-    tags: ['forReport'],
+    tags: Array.isArray(tags) && tags.length ? tags.slice() : ['forReport'],
     closedAt: now,
     nextActivityAt: nextAt || null,
     taskId: taskId != null ? taskId : null,
@@ -2282,147 +2351,72 @@ function addClientCommentFromTask(task, type, comment, nextAt, taskId) {
   return entry;
 }
 
-// Подтверждение закрытия: обязательный комментарий, перевод в системный
-// столбец «Закрытые задачи» и фиксация даты/автора закрытия.
+// Подтверждение закрытия: комментарий, отметка, тип и дата следующей
+// активности. Задача уходит в «Закрытые задачи», создаётся следующая
+// активность (кроме «Нерентабельный клиент»), комментарий — в аналитику.
 function confirmTaskClose() {
   const idEl = document.getElementById('taskCloseConfirmId');
   if (!idEl) return { ok: false, error: 'Задача не выбрана' };
   const t = tasks.find(x => x.id === parseInt(idEl.value, 10));
   if (!t) return { ok: false, error: 'Задача не найдена' };
+  if (isCompletedColumnId(t.status)) { alert('Задача уже закрыта.'); return { ok: false, error: 'Задача закрыта' }; }
+  if (!taskCanBeClosed(t)) { alert(taskClosureBlockMessage(t)); return { ok: false, error: 'Закрыть нельзя' }; }
 
-  const commentEl = document.getElementById('taskCloseConfirmComment');
-  const comment = commentEl ? String(commentEl.value || '').trim() : '';
+  const comment = readTaskCloseField('taskCloseConfirmComment');
   if (!comment) {
     alert('Напишите комментарий — без него задачу закрыть нельзя.');
     return { ok: false, error: 'Нет комментария' };
   }
+  const tag = readTaskCloseField('taskCloseTag');
+  if (!tag) {
+    alert('Выберите отметку комментария: «Для себя» или «Для отчёта».');
+    return { ok: false, error: 'Нет отметки' };
+  }
+  const noprofit = isTaskCloseNoprofit();
+  const type = noprofit ? 'Нерентабелен' : readTaskCloseField('taskCloseType');
+  const date = noprofit ? '' : readTaskCloseField('taskCloseNextDate');
+  if (!noprofit && !date) {
+    alert('Укажите дату и время следующей активности.');
+    return { ok: false, error: 'Нет даты' };
+  }
 
-  const noprofit = taskCloseConfirmMode === 'noprofit';
+  // 1. Текущая задача закрывается.
   const res = closeTaskInternal(t, comment);
   if (!res.ok) { alert(res.error); return res; }
 
-  // «Нерентабельный клиент»: закрываем без следующей активности, но
-  // комментарий остаётся в отчёте по комментариям.
+  // 2. Следующая активность — кроме «Нерентабельный клиент».
+  let newTask = null;
   if (noprofit) {
     t.closeKind = 'noprofit';
-    addClientCommentFromTask(t, 'Нерентабелен', comment, null, t.id);
-    saveTasks();
+  } else {
+    const client = t.clientId != null ? clients.find(c => c.id === t.clientId) : null;
+    const columnId = activityColumnId(type) || t.status;
+    newTask = addAutoTask({
+      title: activityTaskTitle(type || 'Активность', client ? client.orgName : ''),
+      description: comment,
+      deadline: date,
+      status: columnId,
+      clientId: t.clientId != null ? t.clientId : null,
+      contactId: t.contactId != null ? t.contactId : null,
+      ownerId: t.ownerId != null ? t.ownerId : (currentUser ? currentUser.id : null),
+      source: 'activity'
+    });
+    t.nextTaskId = newTask ? newTask.id : null;
   }
+
+  // 3. Комментарий — в аналитику (история взаимодействий клиента).
+  addClientCommentFromTask(t, type, comment, date || null, newTask ? newTask.id : t.id, [tag]);
+  saveTasks();
 
   closeModal('taskCloseConfirmModal');
   closeModal('taskInfoModal');
   closeModal('taskModal');
   refreshAfterTaskChange();
-  return { ok: true, status: res.status, noprofit: noprofit };
+  return { ok: true, status: res.status, noprofit: noprofit, next: newTask ? newTask.id : null };
 }
 
 function closeTaskConfirmModal() {
   closeModal('taskCloseConfirmModal');
-}
-
-/* ===== «Добавить следующую активность» =====
-   Закрывает текущую задачу и сразу создаёт следующую: тип задачи, дата и
-   комментарий. Комментарий уходит в отчёт по комментариям (история клиента),
-   новая задача встаёт в столбец, привязанный к выбранному типу. */
-
-function openTaskNextActivity(taskId) {
-  const t = tasks.find(x => x.id === taskId);
-  if (!t) return;
-  if (isCompletedColumnId(t.status)) { alert('Задача уже закрыта.'); return; }
-  if (!taskCanBeClosed(t)) { alert(taskClosureBlockMessage(t)); return; }
-  document.getElementById('taskNextActivityTaskId').value = t.id;
-
-  const titleEl = document.getElementById('taskNextActivityTitle');
-  if (titleEl) titleEl.textContent = 'Следующая активность';
-
-  // Тип задачи — из справочника типов взаимодействий (как в комментариях).
-  const types = (typeof interactionTypes !== 'undefined' && interactionTypes.length)
-    ? interactionTypes.slice()
-    : ['Звонок'];
-  const select = document.getElementById('taskNextActivityType');
-  if (select) {
-    select.innerHTML = types.map(x => `<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`).join('');
-    const currentName = (taskColumns.find(c => c.id === t.status) || {}).name;
-    const match = types.find(x => String(x).toLowerCase() === String(currentName || '').toLowerCase());
-    select.value = match || types[0];
-  }
-
-  const dateEl = document.getElementById('taskNextActivityDate');
-  if (dateEl) {
-    // По умолчанию — через день, в то же время, что и текущий срок.
-    const base = parseDeadline(t.deadline) || new Date();
-    const next = new Date(base.getTime() + 24 * 60 * 60 * 1000);
-    const p = n => String(n).padStart(2, '0');
-    dateEl.value = next.getFullYear() + '-' + p(next.getMonth() + 1) + '-' + p(next.getDate()) +
-      'T' + p(next.getHours()) + ':' + p(next.getMinutes());
-  }
-  const commentEl = document.getElementById('taskNextActivityComment');
-  if (commentEl) commentEl.value = '';
-  const submit = document.getElementById('taskNextActivitySubmit');
-  if (submit) submit.disabled = true;
-  document.getElementById('taskNextActivityModal').classList.add('active');
-}
-
-function onTaskNextActivityInput() {
-  const date = document.getElementById('taskNextActivityDate');
-  const comment = document.getElementById('taskNextActivityComment');
-  const submit = document.getElementById('taskNextActivitySubmit');
-  if (!submit) return;
-  const ok = !!(date && String(date.value || '').trim()) && !!(comment && String(comment.value || '').trim());
-  submit.disabled = !ok;
-}
-
-function closeTaskNextActivity() {
-  closeModal('taskNextActivityModal');
-}
-
-// Создание следующей задачи + закрытие текущей с комментарием.
-function submitTaskNextActivity() {
-  const idEl = document.getElementById('taskNextActivityTaskId');
-  const t = tasks.find(x => x.id === parseInt(idEl ? idEl.value : '', 10));
-  if (!t) { alert('Задача не найдена'); return { ok: false, error: 'Задача не найдена' }; }
-  if (isCompletedColumnId(t.status)) { alert('Задача уже закрыта.'); return { ok: false, error: 'Задача закрыта' }; }
-  if (!taskCanBeClosed(t)) { alert(taskClosureBlockMessage(t)); return { ok: false, error: 'Закрыть нельзя' }; }
-
-  const typeEl = document.getElementById('taskNextActivityType');
-  const type = typeEl ? String(typeEl.value || '').trim() : '';
-  const dateEl = document.getElementById('taskNextActivityDate');
-  const date = dateEl ? String(dateEl.value || '').trim() : '';
-  const commentEl = document.getElementById('taskNextActivityComment');
-  const comment = commentEl ? String(commentEl.value || '').trim() : '';
-
-  if (!date) { alert('Укажите дату следующей активности.'); return { ok: false, error: 'Нет даты' }; }
-  if (!comment) { alert('Напишите комментарий — он попадёт в отчёт по комментариям.'); return { ok: false, error: 'Нет комментария' }; }
-
-  const client = t.clientId != null ? clients.find(c => c.id === t.clientId) : null;
-  // Столбец новой задачи: привязанный к типу, иначе — текущий столбец задачи.
-  const columnId = activityColumnId(type) || t.status;
-  const newTask = addAutoTask({
-    title: activityTaskTitle(type || 'Активность', client ? client.orgName : ''),
-    description: comment,
-    deadline: date,
-    status: columnId,
-    clientId: t.clientId != null ? t.clientId : null,
-    contactId: t.contactId != null ? t.contactId : null,
-    ownerId: t.ownerId != null ? t.ownerId : (currentUser ? currentUser.id : null),
-    kind: 'regular',
-    source: 'activity'
-  });
-
-  // Комментарий — в отчёт по комментариям (история взаимодействий клиента).
-  addClientCommentFromTask(t, type, comment, date, newTask ? newTask.id : null);
-
-  // Текущая задача закрывается с тем же комментарием.
-  const res = closeTaskInternal(t, comment);
-  if (!res.ok) { alert(res.error); return res; }
-  t.nextTaskId = newTask ? newTask.id : null;
-  saveTasks();
-
-  closeModal('taskNextActivityModal');
-  closeModal('taskInfoModal');
-  closeModal('taskModal');
-  refreshAfterTaskChange();
-  return { ok: true, closed: t.id, next: newTask ? newTask.id : null, status: res.status };
 }
 
 /* ===== Перенос активности =====
@@ -2518,9 +2512,12 @@ function parseDeadline(deadline) {
 }
 
 // Задача просрочена: дедлайн наступил (с учётом времени), задача не завершена.
+// Закрытые («Закрытые задачи», «Выполнено», «Готово» и их аналоги) в счётчик
+// просрочки не попадают — учитываются только активные задачи.
 function taskOverdue(task) {
   if (!task) return false;
   if (isCompletedColumnId(task.status)) return false;
+  if (task.assignmentStatus === 'completed') return false;
   const dl = parseDeadline(task.deadline);
   if (!dl) return false;
   return dl < new Date();
@@ -2677,11 +2674,10 @@ function openTaskInfo(taskId) {
   const actions = document.getElementById('taskInfoActions');
   const closed = isCompletedColumnId(t.status);
   if (actions) {
+    // Внизу карточки — только два действия: «Перенести активность» и
+    // «Закрыть задачу» (закрытие включает создание следующей активности).
     actions.innerHTML = `
-      <button type="button" class="btn btn-secondary" onclick="closeModal('taskInfoModal'); openTaskModal(tasks.find(x=>x.id===${t.id}))">Редактировать</button>
       <button type="button" class="btn btn-secondary" onclick="openTaskReschedule(${t.id})"${closed ? ' disabled' : ''}>Перенести активность</button>
-      <button type="button" class="btn btn-secondary" onclick="openTaskNextActivity(${t.id})"${closed ? ' disabled' : ''}>Добавить следующую активность</button>
-      <button type="button" class="btn btn-secondary" onclick="openTaskCloseConfirm(${t.id}, 'noprofit')"${closed ? ' disabled' : ''}>Нерентабельный клиент</button>
       <button type="button" class="btn" onclick="openTaskCloseConfirm(${t.id})"${closed ? ' disabled' : ''}>Закрыть задачу</button>`;
   }
   document.getElementById('taskInfoModal').classList.add('active');

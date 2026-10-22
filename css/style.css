@@ -736,8 +736,7 @@ body.theme-dark .person-sub { color: var(--text-dim); }
    но ниже системных уведомлений (.toast-host, z-index 500). */
 #taskInfoModal { z-index: 220; }
 #taskCloseConfirmModal,
-#taskRescheduleModal,
-#taskNextActivityModal { z-index: 300; }
+#taskRescheduleModal { z-index: 300; }
 
 /* ============================================================
    Карточка «Информация о задаче»: блоки вместо сухой таблицы
@@ -779,6 +778,22 @@ body.theme-dark .person-sub { color: var(--text-dim); }
 
 .task-info-table { width: 100%; border-collapse: collapse; }
 .task-info-table tr + tr td { border-top: 1px solid #f3f4f6; }
+
+/* Окно «Закрыть задачу»: название задачи и переключатель «Нерентабельный» */
+.task-close-title {
+  font-size: 13px; color: #1f2937; margin-bottom: 12px;
+  padding: 8px 10px; background: #f9fafb; border-radius: 6px;
+}
+.task-close-noprofit {
+  display: flex; align-items: center; gap: 8px; cursor: pointer;
+  font-size: 12.5px; color: #b91c1c; background: #fef2f2;
+  border: 1px solid #fecaca; border-radius: 6px; padding: 8px 10px; margin-top: 4px;
+}
+.task-close-noprofit input { accent-color: #ef4444; width: 14px; height: 14px; flex-shrink: 0; }
+.task-close-noprofit:hover { background: #fee2e2; }
+
+body.theme-dark .task-close-title { background: var(--surface-2); color: var(--text); }
+body.theme-dark .task-close-noprofit { background: #3a1f22; border-color: #5c2b2f; color: #f0a3a3; }
 
 body.theme-dark .task-info-title { color: var(--text); }
 body.theme-dark .task-info-chip { background: var(--surface-2); border-color: var(--border); color: var(--text-dim); }

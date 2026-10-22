@@ -621,57 +621,57 @@ function injectModals() {
     </div>
 
     <div class="modal-overlay" id="taskCloseConfirmModal" onclick="if(event.target===this)closeTaskConfirmModal()">
-      <div class="modal" style="width:480px;max-width:94vw;">
+      <div class="modal" style="width:520px;max-width:94vw;">
         <div class="modal-head">
-          <h2 id="taskCloseConfirmHeading">Закрыть задачу?</h2>
+          <h2 id="taskCloseConfirmHeading">Закрыть задачу</h2>
           <button type="button" class="modal-close-icon" onclick="closeTaskConfirmModal()" title="Отмена" aria-label="Отмена">✕</button>
         </div>
         <input type="hidden" id="taskCloseConfirmId">
         <div class="form-section">
-          <div id="taskCloseConfirmTitle" style="font-size:13px;color:#1f2937;margin-bottom:8px;"></div>
-          <div id="taskCloseConfirmNote" class="field-hint" style="margin-bottom:12px;"></div>
+          <div id="taskCloseConfirmTitle" class="task-close-title"></div>
+
+          <!-- Тип и дата следующей активности: скрываются для нерентабельного -->
+          <div id="taskCloseNextFields">
+            <div class="form-row">
+              <div class="form-group">
+                <label>Тип задачи</label>
+                <select id="taskCloseType" onchange="onTaskCloseConfirmInput()"></select>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Дата и время следующей активности *</label>
+                <input type="datetime-local" id="taskCloseNextDate" onchange="onTaskCloseConfirmInput()">
+              </div>
+            </div>
+          </div>
+
           <div class="form-group">
             <label>Комментарий *</label>
             <textarea id="taskCloseConfirmComment" rows="3" placeholder="Что сделано" oninput="onTaskCloseConfirmInput()"></textarea>
-            <div class="field-hint">Без комментария задачу закрыть нельзя.</div>
           </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>Отметка *</label>
+              <select id="taskCloseTag" onchange="onTaskCloseConfirmInput()">
+                <option value="">— выберите отметку —</option>
+                <option value="forSelf">Для себя</option>
+                <option value="forReport">Для отчёта</option>
+              </select>
+            </div>
+          </div>
+
+          <label class="task-close-noprofit">
+            <input type="checkbox" id="taskCloseNoprofit" onchange="applyTaskCloseMode()">
+            <span>Нерентабельный клиент (без следующей активности)</span>
+          </label>
+
+          <div id="taskCloseConfirmNote" class="field-hint" style="margin-top:8px;"></div>
         </div>
         <div class="modal-actions">
           <button type="button" class="btn btn-secondary" onclick="closeTaskConfirmModal()">Отмена</button>
           <button type="button" class="btn" id="taskCloseConfirmSubmit" onclick="confirmTaskClose()" disabled>Закрыть задачу</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="modal-overlay" id="taskNextActivityModal" onclick="if(event.target===this)closeTaskNextActivity()">
-      <div class="modal" style="width:520px;max-width:94vw;">
-        <div class="modal-head">
-          <h2 id="taskNextActivityTitle">Следующая активность</h2>
-          <button type="button" class="modal-close-icon" onclick="closeTaskNextActivity()" title="Отмена" aria-label="Отмена">✕</button>
-        </div>
-        <input type="hidden" id="taskNextActivityTaskId">
-        <div class="form-section">
-          <div class="form-group">
-            <label>Тип задачи *</label>
-            <select id="taskNextActivityType" onchange="onTaskNextActivityInput()"></select>
-          </div>
-          <div class="form-group">
-            <label>Следующая дата и время *</label>
-            <input type="datetime-local" id="taskNextActivityDate" onchange="onTaskNextActivityInput()">
-          </div>
-          <div class="form-group">
-            <label>Комментарий *</label>
-            <textarea id="taskNextActivityComment" rows="3" placeholder="Что сделано и что дальше"
-                      oninput="onTaskNextActivityInput()"></textarea>
-            <div class="field-hint">
-              Текущая задача закроется, следующая встанет в столбец выбранного типа,
-              а комментарий попадёт в отчёт по комментариям.
-            </div>
-          </div>
-        </div>
-        <div class="modal-actions">
-          <button type="button" class="btn btn-secondary" onclick="closeTaskNextActivity()">Отмена</button>
-          <button type="button" class="btn" id="taskNextActivitySubmit" onclick="submitTaskNextActivity()" disabled>Создать и закрыть</button>
         </div>
       </div>
     </div>
